@@ -100,15 +100,27 @@ const STYLES = `
   .bubble-loader{display:flex;align-items:center;gap:10px;padding:4px 0;font-size:13px;color:var(--text3);}
   .bubble-spinner{width:16px;height:16px;border:2px solid var(--border2);border-top-color:var(--gold);border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0;}
   @keyframes spin{to{transform:rotate(360deg)}}
-  .dir-banner{background:var(--surface);border:1px solid var(--border2);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;}
-  .dir-banner-row{display:flex;gap:10px;align-items:flex-end;}
-  .dir-field{display:flex;flex-direction:column;gap:4px;}
-  .dir-field.grow{flex:1;}
-  .dir-field.unit{width:120px;flex-shrink:0;}
-  .dir-label{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--text3);}
-  .dir-input{background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:10px 13px;color:var(--text);font-family:'Outfit',sans-serif;font-size:14px;outline:none;transition:border-color .15s;width:100%;}
-  .dir-input:focus{border-color:var(--gold-dim);}
-  .dir-input::placeholder{color:var(--text3);}
+
+  /* ── Formulario de búsqueda ── */
+  .search-form{background:var(--surface);border:1px solid var(--border2);border-radius:14px;overflow:hidden;}
+  .search-tabs{display:flex;border-bottom:1px solid var(--border);}
+  .search-tab{flex:1;padding:11px 0;font-size:13px;font-family:'Outfit',sans-serif;font-weight:500;background:transparent;border:none;color:var(--text3);cursor:pointer;transition:all .15s;letter-spacing:.2px;}
+  .search-tab.active{color:var(--gold);border-bottom:2px solid var(--gold);margin-bottom:-1px;background:var(--surface2);}
+  .search-tab:hover:not(.active){color:var(--text2);background:rgba(255,255,255,.02);}
+  .search-fields{padding:16px;}
+  .search-row{display:flex;gap:12px;margin-bottom:12px;}
+  .search-field{display:flex;flex-direction:column;gap:5px;flex:1;}
+  .search-field.unit{width:120px;flex:none;}
+  .search-field-label{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--text3);}
+  .search-field-label span{color:var(--red);margin-left:2px;}
+  .search-field input,.search-field select{background:var(--surface2);border:none;border-bottom:1px solid var(--border2);padding:9px 4px;color:var(--text);font-family:'Outfit',sans-serif;font-size:14px;outline:none;transition:border-color .15s;width:100%;border-radius:0;}
+  .search-field input:focus,.search-field select:focus{border-bottom-color:var(--gold);}
+  .search-field input::placeholder{color:var(--text3);}
+  .search-field select option{background:#1c1c18;}
+  .search-actions{display:flex;gap:10px;padding:0 16px 16px;justify-content:flex-end;}
+  .btn-buscar{padding:10px 28px;background:var(--gold);color:var(--bg);border:none;border-radius:8px;font-family:'Outfit',sans-serif;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;letter-spacing:.3px;}
+  .btn-buscar:hover{background:var(--gold-light);}
+  .btn-buscar:disabled{background:var(--gold-dim);cursor:not-allowed;}
   @media(max-width:600px){.chat-app{height:100dvh;}.landing-cards{flex-direction:column;align-items:center;}.tasacion-valor{font-size:28px;}}
 `
 
@@ -340,6 +352,7 @@ function ChatVendedor({ onBack }) {
   const [multiSel, setMultiSel] = useState([])
   const [deptoVal, setDeptoVal] = useState('')
   const [placeholder, setPlaceholder] = useState('')
+  const [searchTab, setSearchTab] = useState('direccion') // 'direccion' | 'rol'
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
 
@@ -422,15 +435,10 @@ function ChatVendedor({ onBack }) {
       const newData = { ...data, tipo: opt.id }
       setData(newData)
       const nombre = opt.label.toLowerCase()
-      await addAgent(`Perfecto, ${nombre === 'agrícola' ? 'una propiedad' : 'una'} ${nombre}. Voy a hacerte algunas preguntas para conocerla bien.\n\nPuedes buscar por **dirección** o por **ROL SII**:`, 700)
-      if (['departamento', 'oficina'].includes(opt.id)) {
-        setInputMode('direccion_depto')
-        setInputVal('')
-        setDeptoVal('')
-      } else {
-        setInputMode('text')
-        setPlaceholder('Dirección: Av. Los Leones 1200   ó   ROL: 1234-56')
-      }
+      await addAgent(`Perfecto, ${nombre === 'agrícola' ? 'una propiedad' : 'una'} ${nombre}. Voy a hacerte algunas preguntas para conocerla bien.\n\nIngresa la dirección o el ROL SII de tu propiedad:`, 700)
+      setSearchTab('direccion')
+      setInputVal(''); setDeptoVal('')
+      setInputMode('search_form')
       setStage('direccion')
 
     } else if (stage === 'elegir_unidad') {
@@ -445,15 +453,13 @@ function ChatVendedor({ onBack }) {
 
     } else if (stage === 'sii_no_encontrado') {
       if (opt.id === 'intentar_rol') {
-        await addAgent('Ingresa el ROL SII de la propiedad (lo encuentras en tus contribuciones o escritura):', 500)
-        setInputMode('text')
-        setPlaceholder('Ej: 1234-56  ó  ROL 1234-56')
-        setStage('direccion')
+        await addAgent('Ingresa el ROL SII de la propiedad:', 500)
+        setSearchTab('rol'); setInputVal(''); setDeptoVal('')
+        setInputMode('search_form')
       } else if (opt.id === 'intentar_otra') {
-        await addAgent('Claro, intenta nuevamente. Puedes usar la dirección completa, solo el nombre de la calle, o el ROL SII:', 500)
-        setInputMode('text')
-        setPlaceholder('Dirección: Los Leones 1200   ó   ROL: 1234-56')
-        setStage('direccion')
+        await addAgent('Intenta nuevamente con la dirección completa:', 500)
+        setSearchTab('direccion'); setInputVal(''); setDeptoVal('')
+        setInputMode('search_form')
       } else {
         const d = data._pendingData || data
         const newData = { ...d, siiData:{ direccion:`${d.direccion}, ${d.comuna || ''}` } }
@@ -510,31 +516,18 @@ function ChatVendedor({ onBack }) {
     setInputMode(null)
 
     if (stage === 'direccion') {
+      // Fallback por si se llega por texto libre (ej: corrección manual)
       addUser(val)
       const newData = { ...data, direccion: val }
       setData(newData)
-
-      const esProbableRM = COMUNAS_RM.some(c => val.toLowerCase().includes(c.toLowerCase()))
-      if (esProbableRM || ['casa','departamento','oficina','comercial'].includes(data.tipo)) {
-        await addAgent('¿En qué comuna está?', 400)
-        setInputMode('comuna')
-        setStage('comuna')
-      } else {
-        await addAgent('¿En qué región / comuna está?', 400)
-        setInputMode('text')
-        setPlaceholder('Ej: Rancagua, O\'Higgins / Curicó, Maule')
-        setStage('comuna')
-      }
+      await addAgent('¿En qué comuna está?', 400)
+      setInputMode('text')
+      setPlaceholder('Escribe la comuna…')
+      setStage('comuna')
 
     } else if (stage === 'comuna') {
       addUser(val)
       const newData = { ...data, comuna: val }
-      setData(newData)
-      await fetchSII(newData)
-
-    } else if (stage === 'num_depto') {
-      addUser(val)
-      const newData = { ...data, depto: val }
       setData(newData)
       await fetchSII(newData)
 
@@ -701,6 +694,21 @@ function ChatVendedor({ onBack }) {
     return null
   }
 
+  const [comunaForm, setComunaForm] = useState('')
+
+  const handleSearchForm = async () => {
+    const busqueda = inputVal.trim()
+    if (!busqueda || !comunaForm) return
+    const conDepto = deptoVal.trim()
+    const label = data.tipo === 'oficina' ? 'Of.' : data.tipo === 'departamento' ? 'Depto' : ''
+    const resumen = conDepto ? `${busqueda} ${label} ${conDepto}, ${comunaForm}` : `${busqueda}, ${comunaForm}`
+    addUser(resumen)
+    setInputVal(''); setDeptoVal(''); setComunaForm(''); setInputMode(null)
+    const newData = { ...data, direccion: busqueda, depto: conDepto, comuna: comunaForm }
+    setData(newData)
+    await fetchSII(newData)
+  }
+
   const handleBannerSend = async () => {
     const dir = inputVal.trim()
     if (!dir) return
@@ -770,41 +778,59 @@ function ChatVendedor({ onBack }) {
           </>
         )}
 
-        {inputMode === 'direccion_depto' && (
-          <div className="dir-banner">
-            <div className="dir-banner-row">
-              <div className="dir-field grow">
-                <div className="dir-label">Dirección o ROL SII</div>
-                <input className="dir-input" placeholder="Av. Apoquindo 3000  ó  ROL 1234-56"
-                  value={inputVal} onChange={e => setInputVal(e.target.value)}
-                  onKeyDown={e => { if (e.key==='Enter') handleBannerSend() }} autoFocus />
-              </div>
-              <div className="dir-field unit">
-                <div className="dir-label">{data.tipo === 'oficina' ? 'N° Oficina' : 'N° Depto'}</div>
-                <input className="dir-input" placeholder="Ej: 45B"
-                  value={deptoVal} onChange={e => setDeptoVal(e.target.value)}
-                  onKeyDown={e => { if (e.key==='Enter') handleBannerSend() }} />
+        {inputMode === 'search_form' && (
+          <div className="search-form">
+            <div className="search-tabs">
+              <button className={`search-tab${searchTab==='direccion'?' active':''}`} onClick={() => { setSearchTab('direccion'); setInputVal('') }}>
+                Buscar por Dirección
+              </button>
+              <button className={`search-tab${searchTab==='rol'?' active':''}`} onClick={() => { setSearchTab('rol'); setInputVal('') }}>
+                Buscar por ROL
+              </button>
+            </div>
+            <div className="search-fields">
+              {searchTab === 'direccion' ? (
+                <div className="search-row">
+                  <div className="search-field" style={{flex:1}}>
+                    <div className="search-field-label">Dirección Completa<span>*</span></div>
+                    <input value={inputVal} onChange={e => setInputVal(e.target.value)}
+                      placeholder="Ej. Lo Fontecilla 267" autoFocus
+                      onKeyDown={e => { if (e.key==='Enter') handleSearchForm() }} />
+                  </div>
+                  {['departamento','oficina'].includes(data.tipo) && (
+                    <div className="search-field unit">
+                      <div className="search-field-label">Nº {data.tipo==='oficina'?'Oficina':'Unidad'}</div>
+                      <input value={deptoVal} onChange={e => setDeptoVal(e.target.value)}
+                        placeholder="204 A (Opcional)"
+                        onKeyDown={e => { if (e.key==='Enter') handleSearchForm() }} />
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="search-row">
+                  <div className="search-field" style={{flex:1}}>
+                    <div className="search-field-label">ROL SII<span>*</span></div>
+                    <input value={inputVal} onChange={e => setInputVal(e.target.value)}
+                      placeholder="Ej. 1234-56" autoFocus
+                      onKeyDown={e => { if (e.key==='Enter') handleSearchForm() }} />
+                  </div>
+                </div>
+              )}
+              <div className="search-row" style={{marginBottom:0}}>
+                <div className="search-field" style={{flex:1}}>
+                  <div className="search-field-label">Comuna<span>*</span></div>
+                  <select value={comunaForm} onChange={e => setComunaForm(e.target.value)}>
+                    <option value="">Selecciona una Comuna</option>
+                    {COMUNAS_RM.map(c => <option key={c}>{c}</option>)}
+                  </select>
+                </div>
               </div>
             </div>
-            <button className="send-btn" style={{width:'100%',borderRadius:8,fontSize:13,fontWeight:500}}
-              disabled={!inputVal.trim()} onClick={handleBannerSend}>
-              Buscar propiedad →
-            </button>
-          </div>
-        )}
-
-        {inputMode === 'comuna_depto' && (
-          <div className="text-input-row">
-            <select className="chat-input" value={inputVal} onChange={e => setInputVal(e.target.value)} style={{height:46}}>
-              <option value="">Selecciona una comuna…</option>
-              {COMUNAS_RM.map(c => <option key={c}>{c}</option>)}
-            </select>
-            <button className="send-btn" disabled={!inputVal} onClick={() => {
-              const val = inputVal; setInputVal(''); setInputMode(null)
-              addUser(val)
-              const nd = { ...data, comuna: val }; setData(nd)
-              fetchSII(nd)
-            }}>→</button>
+            <div className="search-actions">
+              <button className="btn-buscar" disabled={!inputVal.trim() || !comunaForm} onClick={handleSearchForm}>
+                Siguiente →
+              </button>
+            </div>
           </div>
         )}
 
