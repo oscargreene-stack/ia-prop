@@ -412,9 +412,9 @@ function ChatVendedor({ onBack }) {
       const newData = { ...data, tipo: opt.id }
       setData(newData)
       const nombre = opt.label.toLowerCase()
-      await addAgent(`Perfecto, ${nombre === 'agrícola' ? 'una propiedad' : 'una'} ${nombre}. Voy a hacerte algunas preguntas para conocerla bien.\n\nPrimero necesito la dirección exacta o la ubicación:`, 700)
+      await addAgent(`Perfecto, ${nombre === 'agrícola' ? 'una propiedad' : 'una'} ${nombre}. Voy a hacerte algunas preguntas para conocerla bien.\n\nPuedes buscar tu propiedad por **dirección** o por **ROL SII** (lo encuentras en tu contribuciones o escritura):`, 700)
       setInputMode('text')
-      setPlaceholder('Ej: Av. Los Leones 1200 / Fundo Las Vertientes, Sector El Monte...')
+      setPlaceholder('Dirección: Av. Los Leones 1200   ó   ROL: 1234-56')
       setStage('direccion')
 
     } else if (stage === 'elegir_unidad') {
@@ -428,10 +428,15 @@ function ChatVendedor({ onBack }) {
       setStage('confirmar_sii')
 
     } else if (stage === 'sii_no_encontrado') {
-      if (opt.id === 'intentar_otra') {
-        await addAgent('Claro, intenta nuevamente. Puedes usar solo el nombre de la calle, o el ROL SII si lo tienes:', 500)
+      if (opt.id === 'intentar_rol') {
+        await addAgent('Ingresa el ROL SII de la propiedad (lo encuentras en tus contribuciones o escritura):', 500)
         setInputMode('text')
-        setPlaceholder('Ej: Los Leones 1200 / ROL 123-45')
+        setPlaceholder('Ej: 1234-56  ó  ROL 1234-56')
+        setStage('direccion')
+      } else if (opt.id === 'intentar_otra') {
+        await addAgent('Claro, intenta nuevamente. Puedes usar la dirección completa, solo el nombre de la calle, o el ROL SII:', 500)
+        setInputMode('text')
+        setPlaceholder('Dirección: Los Leones 1200   ó   ROL: 1234-56')
         setStage('direccion')
       } else {
         const d = data._pendingData || data
@@ -552,11 +557,12 @@ function ChatVendedor({ onBack }) {
 
       // ── No encontrado ─────────────────────────────────────────────────────
       if (json.noEncontrado || !json.resultados?.length) {
-        await addAgent('No encontré esa dirección exacta en el SII. Puede que esté registrada de forma diferente.\n\n¿Qué quieres hacer?', 600)
+        await addAgent('No encontré esa propiedad en el SII. Puede que la dirección esté registrada de forma diferente.\n\n¿Quieres intentar con el **ROL SII**? Lo encuentras en tu liquidación de contribuciones o en la escritura (formato: 1234-56).', 600)
         setInputMode('options')
         setOptions([
-          { id:'intentar_otra', label:'Intentar con otra dirección', icon:'📍' },
-          { id:'continuar_sin', label:'Continuar sin datos del SII', icon:'➡️' },
+          { id:'intentar_rol',   label:'Buscar por ROL SII',        icon:'🔢' },
+          { id:'intentar_otra',  label:'Intentar con otra dirección',icon:'📍' },
+          { id:'continuar_sin',  label:'Continuar sin datos del SII',icon:'➡️' },
         ])
         setData(prev => ({ ...prev, _pendingData: d }))
         setStage('sii_no_encontrado')
