@@ -100,6 +100,15 @@ const STYLES = `
   .bubble-loader{display:flex;align-items:center;gap:10px;padding:4px 0;font-size:13px;color:var(--text3);}
   .bubble-spinner{width:16px;height:16px;border:2px solid var(--border2);border-top-color:var(--gold);border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0;}
   @keyframes spin{to{transform:rotate(360deg)}}
+  .dir-banner{background:var(--surface);border:1px solid var(--border2);border-radius:14px;padding:14px 16px;display:flex;flex-direction:column;gap:10px;}
+  .dir-banner-row{display:flex;gap:10px;align-items:flex-end;}
+  .dir-field{display:flex;flex-direction:column;gap:4px;}
+  .dir-field.grow{flex:1;}
+  .dir-field.unit{width:120px;flex-shrink:0;}
+  .dir-label{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--text3);}
+  .dir-input{background:var(--surface2);border:1px solid var(--border2);border-radius:8px;padding:10px 13px;color:var(--text);font-family:'Outfit',sans-serif;font-size:14px;outline:none;transition:border-color .15s;width:100%;}
+  .dir-input:focus{border-color:var(--gold-dim);}
+  .dir-input::placeholder{color:var(--text3);}
   @media(max-width:600px){.chat-app{height:100dvh;}.landing-cards{flex-direction:column;align-items:center;}.tasacion-valor{font-size:28px;}}
 `
 
@@ -329,6 +338,7 @@ function ChatVendedor({ onBack }) {
   const [inputVal, setInputVal] = useState('')
   const [options, setOptions] = useState([])
   const [multiSel, setMultiSel] = useState([])
+  const [deptoVal, setDeptoVal] = useState('')
   const [placeholder, setPlaceholder] = useState('')
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
@@ -412,9 +422,15 @@ function ChatVendedor({ onBack }) {
       const newData = { ...data, tipo: opt.id }
       setData(newData)
       const nombre = opt.label.toLowerCase()
-      await addAgent(`Perfecto, ${nombre === 'agrícola' ? 'una propiedad' : 'una'} ${nombre}. Voy a hacerte algunas preguntas para conocerla bien.\n\nPuedes buscar tu propiedad por **dirección** o por **ROL SII** (lo encuentras en tu contribuciones o escritura):`, 700)
-      setInputMode('text')
-      setPlaceholder('Dirección: Av. Los Leones 1200   ó   ROL: 1234-56')
+      await addAgent(`Perfecto, ${nombre === 'agrícola' ? 'una propiedad' : 'una'} ${nombre}. Voy a hacerte algunas preguntas para conocerla bien.\n\nPuedes buscar por **dirección** o por **ROL SII**:`, 700)
+      if (['departamento', 'oficina'].includes(opt.id)) {
+        setInputMode('direccion_depto')
+        setInputVal('')
+        setDeptoVal('')
+      } else {
+        setInputMode('text')
+        setPlaceholder('Dirección: Av. Los Leones 1200   ó   ROL: 1234-56')
+      }
       setStage('direccion')
 
     } else if (stage === 'elegir_unidad') {
@@ -514,17 +530,7 @@ function ChatVendedor({ onBack }) {
       addUser(val)
       const newData = { ...data, comuna: val }
       setData(newData)
-
-      // Para departamentos y oficinas, pedir número de unidad antes de buscar en SII
-      if (['departamento', 'oficina'].includes(newData.tipo)) {
-        const label = newData.tipo === 'oficina' ? 'oficina' : 'departamento'
-        await addAgent(`¿Cuál es el número de ${label}? (por ejemplo: 45B, 12C, DP 302)`, 400)
-        setInputMode('text')
-        setPlaceholder(`Ej: 45B  /  DP 302  /  12C`)
-        setStage('num_depto')
-      } else {
-        await fetchSII(newData)
-      }
+      await fetchSII(newData)
 
     } else if (stage === 'num_depto') {
       addUser(val)
@@ -695,6 +701,20 @@ function ChatVendedor({ onBack }) {
     return null
   }
 
+  const handleBannerSend = async () => {
+    const dir = inputVal.trim()
+    if (!dir) return
+    const label = data.tipo === 'oficina' ? 'Oficina' : 'Depto'
+    const resumen = deptoVal.trim() ? `${dir} — ${label} ${deptoVal.trim()}` : dir
+    addUser(resumen)
+    setInputVal(''); setDeptoVal(''); setInputMode(null)
+    const newData = { ...data, direccion: dir, depto: deptoVal.trim() }
+    setData(newData)
+    await addAgent('¿En qué comuna está?', 400)
+    setInputMode('comuna_depto')
+    setStage('comuna')
+  }
+
   return (
     <div className="chat-app">
       <div className="chat-header">
@@ -748,6 +768,44 @@ function ChatVendedor({ onBack }) {
               Confirmar →
             </button>
           </>
+        )}
+
+        {inputMode === 'direccion_depto' && (
+          <div className="dir-banner">
+            <div className="dir-banner-row">
+              <div className="dir-field grow">
+                <div className="dir-label">Dirección o ROL SII</div>
+                <input className="dir-input" placeholder="Av. Apoquindo 3000  ó  ROL 1234-56"
+                  value={inputVal} onChange={e => setInputVal(e.target.value)}
+                  onKeyDown={e => { if (e.key==='Enter') handleBannerSend() }} autoFocus />
+              </div>
+              <div className="dir-field unit">
+                <div className="dir-label">{data.tipo === 'oficina' ? 'N° Oficina' : 'N° Depto'}</div>
+                <input className="dir-input" placeholder="Ej: 45B"
+                  value={deptoVal} onChange={e => setDeptoVal(e.target.value)}
+                  onKeyDown={e => { if (e.key==='Enter') handleBannerSend() }} />
+              </div>
+            </div>
+            <button className="send-btn" style={{width:'100%',borderRadius:8,fontSize:13,fontWeight:500}}
+              disabled={!inputVal.trim()} onClick={handleBannerSend}>
+              Buscar propiedad →
+            </button>
+          </div>
+        )}
+
+        {inputMode === 'comuna_depto' && (
+          <div className="text-input-row">
+            <select className="chat-input" value={inputVal} onChange={e => setInputVal(e.target.value)} style={{height:46}}>
+              <option value="">Selecciona una comuna…</option>
+              {COMUNAS_RM.map(c => <option key={c}>{c}</option>)}
+            </select>
+            <button className="send-btn" disabled={!inputVal} onClick={() => {
+              const val = inputVal; setInputVal(''); setInputMode(null)
+              addUser(val)
+              const nd = { ...data, comuna: val }; setData(nd)
+              fetchSII(nd)
+            }}>→</button>
+          </div>
         )}
 
         {(inputMode === 'text' || inputMode === 'comuna') && (
