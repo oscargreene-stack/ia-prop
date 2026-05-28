@@ -417,6 +417,30 @@ function ChatVendedor({ onBack }) {
       setPlaceholder('Ej: Av. Los Leones 1200 / Fundo Las Vertientes, Sector El Monte...')
       setStage('direccion')
 
+    } else if (stage === 'elegir_unidad') {
+      const sii = opt._sii || data._candidatos?.[parseInt(opt.id)]
+      const newData = { ...data, siiData: sii }
+      setData(newData)
+      setMessages(m => [...m, { role:'agent', content:{ type:'sii', data:sii }}])
+      await addAgent('¿Estos datos son correctos?', 400)
+      setInputMode('options')
+      setOptions([{id:'si',label:'Sí, son correctos',icon:'✅'},{id:'no',label:'No, quiero corregir',icon:'✏️'}])
+      setStage('confirmar_sii')
+
+    } else if (stage === 'sii_no_encontrado') {
+      if (opt.id === 'intentar_otra') {
+        await addAgent('Claro, intenta nuevamente. Puedes usar solo el nombre de la calle, o el ROL SII si lo tienes:', 500)
+        setInputMode('text')
+        setPlaceholder('Ej: Los Leones 1200 / ROL 123-45')
+        setStage('direccion')
+      } else {
+        const d = data._pendingData || data
+        const newData = { ...d, siiData:{ direccion:`${d.direccion}, ${d.comuna || ''}` } }
+        setData(newData)
+        await addAgent('Sin problema, continuamos. Te haré las preguntas directamente para poder tasarla.', 500)
+        await nextStep(newData, 0)
+      }
+
     } else if (stage === 'confirmar_sii') {
       if (opt.id === 'si') {
         await addAgent('Perfecto, datos confirmados ✓', 400)
@@ -507,20 +531,53 @@ function ChatVendedor({ onBack }) {
       const q = encodeURIComponent(d.direccion)
       const res = await fetch(`/api/sii?direccion=${q}&comuna=${encodeURIComponent(d.comuna)}`)
       const json = await res.json()
-      const sii = json.resultados?.[0] || json
+
+      setMessages(m => m.filter(x => !(x.role==='agent' && x.content?.type==='loading')))
+
+      // ── Múltiples resultados → mostrar selector ───────────────────────────
+      if (json.multiples && json.resultados?.length > 1) {
+        await addAgent(`Encontré ${json.resultados.length} propiedades en esa dirección. ¿Cuál es la tuya?`, 500)
+        setInputMode('options')
+        setOptions(json.resultados.map((r, i) => ({
+          id: String(i),
+          label: [r.direccion, r.destino, r.m2_construido && `${r.m2_construido} m²`, r.rol && `ROL ${r.rol}`].filter(Boolean).join(' · '),
+          icon: '🏠',
+          _sii: r,
+        })))
+        // Guardar candidatos para el handler
+        setData(prev => ({ ...prev, _candidatos: json.resultados, _pendingData: d }))
+        setStage('elegir_unidad')
+        return
+      }
+
+      // ── No encontrado ─────────────────────────────────────────────────────
+      if (json.noEncontrado || !json.resultados?.length) {
+        await addAgent('No encontré esa dirección exacta en el SII. Puede que esté registrada de forma diferente.\n\n¿Qué quieres hacer?', 600)
+        setInputMode('options')
+        setOptions([
+          { id:'intentar_otra', label:'Intentar con otra dirección', icon:'📍' },
+          { id:'continuar_sin', label:'Continuar sin datos del SII', icon:'➡️' },
+        ])
+        setData(prev => ({ ...prev, _pendingData: d }))
+        setStage('sii_no_encontrado')
+        return
+      }
+
+      // ── Un solo resultado ─────────────────────────────────────────────────
+      const sii = json.resultados[0]
       const newData = { ...d, siiData: sii }
       setData(newData)
-      setMessages(m => m.filter(x => !(x.role==='agent' && x.content?.type==='loading')))
       setMessages(m => [...m, { role:'agent', content:{ type:'sii', data:sii }}])
       await addAgent('¿Estos datos son correctos?', 400)
       setInputMode('options')
-      setOptions([{id:'si',label:'Sí, son correctos',icon:'✅'},{id:'no',label:'No, corregir',icon:'✏️'}])
+      setOptions([{id:'si',label:'Sí, son correctos',icon:'✅'},{id:'no',label:'No, quiero corregir',icon:'✏️'}])
       setStage('confirmar_sii')
-    } catch {
+
+    } catch(err) {
       setMessages(m => m.filter(x => !(x.role==='agent' && x.content?.type==='loading')))
+      await addAgent('Tuve un problema conectándome al SII. No te preocupes, continuamos con lo que me cuentes directamente.', 600)
       const newData = { ...d, siiData:{ direccion:`${d.direccion}, ${d.comuna}` } }
       setData(newData)
-      await addAgent('No pude obtener los datos del SII ahora. Continuemos con lo que me puedas contar.', 500)
       await nextStep(newData, 0)
     }
   }
