@@ -498,7 +498,6 @@ function ChatVendedor({ onBack }) {
       const newData = { ...data, direccion: val }
       setData(newData)
 
-      // ¿RM? preguntar comuna, si no pedir región
       const esProbableRM = COMUNAS_RM.some(c => val.toLowerCase().includes(c.toLowerCase()))
       if (esProbableRM || ['casa','departamento','oficina','comercial'].includes(data.tipo)) {
         await addAgent('¿En qué comuna está?', 400)
@@ -514,6 +513,22 @@ function ChatVendedor({ onBack }) {
     } else if (stage === 'comuna') {
       addUser(val)
       const newData = { ...data, comuna: val }
+      setData(newData)
+
+      // Para departamentos y oficinas, pedir número de unidad antes de buscar en SII
+      if (['departamento', 'oficina'].includes(newData.tipo)) {
+        const label = newData.tipo === 'oficina' ? 'oficina' : 'departamento'
+        await addAgent(`¿Cuál es el número de ${label}? (por ejemplo: 45B, 12C, DP 302)`, 400)
+        setInputMode('text')
+        setPlaceholder(`Ej: 45B  /  DP 302  /  12C`)
+        setStage('num_depto')
+      } else {
+        await fetchSII(newData)
+      }
+
+    } else if (stage === 'num_depto') {
+      addUser(val)
+      const newData = { ...data, depto: val }
       setData(newData)
       await fetchSII(newData)
 
@@ -533,8 +548,9 @@ function ChatVendedor({ onBack }) {
   const fetchSII = async (d) => {
     setMessages(m => [...m, { role:'agent', content:{ type:'loading', text:'Buscando tu propiedad en el SII y catastro…' }}])
     try {
-      const q = encodeURIComponent(d.direccion)
-      const res = await fetch(`/api/sii?direccion=${q}&comuna=${encodeURIComponent(d.comuna)}`)
+      const busqueda = d.depto ? `${d.direccion} ${d.depto}` : d.direccion
+      const q = encodeURIComponent(busqueda)
+      const res = await fetch(`/api/sii?direccion=${q}&comuna=${encodeURIComponent(d.comuna || '')}`)
       const json = await res.json()
 
       setMessages(m => m.filter(x => !(x.role==='agent' && x.content?.type==='loading')))
