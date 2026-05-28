@@ -548,9 +548,11 @@ function ChatVendedor({ onBack }) {
   const fetchSII = async (d) => {
     setMessages(m => [...m, { role:'agent', content:{ type:'loading', text:'Buscando tu propiedad en el SII y catastro…' }}])
     try {
-      const busqueda = d.depto ? `${d.direccion} ${d.depto}` : d.direccion
-      const q = encodeURIComponent(busqueda)
-      const res = await fetch(`/api/sii?direccion=${q}&comuna=${encodeURIComponent(d.comuna || '')}`)
+      // La dirección va SIN el nº de unidad — se pasa por separado para no confundir al SII
+      const q = encodeURIComponent(d.direccion || '')
+      const c = encodeURIComponent(d.comuna || '')
+      const u = encodeURIComponent(d.depto || '')
+      const res = await fetch(`/api/sii?direccion=${q}&comuna=${c}&unidad=${u}`)
       const json = await res.json()
 
       setMessages(m => m.filter(x => !(x.role==='agent' && x.content?.type==='loading')))
