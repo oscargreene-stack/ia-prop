@@ -352,7 +352,8 @@ function ChatVendedor({ onBack }) {
   const [multiSel, setMultiSel] = useState([])
   const [deptoVal, setDeptoVal] = useState('')
   const [placeholder, setPlaceholder] = useState('')
-  const [searchTab, setSearchTab] = useState('direccion') // 'direccion' | 'rol'
+  const [searchTab, setSearchTab] = useState('direccion')
+  const [comunaForm, setComunaForm] = useState('')
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
 
@@ -693,8 +694,6 @@ function ChatVendedor({ onBack }) {
     }
     return null
   }
-
-  const [comunaForm, setComunaForm] = useState('')
 
   const handleSearchForm = async () => {
     const busqueda = inputVal.trim()
