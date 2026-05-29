@@ -40,6 +40,7 @@ const FLUJOS = {
     { id:'terraza_m2', msg:'¿Tiene terraza? ¿Cuántos m² tiene? (escribe 0 si no tiene)', tipo:'text', placeholder:'Ej: 0 / 8 / 12 / 20'},
     { id:'estacionamientos', msg:'¿Cuántos estacionamientos incluye?', tipo:'text', placeholder:'Ej: 0 / 1 / 2'},
     { id:'bodega', msg:'¿Cuántas bodegas incluye?', tipo:'text', placeholder:'Ej: 0 / 1 / 2'},
+    { id:'jardin_m2', msg:'¿Tiene jardín o patio privado? ¿Cuántos m² tiene? (escribe 0 si no tiene)', tipo:'text', placeholder:'Ej: 0 / 15 / 30 / 50'},
     { id:'remodelacion', msg:'¿El departamento tiene alguna remodelación?', tipo:'options', opts:[
       {id:'alta',label:'Sí — alta calidad',icon:'⭐'},{id:'media',label:'Sí — calidad media',icon:'✨'},
       {id:'baja',label:'Sí — básica',icon:'🔧'},{id:'ninguna',label:'No tiene',icon:'—'}]},
@@ -171,6 +172,7 @@ const FLUJOS = {
 
 // ─── Ajustes de tasación ──────────────────────────────────────────────────────
 const AJUSTE_REMO = { alta:20, media:14, baja:7, ninguna:0 }
+const AJUSTE_JARDIN_POR_M2 = 0.35 // Factor sobre precio/m² útil — jardín vale ~35% del precio/m² construido
 const AJUSTE_TIEMPO = { reciente:1.0, hace3:0.85, hace5:0.7 }
 const AJUSTES_CARACT = {
   piscina:300, quincho:120, vista:150, jardin:80, doble_altura:100, seguridad:40,
@@ -193,7 +195,11 @@ function calcAjustes(data) {
     data.infraestructura || '',
   ].flat()
   const ajCar = caract.reduce((s, c) => s + (AJUSTES_CARACT[c] || 0), 0)
-  return { ajRemo: Math.round(ajRemo), ajCar }
+  // Jardín: valorizado a 35% del precio/m² útil estimado (default 50 UF/m²)
+  const jardınM2 = parseFloat(data.jardin_m2) || 0
+  const precioM2Ref = 50 // UF/m² de referencia si no hay datos SII
+  const ajJardin = jardınM2 > 0 ? Math.round(jardınM2 * precioM2Ref * AJUSTE_JARDIN_POR_M2) : 0
+  return { ajRemo: Math.round(ajRemo), ajCar, ajJardin }
 }
 
 // ─── Componentes de mensajes ──────────────────────────────────────────────────
@@ -501,12 +507,12 @@ function ChatVendedor({ onBack }) {
       const resultado = await res.json()
       if (resultado.error) throw new Error(resultado.error)
       setMessages(m => m.filter(x => !(x.role==='agent' && x.content?.type==='loading')))
-      const { ajRemo, ajCar } = calcAjustes(finalData)
+      const { ajRemo, ajCar, ajJardin } = calcAjustes(finalData)
       const valorBase = resultado.valor_uf || 0
-      const valorFinal = valorBase + ajRemo + ajCar
+      const valorFinal = valorBase + ajRemo + ajCar + ajJardin
       const rangoMin = Math.round(valorFinal * 0.93)
       const rangoMax = Math.round(valorFinal * 1.07)
-      setMessages(m => [...m, { role:'agent', content:{ type:'tasacion', resultado, valorFinal, rangoMin, rangoMax, ajRemo, ajCar, valorBase }}])
+      setMessages(m => [...m, { role:'agent', content:{ type:'tasacion', resultado, valorFinal, rangoMin, rangoMax, ajRemo, ajCar, ajJardin, valorBase }}])
       await addAgent(`¡Tasación lista! El valor de mercado estimado es **${fmtUF(valorFinal)}**.\n\nEste valor refleja transacciones reales recientes en la zona, ajustado por las características que me contaste. ¿Tienes alguna pregunta?`, 1200)
       setInputMode('options')
       setOptions([{id:'nueva',label:'Tasar otra propiedad',icon:'🔄'},{id:'detalle',label:'Quiero más detalle',icon:'🔍'}])
@@ -542,7 +548,7 @@ function ChatVendedor({ onBack }) {
       )
     }
     if (content?.type === 'tasacion') {
-      const { resultado, valorFinal, rangoMin, rangoMax, ajRemo, ajCar, valorBase } = content
+      const { resultado, valorFinal, rangoMin, rangoMax, ajRemo, ajCar, ajJardin=0, valorBase } = content
       const conf = resultado.confianza?.toLowerCase()
       const cc = conf?.includes('alta') ? 'conf-alta' : conf?.includes('media') ? 'conf-media' : 'conf-baja'
       return (
@@ -555,6 +561,7 @@ function ChatVendedor({ onBack }) {
             <div className="tasacion-item"><div className="tasacion-item-label">Base CBR</div><div className="tasacion-item-val">{fmtUF(valorBase)}</div></div>
             {ajRemo>0 && <div className="tasacion-item"><div className="tasacion-item-label">Remodelación</div><div className="tasacion-item-val pos">+{fmtUF(ajRemo)}</div></div>}
             {ajCar>0 && <div className="tasacion-item"><div className="tasacion-item-label">Características</div><div className="tasacion-item-val pos">+{fmtUF(ajCar)}</div></div>}
+            {ajJardin>0 && <div className="tasacion-item"><div className="tasacion-item-label">Jardín / Patio</div><div className="tasacion-item-val pos">+{fmtUF(ajJardin)}</div></div>}
             {resultado.precio_m2 && <div className="tasacion-item"><div className="tasacion-item-label">Precio/m²</div><div className="tasacion-item-val">{resultado.precio_m2} UF/m²</div></div>}
           </div>
           {resultado.analisis && <div className="analisis-text">{resultado.analisis}</div>}
