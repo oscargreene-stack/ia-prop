@@ -1,129 +1,6 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
 
-const STYLES = `
-  @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;1,400&family=Outfit:wght@300;400;500;600&display=swap');
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-  :root {
-    --bg:#0a0a08; --surface:#131310; --surface2:#1c1c18; --border:#272722; --border2:#333330;
-    --gold:#c8a96e; --gold-light:#e8cc9a; --gold-dim:#6b5a38; --text:#f2ede4; --text2:#9e9888;
-    --text3:#5a5650; --green:#5ab87a; --green-dim:#1a3325; --red:#d9604c; --red-dim:#391a16;
-    --blue:#5a9fd4; --blue-dim:#152535;
-  }
-  html,body{height:100%;}
-  body{background:var(--bg);font-family:'Outfit',sans-serif;color:var(--text);min-height:100vh;overflow-x:hidden;}
-  .landing{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 20px;position:relative;overflow:hidden;}
-  .landing::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse 80% 60% at 50% 0%,rgba(200,169,110,0.07) 0%,transparent 70%);pointer-events:none;}
-  .landing-logo{font-family:'Playfair Display',serif;font-size:clamp(48px,10vw,80px);font-weight:400;letter-spacing:-1px;line-height:1;margin-bottom:12px;text-align:center;}
-  .landing-logo em{font-style:italic;color:var(--gold);}
-  .landing-tagline{font-size:14px;color:var(--text3);letter-spacing:3px;text-transform:uppercase;margin-bottom:64px;text-align:center;}
-  .landing-cards{display:flex;gap:20px;flex-wrap:wrap;justify-content:center;max-width:700px;}
-  .landing-card{flex:1;min-width:260px;max-width:320px;background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:36px 32px;cursor:pointer;transition:all 0.25s ease;text-align:left;position:relative;overflow:hidden;}
-  .landing-card::before{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,var(--gold-dim),transparent);opacity:0;transition:opacity .25s;}
-  .landing-card:hover{border-color:var(--gold-dim);transform:translateY(-3px);box-shadow:0 20px 40px rgba(0,0,0,.4);}
-  .landing-card:hover::before{opacity:1;}
-  .landing-card-icon{font-size:32px;margin-bottom:16px;}
-  .landing-card-title{font-family:'Playfair Display',serif;font-size:22px;font-weight:400;color:var(--text);margin-bottom:8px;}
-  .landing-card-desc{font-size:13px;color:var(--text3);line-height:1.6;}
-  .landing-card.disabled{opacity:.4;cursor:default;}
-  .landing-card.disabled:hover{transform:none;border-color:var(--border);box-shadow:none;}
-  .coming-soon{position:absolute;top:16px;right:16px;font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3);background:var(--surface2);border:1px solid var(--border);padding:3px 8px;border-radius:20px;}
-  .landing-footer{position:absolute;bottom:24px;font-size:11px;color:var(--text3);letter-spacing:1px;}
-  .chat-app{display:flex;flex-direction:column;height:100vh;max-width:760px;margin:0 auto;}
-  .chat-header{display:flex;align-items:center;gap:14px;padding:18px 24px;border-bottom:1px solid var(--border);background:var(--bg);position:sticky;top:0;z-index:10;}
-  .back-btn{width:32px;height:32px;border-radius:50%;border:1px solid var(--border2);background:transparent;color:var(--text2);font-size:16px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;flex-shrink:0;}
-  .back-btn:hover{border-color:var(--gold-dim);color:var(--gold);}
-  .agent-avatar{width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,#2a2520,#1a1810);border:1px solid var(--gold-dim);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0;}
-  .agent-name{font-size:14px;font-weight:600;color:var(--text);}
-  .agent-status{font-size:11px;color:var(--green);display:flex;align-items:center;gap:5px;}
-  .status-dot{width:5px;height:5px;border-radius:50%;background:var(--green);animation:pulse 2s infinite;}
-  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-  .chat-header-logo{margin-left:auto;font-family:'Playfair Display',serif;font-size:16px;color:var(--text3);}
-  .chat-header-logo em{font-style:italic;color:var(--gold-dim);}
-  .messages-area{flex:1;overflow-y:auto;padding:24px 20px;display:flex;flex-direction:column;gap:6px;scroll-behavior:smooth;}
-  .messages-area::-webkit-scrollbar{width:4px;}
-  .messages-area::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px;}
-  .msg{display:flex;gap:10px;max-width:85%;animation:fadeUp .3s ease;}
-  @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-  .msg.agent{align-self:flex-start;}
-  .msg.user{align-self:flex-end;flex-direction:row-reverse;}
-  .msg-avatar{width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#2a2520,#1a1810);border:1px solid var(--gold-dim);display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0;margin-top:2px;}
-  .bubble{padding:13px 16px;border-radius:16px;font-size:14px;line-height:1.65;color:var(--text);}
-  .msg.agent .bubble{background:#1a1a16;border:1px solid var(--border);border-top-left-radius:4px;}
-  .msg.user .bubble{background:var(--gold-dim);border:1px solid transparent;border-top-right-radius:4px;color:var(--gold-light);}
-  .typing-dots{display:flex;gap:4px;padding:14px 18px;align-items:center;}
-  .typing-dots span{width:6px;height:6px;background:var(--text3);border-radius:50%;animation:bounce 1.2s infinite;}
-  .typing-dots span:nth-child(2){animation-delay:.2s;}
-  .typing-dots span:nth-child(3){animation-delay:.4s;}
-  @keyframes bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-6px)}}
-  .options-area{padding:12px 20px 20px;border-top:1px solid var(--border);background:var(--bg);}
-  .options-hint{font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text3);margin-bottom:10px;}
-  .options-grid{display:flex;flex-wrap:wrap;gap:8px;}
-  .opt{padding:9px 16px;border-radius:24px;border:1px solid var(--border2);background:var(--surface);color:var(--text2);font-size:13px;font-family:'Outfit',sans-serif;cursor:pointer;transition:all .15s;display:flex;align-items:center;gap:7px;}
-  .opt:hover{border-color:var(--gold-dim);color:var(--text);background:var(--surface2);}
-  .opt.selected{background:var(--gold-dim);border-color:var(--gold);color:var(--gold-light);}
-  .opt:disabled,.opt.disabled{opacity:.35;cursor:default;}
-  .opt-icon{font-size:16px;}
-  .text-input-row{display:flex;gap:10px;align-items:flex-end;}
-  .chat-input{flex:1;background:var(--surface2);border:1px solid var(--border2);border-radius:12px;padding:12px 16px;color:var(--text);font-family:'Outfit',sans-serif;font-size:14px;outline:none;resize:none;min-height:46px;max-height:120px;line-height:1.5;transition:border-color .15s;}
-  .chat-input:focus{border-color:var(--gold-dim);}
-  .chat-input::placeholder{color:var(--text3);}
-  .send-btn{width:46px;height:46px;border-radius:12px;border:none;background:var(--gold);color:var(--bg);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;flex-shrink:0;}
-  .send-btn:hover{background:var(--gold-light);}
-  .send-btn:disabled{background:var(--gold-dim);cursor:not-allowed;}
-  .tasacion-card{background:linear-gradient(135deg,#161410 0%,#1e1c16 100%);border:1px solid var(--gold-dim);border-radius:14px;padding:22px;margin-top:6px;}
-  .tasacion-label{font-size:9px;letter-spacing:2.5px;text-transform:uppercase;color:var(--gold-dim);margin-bottom:6px;}
-  .tasacion-valor{font-family:'Playfair Display',serif;font-size:38px;font-weight:400;color:var(--gold-light);line-height:1;margin-bottom:4px;}
-  .tasacion-rango{font-size:12px;color:var(--text3);margin-bottom:16px;}
-  .tasacion-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px;margin-bottom:14px;}
-  .tasacion-item{background:rgba(255,255,255,.03);border-radius:8px;padding:10px 12px;}
-  .tasacion-item-label{font-size:10px;color:var(--text3);margin-bottom:3px;}
-  .tasacion-item-val{font-size:13px;color:var(--text);font-weight:500;}
-  .tasacion-item-val.pos{color:var(--green);}
-  .conf-badge{display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;font-size:10px;font-weight:500;letter-spacing:.5px;text-transform:uppercase;margin-bottom:12px;}
-  .conf-alta{background:var(--green-dim);color:var(--green);border:1px solid var(--green);}
-  .conf-media{background:#2a2010;color:#d4a844;border:1px solid #7a6020;}
-  .conf-baja{background:var(--red-dim);color:var(--red);border:1px solid var(--red);}
-  .analisis-text{font-size:12px;color:var(--text2);line-height:1.7;border-top:1px solid var(--border);padding-top:12px;}
-  .comp-mini{display:flex;flex-direction:column;gap:6px;margin-top:12px;}
-  .comp-mini-item{display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,.025);border-radius:7px;padding:8px 12px;font-size:12px;}
-  .comp-mini-addr{color:var(--text2);flex:1;}
-  .comp-mini-uf{color:var(--text);font-weight:600;text-align:right;}
-  .comp-mini-m2{font-size:10px;color:var(--text3);text-align:right;}
-  .sii-bubble{background:var(--blue-dim);border:1px solid rgba(90,159,212,.3);border-radius:12px;padding:14px 16px;margin-top:6px;}
-  .sii-bubble-tag{font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--blue);margin-bottom:6px;}
-  .sii-bubble-addr{font-size:13px;color:var(--text);font-weight:500;margin-bottom:10px;}
-  .sii-bubble-grid{display:flex;flex-wrap:wrap;gap:8px;}
-  .sii-bubble-item{background:rgba(255,255,255,.04);border-radius:6px;padding:6px 10px;}
-  .sii-bubble-label{font-size:9px;color:var(--text3);margin-bottom:1px;}
-  .sii-bubble-val{font-size:13px;color:var(--text);font-weight:500;}
-  .bubble-loader{display:flex;align-items:center;gap:10px;padding:4px 0;font-size:13px;color:var(--text3);}
-  .bubble-spinner{width:16px;height:16px;border:2px solid var(--border2);border-top-color:var(--gold);border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0;}
-  @keyframes spin{to{transform:rotate(360deg)}}
-
-  /* ── Formulario de búsqueda ── */
-  .search-form{background:var(--surface);border:1px solid var(--border2);border-radius:14px;overflow:hidden;}
-  .search-tabs{display:flex;border-bottom:1px solid var(--border);}
-  .search-tab{flex:1;padding:11px 0;font-size:13px;font-family:'Outfit',sans-serif;font-weight:500;background:transparent;border:none;color:var(--text3);cursor:pointer;transition:all .15s;letter-spacing:.2px;}
-  .search-tab.active{color:var(--gold);border-bottom:2px solid var(--gold);margin-bottom:-1px;background:var(--surface2);}
-  .search-tab:hover:not(.active){color:var(--text2);background:rgba(255,255,255,.02);}
-  .search-fields{padding:16px;}
-  .search-row{display:flex;gap:12px;margin-bottom:12px;}
-  .search-field{display:flex;flex-direction:column;gap:5px;flex:1;}
-  .search-field.unit{width:120px;flex:none;}
-  .search-field-label{font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--text3);}
-  .search-field-label span{color:var(--red);margin-left:2px;}
-  .search-field input,.search-field select{background:var(--surface2);border:none;border-bottom:1px solid var(--border2);padding:9px 4px;color:var(--text);font-family:'Outfit',sans-serif;font-size:14px;outline:none;transition:border-color .15s;width:100%;border-radius:0;}
-  .search-field input:focus,.search-field select:focus{border-bottom-color:var(--gold);}
-  .search-field input::placeholder{color:var(--text3);}
-  .search-field select option{background:#1c1c18;}
-  .search-actions{display:flex;gap:10px;padding:0 16px 16px;justify-content:flex-end;}
-  .btn-buscar{padding:10px 28px;background:var(--gold);color:var(--bg);border:none;border-radius:8px;font-family:'Outfit',sans-serif;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;letter-spacing:.3px;}
-  .btn-buscar:hover{background:var(--gold-light);}
-  .btn-buscar:disabled{background:var(--gold-dim);cursor:not-allowed;}
-  @media(max-width:600px){.chat-app{height:100dvh;}.landing-cards{flex-direction:column;align-items:center;}.tasacion-valor{font-size:28px;}}
-`
-
 const fmtUF = (n) => n ? `${Number(n).toLocaleString('es-CL', {minimumFractionDigits:0,maximumFractionDigits:0})} UF` : '—'
 
 // ─── Tipos de propiedad ───────────────────────────────────────────────────────
@@ -869,10 +746,9 @@ function ChatVendedor({ onBack }) {
 // ─── Landing ──────────────────────────────────────────────────────────────────
 export default function Home() {
   const [view, setView] = useState('landing')
-  if (view === 'vendedor') return <><style dangerouslySetInnerHTML={{__html:STYLES}}/><ChatVendedor onBack={() => setView('landing')}/></>
+  if (view === 'vendedor') return <ChatVendedor onBack={() => setView('landing')}/>
   return (
     <>
-      <style dangerouslySetInnerHTML={{__html:STYLES}}/>
       <div className="landing">
         <div className="landing-logo">IA <em>Prop</em></div>
         <div className="landing-tagline">Tu agente inmobiliario inteligente</div>
