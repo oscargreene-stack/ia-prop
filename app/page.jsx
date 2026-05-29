@@ -430,8 +430,18 @@ function ChatVendedor({ onBack }) {
       const c = encodeURIComponent(d.comuna || '')
       const u = encodeURIComponent(d.depto || '')
       const res = await fetch(`/api/sii?direccion=${q}&comuna=${c}&unidad=${u}`)
-      const json = await res.json()
 
+      // Si el servidor falla, continuar sin datos SII
+      if (!res.ok) {
+        setMessages(m => m.filter(x => !(x.role==='agent' && x.content?.type==='loading')))
+        await addAgent('No pude consultar el SII ahora, pero continuamos sin problema.', 400)
+        const fallback = { ...d, siiData:{ direccion:`${d.direccion}${d.depto ? ' '+d.depto : ''}, ${d.comuna}` } }
+        setData(fallback)
+        await nextStep(fallback, 0)
+        return
+      }
+
+      const json = await res.json()
       setMessages(m => m.filter(x => !(x.role==='agent' && x.content?.type==='loading')))
 
       // ── Múltiples resultados → mostrar selector ───────────────────────────
