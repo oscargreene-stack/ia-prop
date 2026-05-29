@@ -75,6 +75,7 @@ Genera 3-5 comparables ficticios pero realistas basados en el mercado real.`
     extras?.piso ? `Piso: ${extras.piso}` : null,
     extras?.orientacion ? `Orientación: ${extras.orientacion}` : null,
     extras?.terraza_m2 && extras.terraza_m2 > 0 ? `Terraza: ${extras.terraza_m2} m²` : null,
+    extras?.jardin_m2 && parseFloat(extras.jardin_m2) > 0 ? `Jardín/patio privado: ${extras.jardin_m2} m²` : null,
     extras?.estacionamientos && extras.estacionamientos > 0 ? `Estacionamientos: ${extras.estacionamientos}` : null,
     extras?.bodega && extras.bodega > 0 ? `Bodegas: ${extras.bodega}` : null,
     extras?.superficie_ha ? `Hectáreas: ${extras.superficie_ha}` : null,
