@@ -460,17 +460,12 @@ function ChatVendedor({ onBack }) {
         return
       }
 
-      // ── No encontrado ─────────────────────────────────────────────────────
+      // ── No encontrado → continuar sin SII ──────────────────────────────
       if (json.noEncontrado || !json.resultados?.length) {
-        await addAgent('No encontré esa propiedad en el SII. Puede que la dirección esté registrada de forma diferente.\n\n¿Quieres intentar con el **ROL SII**? Lo encuentras en tu liquidación de contribuciones o en la escritura (formato: 1234-56).', 600)
-        setInputMode('options')
-        setOptions([
-          { id:'intentar_rol',   label:'Buscar por ROL SII',        icon:'🔢' },
-          { id:'intentar_otra',  label:'Intentar con otra dirección',icon:'📍' },
-          { id:'continuar_sin',  label:'Continuar sin datos del SII',icon:'➡️' },
-        ])
-        setData(prev => ({ ...prev, _pendingData: d }))
-        setStage('sii_no_encontrado')
+        const newData = { ...d, siiData:{ direccion:`${d.direccion}${d.depto ? ' '+d.depto : ''}, ${d.comuna}` } }
+        setData(newData)
+        await addAgent(`Perfecto, registré la propiedad en **${d.comuna}**. Continuamos con las preguntas:`, 400)
+        await nextStep(newData, 0)
         return
       }
 
