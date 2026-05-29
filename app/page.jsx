@@ -37,14 +37,9 @@ const FLUJOS = {
     { id:'orientacion', msg:'¿Cuál es la orientación principal?', tipo:'options', opts:[
       {id:'norte',label:'Norte',icon:'☀️'},{id:'sur',label:'Sur',icon:'🌤️'},
       {id:'oriente',label:'Oriente',icon:'🌅'},{id:'poniente',label:'Poniente',icon:'🌄'},{id:'mixta',label:'Mixta / No sé',icon:'🧭'}]},
-    { id:'terraza_m2', msg:'¿Tiene terraza? ¿Cuántos m² aproximadamente?', tipo:'options', opts:[
-      {id:'0',label:'Sin terraza',icon:'—'},{id:'5',label:'~5 m²',icon:'🪴'},{id:'10',label:'~10 m²',icon:'🌿'},
-      {id:'15',label:'~15 m²',icon:'🌳'},{id:'20+',label:'20 m² o más',icon:'🏡'}]},
-    { id:'estacionamientos', msg:'¿Cuántos estacionamientos incluye?', tipo:'options', opts:[
-      {id:'0',label:'Sin estacionamiento',icon:'—'},{id:'1',label:'1 estacionamiento',icon:'🚗'},
-      {id:'2',label:'2 estacionamientos',icon:'🚗🚗'},{id:'3+',label:'3 o más',icon:'🅿️'}]},
-    { id:'bodega', msg:'¿Tiene bodega?', tipo:'options', opts:[
-      {id:'0',label:'Sin bodega',icon:'—'},{id:'1',label:'1 bodega',icon:'📦'},{id:'2+',label:'2 o más',icon:'📦📦'}]},
+    { id:'terraza_m2', msg:'¿Tiene terraza? ¿Cuántos m² tiene? (escribe 0 si no tiene)', tipo:'text', placeholder:'Ej: 0 / 8 / 12 / 20'},
+    { id:'estacionamientos', msg:'¿Cuántos estacionamientos incluye?', tipo:'text', placeholder:'Ej: 0 / 1 / 2'},
+    { id:'bodega', msg:'¿Cuántas bodegas incluye?', tipo:'text', placeholder:'Ej: 0 / 1 / 2'},
     { id:'remodelacion', msg:'¿El departamento tiene alguna remodelación?', tipo:'options', opts:[
       {id:'alta',label:'Sí — alta calidad',icon:'⭐'},{id:'media',label:'Sí — calidad media',icon:'✨'},
       {id:'baja',label:'Sí — básica',icon:'🔧'},{id:'ninguna',label:'No tiene',icon:'—'}]},
