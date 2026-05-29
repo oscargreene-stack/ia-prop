@@ -95,7 +95,7 @@ Instrucciones:
         max_tokens: 2000,
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
-        mcp_servers: [{ type: 'url', url: MCP_URL, name: 'datainmobiliaria' }],
+        mcp_servers: [{ type: 'url', url: MCP_URL, name: 'datainmobiliaria', authorization_token: process.env.DATAINMOBILIARIA_TOKEN }],
       }),
     })
 
