@@ -12,12 +12,61 @@ export async function POST(request) {
   const dir    = siiData?.direccion || `${form.direccion}${form.depto ? ' '+form.depto : ''}, ${form.comuna}`
   const comuna = form.comuna || ''
   const tipo   = extras?.tipo || 'propiedad'
-  const m2     = siiData?.m2_construido || siiData?.m2_util || null
-  const m2Util = siiData?.m2_util || null
   const rol    = siiData?.rol || null
   const anio   = siiData?.anio_construccion || null
   const avaluo = siiData?.avaluo_fiscal_uf || null
   const caracts = (extras?.caracteristicas || []).filter(c => c !== 'ninguna')
+
+  // Validar y enriquecer datos SII con DataInmobiliaria cuando hay ROL
+  // BaseAPI a veces devuelve m2_terreno incorrectos — DataInmobiliaria tiene el dato real del SII
+  let m2Terreno = parseFloat(siiData?.m2_terreno) || null
+  let m2Construido = parseFloat(siiData?.m2_construido) || null
+  let m2Util = parseFloat(siiData?.m2_util) || null
+
+  if (rol) {
+    try {
+      const MCP_URL = process.env.MCP_URL || 'https://mcp.datainmobiliaria.cl/mcp'
+      const DATAINM_TOKEN = process.env.DATAINMOBILIARIA_TOKEN
+      // Parsear ROL formato "cod_com-cod_mz-cod_pr"
+      const rolParts = rol.toString().split('-')
+      if (rolParts.length === 3 && DATAINM_TOKEN) {
+        const [codCom, codMz, codPr] = rolParts.map(Number)
+        const query = `SELECT superficie_total_terreno, superficie_construccion, ano_construccion FROM datainmobiliaria.consolidado WHERE cod_com=${codCom} AND cod_mz=${codMz} AND cod_pr=${codPr} LIMIT 1`
+        const bqRes = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': process.env.ANTHROPIC_API_KEY,
+            'anthropic-version': '2023-06-01',
+            'anthropic-beta': 'mcp-client-2025-04-04'
+          },
+          body: JSON.stringify({
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 500,
+            system: 'Respond only with a JSON object: {"superficie_total_terreno": N, "superficie_construccion": N}. No other text.',
+            messages: [{ role: 'user', content: `Run this BigQuery SQL and return the result as JSON: ${query}` }],
+            mcp_servers: [{ type: 'url', url: MCP_URL, name: 'datainmobiliaria', authorization_token: DATAINM_TOKEN }]
+          })
+        })
+        if (bqRes.ok) {
+          const bqData = await bqRes.json()
+          const bqText = (bqData.content || []).filter(b => b.type === 'text').map(b => b.text).join('')
+          const bqMatch = bqText.match(/\{[^}]+\}/)
+          if (bqMatch) {
+            const siiReal = JSON.parse(bqMatch[0])
+            // Solo sobreescribir si DataInmobiliaria tiene datos más completos
+            if (siiReal.superficie_total_terreno > 0) m2Terreno = siiReal.superficie_total_terreno
+            if (siiReal.superficie_construccion > 0) m2Construido = siiReal.superficie_construccion
+          }
+        }
+      }
+    } catch (e) {
+      console.error('DataInmobiliaria enrichment failed:', e.message)
+      // Continuar con los datos que tenemos
+    }
+  }
+
+  const m2 = m2Construido || m2Util || null
 
   const systemPrompt = `Eres Valentina, tasadora inmobiliaria experta con 20 años de experiencia en la Región Metropolitana de Chile.
 
