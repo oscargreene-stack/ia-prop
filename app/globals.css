@@ -93,6 +93,8 @@
   .sii-bubble-item{background:rgba(255,255,255,.04);border-radius:6px;padding:6px 10px;}
   .sii-bubble-label{font-size:9px;color:var(--text3);margin-bottom:1px;}
   .sii-bubble-val{font-size:13px;color:var(--text);font-weight:500;}
+  .sii-bubble-val.rol{color:var(--blue);font-weight:700;font-family:monospace;letter-spacing:0.5px;}
+  .sii-bubble-val.green{color:var(--green);font-weight:700;}
   .bubble-loader{display:flex;align-items:center;gap:10px;padding:4px 0;font-size:13px;color:var(--text3);}
   .bubble-spinner{width:16px;height:16px;border:2px solid var(--border2);border-top-color:var(--gold);border-radius:50%;animation:spin .8s linear infinite;flex-shrink:0;}
   @keyframes spin{to{transform:rotate(360deg)}}
