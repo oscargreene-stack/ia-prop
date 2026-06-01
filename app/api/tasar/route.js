@@ -45,7 +45,7 @@ AJUSTA según:
 - Bodega: 50-100 UF
 - Remodelación completa reciente: +10-18% sobre base
 
-RESPONDE SOLO con JSON válido, sin texto adicional, sin backticks:
+RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA (sin saltos de línea dentro de strings), sin texto adicional, sin backticks. Todos los strings deben estar en una sola línea. NO uses \n dentro de valores de strings:
 {
   "valor_uf": number,
   "precio_m2": number,
