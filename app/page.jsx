@@ -437,6 +437,8 @@ function ChatVendedor({ onBack }) {
       )
 
       if (!res.ok) {
+        const errText = await res.text().catch(()=>'')
+        console.error('BaseAPI error:', res.status, errText)
         setMessages(m => m.filter(x => !(x.role==='agent' && x.content?.type==='loading')))
         await addAgent('No pude consultar el SII ahora, pero continuamos sin problema.', 400)
         const fallback = { ...d, siiData:{ direccion:`${d.direccion}${d.depto ? ' '+d.depto : ''}, ${d.comuna}` } }
@@ -506,6 +508,7 @@ function ChatVendedor({ onBack }) {
       setStage('confirmar_sii')
 
     } catch(err) {
+      console.error('fetchSII catch:', err.name, err.message)
       setMessages(m => m.filter(x => !(x.role==='agent' && x.content?.type==='loading')))
       await addAgent('Tuve un problema conectándome al SII. No te preocupes, continuamos con lo que me cuentes directamente.', 600)
       const newData = { ...d, siiData:{ direccion:`${d.direccion}, ${d.comuna}` } }
