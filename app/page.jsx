@@ -1183,6 +1183,15 @@ function ChatComprador({ onBack }) {
   const [options, setOptions] = useState([])
   const [multiSel, setMultiSel] = useState([])
   const [chatHistory, setChatHistory] = useState([])
+  const [propiedadesDB, setPropiedadesDB] = useState([])
+
+  // Cargar base de datos de propiedades al montar
+  useEffect(() => {
+    fetch('/data/propiedades_muestra.json')
+      .then(r => r.json())
+      .then(d => setPropiedadesDB(d.propiedades || []))
+      .catch(() => {})
+  }, [])
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
 
@@ -1202,7 +1211,7 @@ function ChatComprador({ onBack }) {
       const res = await fetch('/api/buscar', {
         method:'POST',
         headers:{ 'Content-Type':'application/json' },
-        body: JSON.stringify({ messages: newHistory, perfil: currentData })
+        body: JSON.stringify({ messages: newHistory, perfil: currentData, propiedades_db: propiedadesDB })
       })
       const result = await res.json()
       setTyping(false)
