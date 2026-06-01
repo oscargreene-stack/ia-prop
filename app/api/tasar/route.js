@@ -122,7 +122,7 @@ La recomendacion_precio_venta debe ser directa y honesta: si el mercado está ba
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-5',
-        max_tokens: 2000,
+        max_tokens: 3000,
         system: systemPrompt,
         messages: [{ role: 'user', content: `Tasa esta propiedad y entrega el plan regulador:\n\n${detalles}` }],
       }),
@@ -138,8 +138,13 @@ La recomendacion_precio_venta debe ser directa y honesta: si el mercado está ba
 
     // Robust JSON sanitizer: fix common issues from LLM output
     function sanitizeJSON(raw) {
+      // 0. Replace unicode typographic quotes/apostrophes that break JSON
+      let s0 = raw
+        .replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, '\"') // curly double quotes -> "
+        .replace(/[\u2018\u2019\u201A\u201B\u2032\u2035]/g, "\'") // curly single quotes -> '
+        .replace(/\u2013|\u2014/g, '-')  // em/en dash -> hyphen
       // 1. Flatten all real newlines (outside or inside strings) to spaces
-      let s = raw.replace(/\r?\n/g, ' ').replace(/\r/g, ' ')
+      let s = s0.replace(/\r?\n/g, ' ').replace(/\r/g, ' ')
       // 2. Remove other control chars except tab
       s = s.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ' ')
       // 3. Remove trailing commas before ] or }
