@@ -1256,6 +1256,8 @@ function ChatComprador({ onBack }) {
     await addAgent(paso.msg, 500)
     if (paso.tipo === 'options') {
       setInputMode('options'); setOptions(paso.opts); setStage(`flujo_${paso.id}`)
+    } else if (paso.tipo === 'multi_comuna') {
+      setInputMode('multi_comuna'); setMultiSel([]); setOptions(paso.opts); setStage(`flujo_${paso.id}`)
     } else if (paso.tipo === 'multi') {
       setInputMode('multi'); setMultiSel([]); setOptions(paso.opts); setStage(`flujo_${paso.id}`)
     } else if (paso.tipo === 'text') {
