@@ -160,3 +160,35 @@
   padding: 6px 10px;
   line-height: 1.4;
 }
+
+/* ── Selector de comunas ─────────────────────────────────────────────────── */
+.comunas-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px 2px;
+  margin-bottom: 4px;
+}
+.comuna-btn {
+  background: var(--bubble-bg, #1a1a1a);
+  border: 1px solid var(--border, #333);
+  color: var(--text-dim, #888);
+  border-radius: 20px;
+  padding: 5px 12px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.comuna-btn:hover {
+  border-color: var(--gold, #c9a84c);
+  color: var(--text-main, #eee);
+}
+.comuna-btn.selected {
+  background: rgba(201,168,76,0.15);
+  border-color: var(--gold, #c9a84c);
+  color: var(--gold-light, #e0c070);
+  font-weight: 600;
+}
