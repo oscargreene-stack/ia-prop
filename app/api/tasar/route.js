@@ -101,6 +101,16 @@ AJUSTA según:
 - Bodega: 50-100 UF
 - Remodelación completa reciente: +10-18% sobre base
 
+ANÁLISIS DE POTENCIAL DE DESARROLLO (solo para casas y terrenos con m² terreno > 800m²):
+Cuando el terreno es grande, SIEMPRE incluir en el JSON el campo "potencial_desarrollo" con:
+- Cuántas unidades habitacionales permite la densidad del plan regulador (densidad_max hab/ha ÷ ~3.5 personas/hogar ÷ 10000 * m2_terreno = unidades aprox)
+- Si supera 2 unidades: indicar que el terreno permite subdividir y construir un condominio de casas o vender lotes
+- Mencionar que esto puede multiplicar el valor del terreno significativamente
+- SIEMPRE aclarar que "estos datos son referenciales y deben ser verificados con un arquitecto y la DOM de la municipalidad"
+- Si densidad_max no está disponible, usar 100 hab/ha como referencia conservadora para Las Condes/Vitacura/Lo Barnechea y 150 hab/ha para otras comunas RM
+
+Ejemplo de cálculo: terreno 3.982m², densidad 50 hab/ha → (50/10000)*3982/3.5 = ~5.7 unidades → "el terreno permitiría construir aproximadamente 5-6 casas en condominio"
+
 RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA (sin saltos de línea dentro de strings), sin texto adicional, sin backticks. Todos los strings deben estar en una sola línea. NO uses \n dentro de valores de strings:
 {
   "valor_uf": number,
@@ -138,7 +148,15 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA (sin saltos de línea dentro d
   "analisis": string,
   "factores_positivos": [string],
   "factores_negativos": [string],
-  "recomendacion_precio_venta": string
+  "recomendacion_precio_venta": string,
+"potencial_desarrollo": {
+  "aplica": boolean,
+  "m2_terreno": number,
+  "densidad_max_hab_ha": number,
+  "unidades_estimadas": number,
+  "descripcion": string,
+  "advertencia": string
+} | null
 }
 
 Para plan_regulador: usa tu conocimiento real de la normativa comunal vigente. Si no tienes certeza de la zona exacta, indica la zona más probable y marca confianza "Media".
