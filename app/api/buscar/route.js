@@ -3,10 +3,17 @@
 
 export async function POST(request) {
   const body = await request.json()
-  const { messages, perfil } = body
+  const { messages, perfil, propiedades_db } = body
 
   const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY
   if (!ANTHROPIC_KEY) return Response.json({ error: 'ANTHROPIC_API_KEY no configurada' }, { status: 500 })
+
+  // Build properties context from DB
+  const propiedadesStr = propiedades_db && propiedades_db.length > 0
+    ? propiedades_db.map(p =>
+        `[${p.mlc_id}] ${p.tipo} | ${p.precio_uf} UF | ${p.m2}m² (${p.uf_m2} UF/m²) | ${p.dorm}d/${p.banos}b | ${p.comuna_display} | ${p.url}`
+      ).join('\n')
+    : 'Base de datos no disponible en este momento.'
 
   const systemPrompt = `Eres Isidora, asesora inmobiliaria experta con 20 años de experiencia en la Región Metropolitana de Chile. Tu rol es ayudar a compradores a encontrar la propiedad ideal según sus necesidades y presupuesto.
 
@@ -68,6 +75,20 @@ CÓMO RESPONDER:
 8. Cuando el comprador esté listo para ver propiedades específicas, dile que puede contactar a un agente para visitas.
 9. Sé honesta: si el presupuesto es bajo para lo que busca, díselo con alternativas concretas.
 10. Máximo 3-4 párrafos por respuesta. Sé concisa pero completa.
+
+PROPIEDADES DISPONIBLES EN BASE DE DATOS:
+Cuando el comprador haya definido su perfil (tipo, presupuesto, comunas, dormitorios), SIEMPRE muestra propiedades reales de la base de datos que hacen match. Filtra por:
+- tipo: departamento o casa según lo pedido
+- precio_uf: dentro del rango del presupuesto (con ±20% de tolerancia)  
+- dorm: igual o mayor a lo pedido (con ±1 de tolerancia)
+- comuna_display: alguna de las comunas seleccionadas O colindantes cercanas
+
+Para cada propiedad que muestres incluye: tipo, precio en UF, m², UF/m², dormitorios/baños, comuna, y el link directo al aviso.
+Muestra máximo 5 propiedades que mejor hagan match. Ordénalas de mayor a menor relevancia.
+Si no hay match exacto, explica por qué y ajusta los criterios (comunas colindantes, presupuesto ±10%, etc.).
+
+BASE DE DATOS DE PROPIEDADES:
+${propiedadesStr}
 
 FORMATO DE RESPUESTA:
 Responde en texto natural en español. NO uses JSON. NO uses markdown excesivo (evita # headers). Puedes usar **negrita** para destacar datos clave (precios, comunas, m²). Usa emojis con moderación.`
