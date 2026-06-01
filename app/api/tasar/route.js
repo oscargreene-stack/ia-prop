@@ -274,7 +274,7 @@ La recomendacion_precio_venta debe ser directa y honesta: si el mercado está ba
           densidadHabHa = 120
         }
       }
-      const personasPorHogar = 3.5
+      const personasPorHogar = 4
       const unidadesEstimadas = Math.floor((densidadHabHa / 10000) * m2Terreno / personasPorHogar)
 
       if (unidadesEstimadas >= 2) {
