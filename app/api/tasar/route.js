@@ -136,7 +136,19 @@ La recomendacion_precio_venta debe ser directa y honesta: si el mercado está ba
     const match = clean.match(/\{[\s\S]*\}/)
     if (!match) return Response.json({ error: 'Sin JSON en respuesta', raw: text.slice(0, 300) }, { status: 500 })
 
-    return Response.json(JSON.parse(match[0]))
+    // Sanitize: remove control characters inside strings that break JSON.parse
+    const sanitized = match[0]
+      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ' ')  // remove bad control chars
+      .replace(/\n/g, ' ')                                   // flatten newlines inside JSON
+      .replace(/,\s*([}\]])/g, '$1')                        // remove trailing commas
+
+    try {
+      return Response.json(JSON.parse(sanitized))
+    } catch(parseErr) {
+      // Last resort: try to extract only the safe fields
+      console.error('JSON parse error:', parseErr.message, 'raw:', sanitized.slice(0, 200))
+      return Response.json({ error: 'JSON inválido: ' + parseErr.message, raw: sanitized.slice(0, 500) }, { status: 500 })
+    }
   } catch (err) {
     return Response.json({ error: err.message }, { status: 500 })
   }
