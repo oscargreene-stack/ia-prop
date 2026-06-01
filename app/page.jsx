@@ -352,7 +352,29 @@ function ChatVendedor({ onBack }) {
     } else if (stage === 'confirmar_sii') {
       if (opt.id === 'si') {
         await addAgent('Perfecto, datos confirmados ✓', 400)
-        await nextStep(data, 0)
+        // Para casas y terrenos, pedir confirmación de m² de terreno antes de continuar
+        const tipoActual = data.tipo
+        const terrenoSII = parseFloat(data.siiData?.m2_terreno) || 0
+        if (['casa', 'terreno', 'parcela'].includes(tipoActual)) {
+          const msgTerreno = terrenoSII > 0
+            ? `El SII registra **${terrenoSII.toLocaleString('es-CL')} m² de terreno** para esta propiedad. ¿Es correcto este dato?`
+            : '¿Cuántos m² de terreno tiene la propiedad? (el SII no registra este dato para esta propiedad)'
+          await addAgent(msgTerreno, 500)
+          if (terrenoSII > 0) {
+            setInputMode('options')
+            setOptions([
+              { id: 'si_terreno', label: `Sí, ${terrenoSII.toLocaleString('es-CL')} m² es correcto`, icon: '✅' },
+              { id: 'no_terreno', label: 'No, el dato es incorrecto', icon: '✏️' },
+            ])
+            setStage('confirmar_terreno')
+          } else {
+            setInputMode('text')
+            setPlaceholder('Ej: 3982')
+            setStage('ingresar_terreno')
+          }
+        } else {
+          await nextStep(data, 0)
+        }
       } else {
         await addAgent('Sin problema. Dame la dirección correcta:', 400)
         setInputMode('text')
@@ -368,6 +390,17 @@ function ChatVendedor({ onBack }) {
         setInputMode('text')
         setPlaceholder('Ej: 5.000 UF / $250.000.000')
         setStage('precio_monto')
+      }
+
+    } else if (stage === 'confirmar_terreno') {
+      if (opt.id === 'si_terreno') {
+        await addAgent('Perfecto ✓', 300)
+        await nextStep(data, 0)
+      } else {
+        await addAgent('¿Cuántos m² de terreno tiene realmente la propiedad?', 400)
+        setInputMode('text')
+        setPlaceholder('Ej: 3982')
+        setStage('ingresar_terreno')
       }
 
     } else if (stage.startsWith('flujo_')) {
@@ -411,6 +444,22 @@ function ChatVendedor({ onBack }) {
       const newData = { ...data, comuna: val }
       setData(newData)
       await fetchSII(newData)
+
+    } else if (stage === 'ingresar_terreno') {
+      const m2Corregido = parseFloat(val.replace(/[^0-9.]/g, ''))
+      if (m2Corregido > 0) {
+        addUser(`${m2Corregido.toLocaleString('es-CL')} m²`)
+        const newSiiData = { ...data.siiData, m2_terreno: m2Corregido }
+        const newData = { ...data, siiData: newSiiData }
+        setData(newData)
+        await addAgent(`Anotado: **${m2Corregido.toLocaleString('es-CL')} m² de terreno** ✓`, 300)
+        await nextStep(newData, 0)
+      } else {
+        await addAgent('Ingresa un número válido (ej: 3982)', 300)
+        setInputMode('text')
+        setPlaceholder('Ej: 3982')
+        setStage('ingresar_terreno')
+      }
 
     } else if (stage === 'precio_monto') {
       addUser(val)
