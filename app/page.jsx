@@ -3,7 +3,8 @@ import { useState, useEffect, useRef } from 'react'
 
 const fmtUF = (n) => n ? `${Number(n).toLocaleString('es-CL', {minimumFractionDigits:0,maximumFractionDigits:0})} UF` : '—'
 
-// ─── Tipos de propiedad ───────────────────────────────────────────────────────
+// ─── Tipos de propiedad ─────────────────────────────────────────────────────
+// v2 — agente comprador activo──
 const TIPOS = [
   { id:'casa',         label:'Casa',         icon:'🏡' },
   { id:'departamento', label:'Departamento', icon:'🏢' },
