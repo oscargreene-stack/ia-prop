@@ -684,6 +684,19 @@ function ChatVendedor({ onBack }) {
             </div>
           )}
 
+          {/* Potencial de Desarrollo */}
+          {resultado.potencial_desarrollo?.aplica && (
+            <div className="tas-section potencial-dev">
+              <div className="tas-section-title">🏗️ Potencial de Desarrollo del Terreno</div>
+              <div className="potencial-highlight">
+                <div className="potencial-numero">~{resultado.potencial_desarrollo.unidades_estimadas}</div>
+                <div className="potencial-label">casas posibles según plan regulador</div>
+              </div>
+              <div className="potencial-desc">{resultado.potencial_desarrollo.descripcion}</div>
+              <div className="potencial-advertencia">⚠️ {resultado.potencial_desarrollo.advertencia}</div>
+            </div>
+          )}
+
           {/* Comparables */}
           {resultado.comparables?.length>0 && (
             <div className="comp-mini">
