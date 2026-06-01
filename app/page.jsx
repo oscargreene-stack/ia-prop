@@ -887,10 +887,354 @@ function ChatVendedor({ onBack }) {
   )
 }
 
+
+// ─── Flujo de preguntas comprador ────────────────────────────────────────────
+const FLUJOS_COMPRADOR = {
+  departamento: [
+    { id:'presupuesto', msg:'¿Cuál es tu presupuesto aproximado?', tipo:'options', opts:[
+      {id:'hasta_3000',label:'Hasta 3.000 UF',icon:'💚'},{id:'3000_5000',label:'3.000 – 5.000 UF',icon:'💛'},
+      {id:'5000_8000',label:'5.000 – 8.000 UF',icon:'🟠'},{id:'8000_12000',label:'8.000 – 12.000 UF',icon:'🔴'},
+      {id:'12000_20000',label:'12.000 – 20.000 UF',icon:'🟣'},{id:'mas_20000',label:'Más de 20.000 UF',icon:'⭐'}]},
+    { id:'dormitorios', msg:'¿Cuántos dormitorios necesitas?', tipo:'options', opts:[
+      {id:'1',label:'1 dormitorio',icon:'🛏️'},{id:'2',label:'2 dormitorios',icon:'🛏️🛏️'},
+      {id:'3',label:'3 dormitorios',icon:'🏠'},{id:'4+',label:'4 o más',icon:'🏡'}]},
+    { id:'zona', msg:'¿Qué zona de Santiago prefieres?', tipo:'multi', opts:[
+      {id:'oriente',label:'Sector oriente (Las Condes, Vitacura, La Reina)',icon:'🏔️'},
+      {id:'centro',label:'Centro / Providencia / Ñuñoa',icon:'🏙️'},
+      {id:'sur',label:'Sector sur (San Miguel, La Florida, Maipú)',icon:'🌆'},
+      {id:'norte',label:'Sector norte (Huechuraba, Recoleta)',icon:'🌇'},
+      {id:'sin_preferencia',label:'Sin preferencia, me adapto',icon:'🗺️'}]},
+    { id:'uso', msg:'¿Para qué es el departamento?', tipo:'options', opts:[
+      {id:'vivir',label:'Para vivir yo / mi familia',icon:'🏠'},{id:'invertir',label:'Para arrendar / inversión',icon:'💰'},
+      {id:'ambos',label:'Vivir ahora, arrendar después',icon:'🔄'}]},
+    { id:'caracteristicas', msg:'¿Qué características son imprescindibles?', tipo:'multi', opts:[
+      {id:'estacionamiento',label:'Estacionamiento',icon:'🚗'},{id:'bodega',label:'Bodega',icon:'📦'},
+      {id:'terraza',label:'Terraza o balcón',icon:'🌿'},{id:'piscina_edificio',label:'Piscina en edificio',icon:'🏊'},
+      {id:'gimnasio',label:'Gimnasio',icon:'💪'},{id:'conserje',label:'Conserje 24/7',icon:'🔐'},
+      {id:'ninguna',label:'Solo el departamento',icon:'—'}]},
+    { id:'urgencia', msg:'¿Cuándo necesitas comprar?', tipo:'options', opts:[
+      {id:'inmediato',label:'Lo antes posible',icon:'⚡'},{id:'3_meses',label:'En los próximos 3 meses',icon:'📅'},
+      {id:'6_meses',label:'En 6 meses',icon:'🗓️'},{id:'sin_prisa',label:'Sin apuro, buscando la ideal',icon:'🔍'}]},
+  ],
+  casa: [
+    { id:'presupuesto', msg:'¿Cuál es tu presupuesto?', tipo:'options', opts:[
+      {id:'hasta_5000',label:'Hasta 5.000 UF',icon:'💚'},{id:'5000_10000',label:'5.000 – 10.000 UF',icon:'💛'},
+      {id:'10000_20000',label:'10.000 – 20.000 UF',icon:'🟠'},{id:'20000_40000',label:'20.000 – 40.000 UF',icon:'🔴'},
+      {id:'mas_40000',label:'Más de 40.000 UF',icon:'⭐'}]},
+    { id:'terreno_min', msg:'¿Cuánto terreno mínimo necesitas?', tipo:'options', opts:[
+      {id:'cualquiera',label:'No tengo requisito de terreno',icon:'—'},{id:'200_500',label:'200 – 500 m²',icon:'🌱'},
+      {id:'500_1000',label:'500 – 1.000 m²',icon:'🌿'},{id:'1000_3000',label:'1.000 – 3.000 m²',icon:'🌳'},
+      {id:'mas_3000',label:'Más de 3.000 m²',icon:'🏞️'}]},
+    { id:'dormitorios', msg:'¿Cuántos dormitorios necesitas?', tipo:'options', opts:[
+      {id:'3',label:'3 dormitorios',icon:'🏠'},{id:'4',label:'4 dormitorios',icon:'🏡'},
+      {id:'5+',label:'5 o más',icon:'🏰'}]},
+    { id:'zona', msg:'¿Qué zona prefieres?', tipo:'multi', opts:[
+      {id:'precordillera',label:'Precordillera (Lo Barnechea, La Dehesa)',icon:'🏔️'},
+      {id:'oriente',label:'Oriente (Las Condes, Vitacura)',icon:'🌟'},
+      {id:'centro_sur',label:'Centro-sur (La Reina, Ñuñoa, Macul)',icon:'🏙️'},
+      {id:'sur',label:'Sur (La Florida, Puente Alto)',icon:'🌆'},
+      {id:'sin_preferencia',label:'Sin preferencia',icon:'🗺️'}]},
+    { id:'caracteristicas', msg:'¿Qué necesita tener la casa?', tipo:'multi', opts:[
+      {id:'piscina',label:'Piscina',icon:'🏊'},{id:'jardin_grande',label:'Jardín grande',icon:'🌳'},
+      {id:'quincho',label:'Quincho / BBQ',icon:'🔥'},{id:'estacionamiento',label:'Estacionamiento cubierto',icon:'🚗'},
+      {id:'condominio',label:'En condominio cerrado',icon:'🔐'},{id:'sin_requisitos',label:'Sin requisito especial',icon:'—'}]},
+    { id:'uso', msg:'¿Para qué es la casa?', tipo:'options', opts:[
+      {id:'vivir',label:'Para vivir',icon:'🏠'},{id:'invertir',label:'Inversión / arrendar',icon:'💰'},
+      {id:'desarrollar',label:'Desarrollar / subdividir',icon:'🏗️'}]},
+    { id:'urgencia', msg:'¿Cuándo necesitas comprar?', tipo:'options', opts:[
+      {id:'inmediato',label:'Lo antes posible',icon:'⚡'},{id:'3_meses',label:'En 3 meses',icon:'📅'},
+      {id:'6_meses',label:'En 6 meses',icon:'🗓️'},{id:'sin_prisa',label:'Sin apuro',icon:'🔍'}]},
+  ],
+  oficina: [
+    { id:'presupuesto', msg:'¿Cuál es tu presupuesto?', tipo:'options', opts:[
+      {id:'hasta_3000',label:'Hasta 3.000 UF',icon:'💚'},{id:'3000_6000',label:'3.000 – 6.000 UF',icon:'💛'},
+      {id:'6000_15000',label:'6.000 – 15.000 UF',icon:'🟠'},{id:'mas_15000',label:'Más de 15.000 UF',icon:'⭐'}]},
+    { id:'superficie', msg:'¿Cuántos m² necesitas?', tipo:'options', opts:[
+      {id:'hasta_50',label:'Hasta 50 m²',icon:'🏢'},{id:'50_100',label:'50 – 100 m²',icon:'🏢'},
+      {id:'100_300',label:'100 – 300 m²',icon:'🏬'},{id:'mas_300',label:'Más de 300 m²',icon:'🏦'}]},
+    { id:'zona', msg:'¿En qué sector necesitas la oficina?', tipo:'multi', opts:[
+      {id:'el_golf',label:'El Golf / Las Condes',icon:'💼'},{id:'providencia',label:'Providencia',icon:'🏙️'},
+      {id:'vitacura',label:'Vitacura / Av. Costanera',icon:'✨'},{id:'santiago_centro',label:'Santiago Centro',icon:'🏛️'},
+      {id:'otros',label:'Otro / flexible',icon:'📍'}]},
+    { id:'caracteristicas', msg:'¿Qué necesita la oficina?', tipo:'multi', opts:[
+      {id:'estacionamientos',label:'Estacionamientos',icon:'🚗'},{id:'recepcion',label:'Recepción en edificio',icon:'🤵'},
+      {id:'divisiones',label:'Ya con divisiones',icon:'🚪'},{id:'open_space',label:'Open space',icon:'🏞️'},
+      {id:'terraza',label:'Terraza',icon:'🌿'},{id:'ninguna',label:'Sin requisito especial',icon:'—'}]},
+    { id:'uso', msg:'¿Es para usar o para invertir?', tipo:'options', opts:[
+      {id:'usar',label:'Para mi empresa / uso propio',icon:'💼'},{id:'arrendar',label:'Para arrendar',icon:'💰'},
+      {id:'ambos',label:'Usar ahora, arrendar después',icon:'🔄'}]},
+  ],
+  terreno: [
+    { id:'presupuesto', msg:'¿Cuál es tu presupuesto?', tipo:'options', opts:[
+      {id:'hasta_5000',label:'Hasta 5.000 UF',icon:'💚'},{id:'5000_15000',label:'5.000 – 15.000 UF',icon:'💛'},
+      {id:'15000_40000',label:'15.000 – 40.000 UF',icon:'🟠'},{id:'mas_40000',label:'Más de 40.000 UF',icon:'⭐'}]},
+    { id:'superficie', msg:'¿Cuántos m² de terreno buscas?', tipo:'options', opts:[
+      {id:'hasta_500',label:'Hasta 500 m²',icon:'📐'},{id:'500_1500',label:'500 – 1.500 m²',icon:'📏'},
+      {id:'1500_5000',label:'1.500 – 5.000 m²',icon:'🗺️'},{id:'mas_5000',label:'Más de 5.000 m²',icon:'🏞️'}]},
+    { id:'uso', msg:'¿Para qué usarás el terreno?', tipo:'options', opts:[
+      {id:'casa_propia',label:'Construir mi casa',icon:'🏡'},{id:'condominio',label:'Desarrollar condominio / proyecto',icon:'🏗️'},
+      {id:'comercial',label:'Proyecto comercial',icon:'🏪'},{id:'inversion',label:'Inversión / plusvalía',icon:'💰'}]},
+    { id:'zona', msg:'¿Qué zona prefieres?', tipo:'multi', opts:[
+      {id:'precordillera',label:'Precordillera / Lo Barnechea',icon:'🏔️'},{id:'oriente',label:'Sector oriente',icon:'🌟'},
+      {id:'centro',label:'Zona central / Providencia',icon:'🏙️'},{id:'sur_poniente',label:'Sur / poniente',icon:'🌆'},
+      {id:'flexible',label:'Flexible según precio',icon:'🗺️'}]},
+    { id:'urgencia', msg:'¿Cuándo quieres comprar?', tipo:'options', opts:[
+      {id:'inmediato',label:'Lo antes posible',icon:'⚡'},{id:'3_6_meses',label:'En 3 a 6 meses',icon:'📅'},
+      {id:'sin_prisa',label:'Sin apuro',icon:'🔍'}]},
+  ],
+  comercial: [
+    { id:'presupuesto', msg:'¿Cuál es tu presupuesto?', tipo:'options', opts:[
+      {id:'hasta_3000',label:'Hasta 3.000 UF',icon:'💚'},{id:'3000_8000',label:'3.000 – 8.000 UF',icon:'💛'},
+      {id:'8000_20000',label:'8.000 – 20.000 UF',icon:'🟠'},{id:'mas_20000',label:'Más de 20.000 UF',icon:'⭐'}]},
+    { id:'subtipo', msg:'¿Qué tipo de propiedad comercial buscas?', tipo:'options', opts:[
+      {id:'local',label:'Local comercial',icon:'🏪'},{id:'bodega',label:'Bodega / Galpón',icon:'🏭'},
+      {id:'edificio',label:'Edificio completo',icon:'🏢'},{id:'nave',label:'Nave industrial',icon:'🏗️'}]},
+    { id:'superficie', msg:'¿Qué superficie necesitas?', tipo:'options', opts:[
+      {id:'hasta_100',label:'Hasta 100 m²',icon:'📐'},{id:'100_500',label:'100 – 500 m²',icon:'📏'},
+      {id:'500_2000',label:'500 – 2.000 m²',icon:'🗺️'},{id:'mas_2000',label:'Más de 2.000 m²',icon:'🏞️'}]},
+    { id:'zona', msg:'¿En qué sector?', tipo:'multi', opts:[
+      {id:'santiago_centro',label:'Santiago Centro',icon:'🏛️'},{id:'oriente',label:'Sector oriente',icon:'🌟'},
+      {id:'sur',label:'Sector sur',icon:'🌆'},{id:'industrial',label:'Zona industrial / Pudahuel',icon:'🏭'},
+      {id:'flexible',label:'Flexible',icon:'🗺️'}]},
+    { id:'uso', msg:'¿Para qué es?', tipo:'options', opts:[
+      {id:'operar',label:'Operar mi negocio',icon:'💼'},{id:'arrendar',label:'Arrendar / inversión',icon:'💰'},
+      {id:'desarrollar',label:'Desarrollar proyecto',icon:'🏗️'}]},
+  ],
+}
+
+// ─── Chat Comprador ───────────────────────────────────────────────────────────
+function ChatComprador({ onBack }) {
+  const [messages, setMessages] = useState([])
+  const [typing, setTyping] = useState(false)
+  const [stage, setStage] = useState('greeting')
+  const [data, setData] = useState({})
+  const [flujoIdx, setFlujoIdx] = useState(0)
+  const [inputMode, setInputMode] = useState(null)
+  const [inputVal, setInputVal] = useState('')
+  const [options, setOptions] = useState([])
+  const [multiSel, setMultiSel] = useState([])
+  const [chatHistory, setChatHistory] = useState([])
+  const bottomRef = useRef(null)
+  const inputRef = useRef(null)
+
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior:'smooth' }) }, [messages, typing])
+
+  const addAgent = (content, delay=600) => new Promise(res => {
+    setTyping(true)
+    setTimeout(() => { setTyping(false); setMessages(m => [...m, { role:'agent', content }]); res() }, delay)
+  })
+  const addUser = (text) => setMessages(m => [...m, { role:'user', content: text }])
+
+  const askValentina = async (userMsg, currentData) => {
+    const newHistory = [...chatHistory, { role:'user', content: userMsg }]
+    setChatHistory(newHistory)
+    setTyping(true)
+    try {
+      const res = await fetch('/api/buscar', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ messages: newHistory, perfil: currentData })
+      })
+      const result = await res.json()
+      setTyping(false)
+      const respuesta = result.respuesta || 'Hubo un problema, intenta de nuevo.'
+      setMessages(m => [...m, { role:'agent', content: respuesta }])
+      setChatHistory(h => [...h, { role:'assistant', content: respuesta }])
+      return respuesta
+    } catch(e) {
+      setTyping(false)
+      await addAgent('Hubo un problema conectándome. ¿Intentamos de nuevo?', 300)
+    }
+  }
+
+  // Inicio
+  useEffect(() => {
+    const init = async () => {
+      await addAgent('¡Hola! Soy Valentina, tu asesora inmobiliaria 👋\n\nEstoy aquí para ayudarte a encontrar la propiedad perfecta en Santiago. Cuéntame, ¿qué tipo de propiedad estás buscando?', 800)
+      setInputMode('options')
+      setOptions(TIPOS)
+      setStage('tipo')
+    }
+    init()
+  }, [])
+
+  const nextStep = async (currentData, idx) => {
+    const tipo = currentData.tipo
+    const flujo = FLUJOS_COMPRADOR[tipo] || []
+    if (idx >= flujo.length) {
+      // Fin del flujo — pasar a conversación libre con Valentina
+      setStage('chat_libre')
+      setInputMode(null)
+      const resumen = buildResumen(currentData)
+      await askValentina(
+        `He completado mi perfil de búsqueda. Aquí está lo que busco: ${resumen}. Por favor dame tu análisis experto: qué comunas me recomiendas, qué puedo esperar con mi presupuesto, y cuáles son las mejores oportunidades del mercado actual para mi perfil.`,
+        currentData
+      )
+      setInputMode('text_libre')
+      return
+    }
+    const paso = flujo[idx]
+    setFlujoIdx(idx + 1)
+    await addAgent(paso.msg, 500)
+    if (paso.tipo === 'options') {
+      setInputMode('options'); setOptions(paso.opts); setStage(`flujo_${paso.id}`)
+    } else if (paso.tipo === 'multi') {
+      setInputMode('multi'); setMultiSel([]); setOptions(paso.opts); setStage(`flujo_${paso.id}`)
+    } else if (paso.tipo === 'text') {
+      setInputMode('text'); setStage(`flujo_${paso.id}`)
+    }
+  }
+
+  const buildResumen = (d) => {
+    const partes = [
+      `Tipo: ${d.tipo}`,
+      d.presupuesto ? `Presupuesto: ${d.presupuesto.replace(/_/g,' ')} UF` : null,
+      d.dormitorios ? `Dormitorios: ${d.dormitorios}` : null,
+      d.superficie ? `Superficie: ${d.superficie.replace(/_/g,' ')} m²` : null,
+      d.terreno_min ? `Terreno mínimo: ${d.terreno_min.replace(/_/g,' ')} m²` : null,
+      d.zona?.length ? `Zona preferida: ${d.zona.join(', ')}` : null,
+      d.uso ? `Uso: ${d.uso}` : null,
+      d.subtipo ? `Subtipo: ${d.subtipo}` : null,
+      d.caracteristicas?.length ? `Características: ${d.caracteristicas.join(', ')}` : null,
+      d.urgencia ? `Urgencia: ${d.urgencia}` : null,
+    ].filter(Boolean)
+    return partes.join(' | ')
+  }
+
+  const handleOption = async (opt) => {
+    addUser(opt.label)
+    setInputMode(null)
+
+    if (stage === 'tipo') {
+      const newData = { ...data, tipo: opt.id }
+      setData(newData)
+      await addAgent(`Perfecto, buscas ${opt.label.toLowerCase()}. Voy a hacerte algunas preguntas para entender bien lo que necesitas.`, 600)
+      await nextStep(newData, 0)
+
+    } else if (stage.startsWith('flujo_')) {
+      const campo = stage.replace('flujo_', '')
+      const newData = { ...data, [campo]: opt.id }
+      setData(newData)
+      await nextStep(newData, flujoIdx)
+    }
+  }
+
+  const handleMultiConfirm = async () => {
+    const campo = stage.replace('flujo_', '')
+    const labels = multiSel.map(s => options.find(o => o.id === s)?.label).filter(Boolean)
+    addUser(labels.length ? labels.join(', ') : 'Sin preferencia')
+    setInputMode(null)
+    const newData = { ...data, [campo]: multiSel }
+    setData(newData)
+    await nextStep(newData, flujoIdx)
+  }
+
+  const handleSend = async () => {
+    const val = inputVal.trim()
+    if (!val) return
+    setInputVal('')
+    setInputMode(null)
+
+    if (stage === 'chat_libre' || stage === 'text_libre') {
+      addUser(val)
+      await askValentina(val, data)
+      setInputMode('text_libre')
+    } else if (stage.startsWith('flujo_')) {
+      addUser(val)
+      const campo = stage.replace('flujo_', '')
+      const newData = { ...data, [campo]: val }
+      setData(newData)
+      await nextStep(newData, flujoIdx)
+    }
+  }
+
+  const renderContent = (content) => {
+    if (typeof content !== 'string') return null
+    // Render **bold** markdown
+    return content.split('\n').map((line, i, arr) => (
+      <span key={i}>
+        {line.split(/\*\*(.*?)\*\*/g).map((p, j) => j%2===1 ? <strong key={j}>{p}</strong> : p)}
+        {i < arr.length-1 && <br/>}
+      </span>
+    ))
+  }
+
+  return (
+    <div className="chat-app">
+      <div className="chat-header">
+        <button className="back-btn" onClick={onBack}>←</button>
+        <div className="agent-avatar">🤵</div>
+        <div>
+          <div className="agent-name">Valentina · Asesora de Compra</div>
+          <div className="agent-status"><span className="status-dot"/>En línea</div>
+        </div>
+        <div className="chat-header-logo">IA <em>Prop</em></div>
+      </div>
+
+      <div className="messages-area">
+        {messages.map((msg, i) => msg.role==='agent'
+          ? <AgentBubble key={i}>{renderContent(msg.content)}</AgentBubble>
+          : <UserBubble key={i}>{msg.content}</UserBubble>
+        )}
+        {typing && <AgentBubble typing/>}
+        <div ref={bottomRef}/>
+      </div>
+
+      <div className="options-area">
+        {inputMode === 'options' && (
+          <>
+            <div className="options-hint">Selecciona una opción</div>
+            <div className="options-grid">
+              {options.map(opt => (
+                <button key={opt.id} className="opt" onClick={() => handleOption(opt)}>
+                  {opt.icon && <span className="opt-icon">{opt.icon}</span>}{opt.label}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+
+        {inputMode === 'multi' && (
+          <>
+            <div className="options-hint">Selecciona todo lo que aplique</div>
+            <div className="options-grid" style={{marginBottom:10}}>
+              {options.map(opt => (
+                <button key={opt.id} className={`opt${multiSel.includes(opt.id)?' selected':''}`}
+                  onClick={() => {
+                    if (opt.id==='sin_preferencia'||opt.id==='ninguna'||opt.id==='flexible') setMultiSel([opt.id])
+                    else setMultiSel(p => p.includes(opt.id) ? p.filter(x=>x!==opt.id) : [...p.filter(x=>x!=='sin_preferencia'&&x!=='ninguna'&&x!=='flexible'),opt.id])
+                  }}>
+                  {opt.icon && <span className="opt-icon">{opt.icon}</span>}{opt.label}
+                </button>
+              ))}
+            </div>
+            <button className="opt" style={{background:'var(--gold-dim)',borderColor:'var(--gold)',color:'var(--gold-light)'}} onClick={handleMultiConfirm}>
+              Confirmar →
+            </button>
+          </>
+        )}
+
+        {(inputMode === 'text' || inputMode === 'text_libre') && (
+          <div className="text-input-row">
+            <textarea ref={inputRef} className="chat-input"
+              placeholder={inputMode==='text_libre' ? 'Pregúntame lo que quieras sobre el mercado, comunas, precios…' : 'Escribe aquí…'}
+              value={inputVal} onChange={e => setInputVal(e.target.value)}
+              onKeyDown={e => { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); handleSend() }}}
+              rows={1}/>
+            <button className="send-btn" disabled={!inputVal.trim()} onClick={handleSend}>→</button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+
 // ─── Landing ──────────────────────────────────────────────────────────────────
 export default function Home() {
   const [view, setView] = useState('landing')
   if (view === 'vendedor') return <ChatVendedor onBack={() => setView('landing')}/>
+  if (view === 'comprador') return <ChatComprador onBack={() => setView('landing')}/>
   return (
     <>
       <div className="landing">
@@ -902,8 +1246,7 @@ export default function Home() {
             <div className="landing-card-title">Quiero vender</div>
             <div className="landing-card-desc">Tasa tu propiedad gratis con datos reales del mercado y recibe asesoría personalizada.</div>
           </div>
-          <div className="landing-card disabled">
-            <div className="coming-soon">Próximamente</div>
+          <div className="landing-card" onClick={() => setView('comprador')}>
             <div className="landing-card-icon">🔍</div>
             <div className="landing-card-title">Quiero comprar</div>
             <div className="landing-card-desc">Cuéntanos qué buscas y te encontramos la propiedad perfecta al mejor precio.</div>
