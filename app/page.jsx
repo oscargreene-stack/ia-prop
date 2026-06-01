@@ -529,7 +529,7 @@ function ChatVendedor({ onBack }) {
           siiData: finalData.siiData,
           form:{ direccion: finalData.direccion, depto:'', comuna: finalData.comuna || '' },
           answers:{ remodelacion: finalData.remodelacion || 'ninguna', tiempo_remo: finalData.tiempo_remo || 'reciente', conservacion:'bueno', terraza_m2: parseInt(finalData.terraza_m2)||0, estacionamientos: parseInt(finalData.estacionamientos)||0, bodegas: parseInt(finalData.bodega)||0, m2_util: finalData.siiData?.m2_util || null },
-          extras: finalData,
+          extras: { ...finalData, tipo: finalData.tipo, piso: finalData.piso, orientacion: finalData.orientacion, jardin_m2: finalData.jardin_m2, precio_idea: finalData.precio_idea },
         })
       })
       const resultado = await res.json()
@@ -581,25 +581,94 @@ function ChatVendedor({ onBack }) {
       const { resultado, valorFinal, rangoMin, rangoMax, ajRemo, ajCar, ajJardin=0, valorBase } = content
       const conf = resultado.confianza?.toLowerCase()
       const cc = conf?.includes('alta') ? 'conf-alta' : conf?.includes('media') ? 'conf-media' : 'conf-baja'
+      const pr = resultado.plan_regulador
       return (
         <div className="tasacion-card">
+          {/* Valor principal */}
           <div className="tasacion-label">Tasación de mercado</div>
           <div className="tasacion-valor">{fmtUF(valorFinal)}</div>
-          <div className="tasacion-rango">Rango: {fmtUF(rangoMin)} — {fmtUF(rangoMax)}</div>
+          <div className="tasacion-rango">Rango estimado: {fmtUF(rangoMin)} — {fmtUF(rangoMax)}</div>
           <div className={`conf-badge ${cc}`}>Confianza {resultado.confianza}</div>
-          <div className="tasacion-grid">
-            <div className="tasacion-item"><div className="tasacion-item-label">Base CBR</div><div className="tasacion-item-val">{fmtUF(valorBase)}</div></div>
-            {ajRemo>0 && <div className="tasacion-item"><div className="tasacion-item-label">Remodelación{content.remoInfo ? ` (${content.remoInfo.ufM2} UF/m² × ${content.remoInfo.m2} m²)` : ''}</div><div className="tasacion-item-val pos">+{fmtUF(ajRemo)}</div></div>}
-            {ajCar>0 && <div className="tasacion-item"><div className="tasacion-item-label">Características</div><div className="tasacion-item-val pos">+{fmtUF(ajCar)}</div></div>}
-            {ajJardin>0 && <div className="tasacion-item"><div className="tasacion-item-label">Jardín / Patio</div><div className="tasacion-item-val pos">+{fmtUF(ajJardin)}</div></div>}
-            {resultado.precio_m2 && <div className="tasacion-item"><div className="tasacion-item-label">Precio/m²</div><div className="tasacion-item-val">{resultado.precio_m2} UF/m²</div></div>}
-          </div>
+
+          {/* Desglose detallado */}
+          {resultado.desglose?.length > 0 ? (
+            <div className="tas-section">
+              <div className="tas-section-title">Desglose del valor</div>
+              {resultado.desglose.map((it, i) => (
+                <div key={i} className="tas-row">
+                  <div>
+                    <div className="tas-row-label">{it.concepto}</div>
+                    {it.calculo && <div className="tas-row-calc">{it.calculo}</div>}
+                  </div>
+                  <div className={it.valor_uf >= 0 ? 'tas-row-val pos' : 'tas-row-val neg'}>
+                    {it.valor_uf >= 0 ? '+' : ''}{fmtUF(it.valor_uf)}
+                  </div>
+                </div>
+              ))}
+              <div className="tas-row tas-row-total">
+                <div className="tas-row-label">Total estimado</div>
+                <div className="tas-row-val">{fmtUF(valorFinal)}</div>
+              </div>
+            </div>
+          ) : (
+            <div className="tasacion-grid">
+              <div className="tasacion-item"><div className="tasacion-item-label">Base CBR</div><div className="tasacion-item-val">{fmtUF(valorBase)}</div></div>
+              {ajRemo>0 && <div className="tasacion-item"><div className="tasacion-item-label">Remodelación</div><div className="tasacion-item-val pos">+{fmtUF(ajRemo)}</div></div>}
+              {ajCar>0 && <div className="tasacion-item"><div className="tasacion-item-label">Características</div><div className="tasacion-item-val pos">+{fmtUF(ajCar)}</div></div>}
+              {ajJardin>0 && <div className="tasacion-item"><div className="tasacion-item-label">Jardín / Patio</div><div className="tasacion-item-val pos">+{fmtUF(ajJardin)}</div></div>}
+              {resultado.precio_m2 && <div className="tasacion-item"><div className="tasacion-item-label">Precio/m²</div><div className="tasacion-item-val">{resultado.precio_m2} UF/m²</div></div>}
+            </div>
+          )}
+
+          {/* Plan Regulador */}
+          {pr && (
+            <div className="tas-section">
+              <div className="tas-section-title">📋 Plan Regulador — {pr.zona || ''} {pr.nombre_zona || ''}</div>
+              <div className="plan-grid">
+                {pr.uso_suelo && <div className="plan-item"><div className="plan-label">Uso de suelo</div><div className="plan-val">{pr.uso_suelo}</div></div>}
+                {pr.altura_max_pisos && <div className="plan-item"><div className="plan-label">Altura máx.</div><div className="plan-val">{pr.altura_max_pisos} pisos{pr.altura_max_m ? ` / ${pr.altura_max_m}m` : ''}</div></div>}
+                {pr.coef_constructibilidad && <div className="plan-item"><div className="plan-label">Constructibilidad</div><div className="plan-val">{pr.coef_constructibilidad}</div></div>}
+                {pr.coef_ocupacion_suelo && <div className="plan-item"><div className="plan-label">Ocup. suelo</div><div className="plan-val">{pr.coef_ocupacion_suelo}</div></div>}
+                {pr.densidad_max && <div className="plan-item"><div className="plan-label">Densidad máx.</div><div className="plan-val">{pr.densidad_max}</div></div>}
+                {pr.antejardín_m > 0 && <div className="plan-item"><div className="plan-label">Antejardín</div><div className="plan-val">{pr.antejardín_m} m</div></div>}
+              </div>
+              {pr.impacto_valor && <div className="plan-impacto">{pr.impacto_valor}</div>}
+              {pr.observaciones && <div className="plan-obs">{pr.observaciones}</div>}
+            </div>
+          )}
+
+          {/* Factores + / - */}
+          {(resultado.factores_positivos?.length > 0 || resultado.factores_negativos?.length > 0) && (
+            <div className="tas-section">
+              <div className="tas-section-title">Factores de valor</div>
+              <div className="factores-grid">
+                {resultado.factores_positivos?.map((f,i) => <div key={i} className="factor pos">✓ {f}</div>)}
+                {resultado.factores_negativos?.map((f,i) => <div key={i} className="factor neg">✗ {f}</div>)}
+              </div>
+            </div>
+          )}
+
+          {/* Análisis */}
           {resultado.analisis && <div className="analisis-text">{resultado.analisis}</div>}
+
+          {/* Recomendación */}
+          {resultado.recomendacion_precio_venta && (
+            <div className="tas-recomendacion">
+              <div className="tas-reco-title">💡 Recomendación</div>
+              <div className="tas-reco-text">{resultado.recomendacion_precio_venta}</div>
+            </div>
+          )}
+
+          {/* Comparables */}
           {resultado.comparables?.length>0 && (
             <div className="comp-mini">
-              {resultado.comparables.slice(0,3).map((c,i) => (
+              <div className="tas-section-title">Transacciones de referencia</div>
+              {resultado.comparables.slice(0,4).map((c,i) => (
                 <div key={i} className="comp-mini-item">
-                  <div className="comp-mini-addr">{c.direccion} · {c.m2} m²</div>
+                  <div>
+                    <div className="comp-mini-addr">{c.direccion} · {c.m2} m²</div>
+                    <div className="comp-mini-meta">{c.tipo} · {c.fecha}{c.similitud ? ` · ${c.similitud}` : ''}</div>
+                  </div>
                   <div><div className="comp-mini-uf">{fmtUF(c.precio_uf)}</div><div className="comp-mini-m2">{c.uf_m2} UF/m²</div></div>
                 </div>
               ))}
