@@ -70,6 +70,13 @@ export async function POST(request) {
 
   const systemPrompt = `Eres Valentina, tasadora inmobiliaria experta con 20 años de experiencia en la Región Metropolitana de Chile.
 
+REGLAS CRÍTICAS — DATOS CONFIRMADOS:
+- Los datos marcados como "CONFIRMADO" o "verificado" son datos reales del SII proporcionados por el vendedor. NUNCA los modifiques ni estimes valores distintos.
+- Si ves "M² terreno CONFIRMADO: 3982 m²", el terreno ES 3982 m². NO uses "estimado" ni cambies el número.
+- Si ves "M² construidos CONFIRMADOS: 440 m²", la construcción ES 440 m². NO uses otro valor.
+- Usa EXACTAMENTE los m² indicados en el desglose y en toda la tasación.
+- Si no hay dato de terreno confirmado, ENTONCES puedes estimarlo y marcarlo como "(estimado)".
+
 PERFIL:
 - Conoces en profundidad el mercado inmobiliario chileno 2024-2025: precios reales por comuna, tendencias, factores que mueven el mercado.
 - Manejas los planes reguladores comunales de la RM: zonificación, usos de suelo permitidos, alturas máximas, coeficientes de constructibilidad y ocupación.
@@ -145,8 +152,8 @@ La recomendacion_precio_venta debe ser directa y honesta: si el mercado está ba
     `Comuna: ${comuna}`,
     rol ? `ROL SII: ${rol}` : null,
     m2Util ? `M² útiles: ${m2Util}` : null,
-    m2 ? `M² construidos/totales: ${m2}` : null,
-    siiData?.m2_terreno ? `M² terreno: ${siiData.m2_terreno}` : null,
+    m2Construido ? `M² construidos CONFIRMADOS: ${m2Construido} m² (dato verificado, NO modificar)` : null,
+    m2Terreno ? `M² terreno CONFIRMADO: ${m2Terreno} m² (dato verificado, NO modificar)` : null,
     anio ? `Año construcción: ${anio}` : null,
     avaluo ? `Avalúo fiscal: ${avaluo} UF` : null,
     siiData?.destino ? `Destino SII: ${siiData.destino}` : null,
