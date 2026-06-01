@@ -136,18 +136,65 @@ La recomendacion_precio_venta debe ser directa y honesta: si el mercado está ba
     const match = clean.match(/\{[\s\S]*\}/)
     if (!match) return Response.json({ error: 'Sin JSON en respuesta', raw: text.slice(0, 300) }, { status: 500 })
 
-    // Sanitize: remove control characters inside strings that break JSON.parse
-    const sanitized = match[0]
-      .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ' ')  // remove bad control chars
-      .replace(/\n/g, ' ')                                   // flatten newlines inside JSON
-      .replace(/,\s*([}\]])/g, '$1')                        // remove trailing commas
+    // Robust JSON sanitizer: fix common issues from LLM output
+    function sanitizeJSON(raw) {
+      // 1. Flatten all real newlines (outside or inside strings) to spaces
+      let s = raw.replace(/\r?\n/g, ' ').replace(/\r/g, ' ')
+      // 2. Remove other control chars except tab
+      s = s.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ' ')
+      // 3. Remove trailing commas before ] or }
+      s = s.replace(/,\s*([\]\}])/g, '$1')
+      // 4. Fix unescaped quotes inside string values using a state machine
+      let result = ''
+      let inString = false
+      let escaped = false
+      for (let i = 0; i < s.length; i++) {
+        const ch = s[i]
+        if (escaped) { result += ch; escaped = false; continue }
+        if (ch === '\\') { result += ch; escaped = true; continue }
+        if (ch === '"') {
+          if (!inString) { inString = true; result += ch; continue }
+          // Peek: if next non-space char is : , } ] then this closes the string
+          let j = i + 1
+          while (j < s.length && s[j] === ' ') j++
+          const next = s[j]
+          if (next === ':' || next === ',' || next === '}' || next === ']') {
+            inString = false; result += ch
+          } else {
+            // Unescaped quote inside string — escape it
+            result += '\\"'
+          }
+          continue
+        }
+        result += ch
+      }
+      return result
+    }
 
+    const sanitized = sanitizeJSON(match[0])
     try {
       return Response.json(JSON.parse(sanitized))
     } catch(parseErr) {
-      // Last resort: try to extract only the safe fields
-      console.error('JSON parse error:', parseErr.message, 'raw:', sanitized.slice(0, 200))
-      return Response.json({ error: 'JSON inválido: ' + parseErr.message, raw: sanitized.slice(0, 500) }, { status: 500 })
+      console.error('JSON parse error:', parseErr.message)
+      // Last resort: extract fields individually with regex
+      const extract = (key) => {
+        const m = sanitized.match(new RegExp('"' + key + '"\\s*:\\s*([\\d.]+)'))
+        return m ? parseFloat(m[1]) : null
+      }
+      const extractStr = (key) => {
+        const m = sanitized.match(new RegExp('"' + key + '"\\s*:\\s*"([^"]*)"'))
+        return m ? m[1] : null
+      }
+      const fallback = {
+        valor_uf: extract('valor_uf'),
+        precio_m2: extract('precio_m2'),
+        confianza: extractStr('confianza') || 'Baja',
+        analisis: extractStr('analisis') || 'Tasación completada con datos disponibles.',
+        recomendacion_precio_venta: extractStr('recomendacion_precio_venta') || '',
+        desglose: [], comparables: [], factores_positivos: [], factores_negativos: [], plan_regulador: null
+      }
+      if (fallback.valor_uf) return Response.json(fallback)
+      return Response.json({ error: 'JSON invalido: ' + parseErr.message, raw: sanitized.slice(0, 300) }, { status: 500 })
     }
   } catch (err) {
     return Response.json({ error: err.message }, { status: 500 })
