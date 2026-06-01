@@ -120,3 +120,43 @@
   .btn-buscar:hover{background:var(--gold-light);}
   .btn-buscar:disabled{background:var(--gold-dim);cursor:not-allowed;}
   @media(max-width:600px){.chat-app{height:100dvh;}.landing-cards{flex-direction:column;align-items:center;}.tasacion-valor{font-size:28px;}}
+
+/* ── Potencial de Desarrollo ─────────────────────────── */
+.potencial-dev {
+  background: linear-gradient(135deg, rgba(16,185,129,0.08) 0%, rgba(5,150,105,0.04) 100%);
+  border: 1px solid rgba(16,185,129,0.3);
+  border-radius: 10px;
+  padding: 14px;
+}
+.potencial-highlight {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.potencial-numero {
+  font-size: 2rem;
+  font-weight: 800;
+  color: #10b981;
+  line-height: 1;
+}
+.potencial-label {
+  font-size: 0.75rem;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.potencial-desc {
+  font-size: 0.82rem;
+  color: var(--text-main);
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+.potencial-advertencia {
+  font-size: 0.75rem;
+  color: var(--gold-dim, #a8903a);
+  background: rgba(168,144,58,0.08);
+  border-radius: 6px;
+  padding: 6px 10px;
+  line-height: 1.4;
+}
