@@ -1,6 +1,6 @@
 // app/api/tasar/route.js
-// Tasación usando Claude con conocimiento del mercado inmobiliario chileno
-// Sin MCP (DataInmobiliaria MCP requiere OAuth Google, no funciona desde Vercel)
+// Agente Valentina — experta tasadora inmobiliaria chilena
+// Entrega tasación fundamentada + plan regulador por comuna
 
 export async function POST(request) {
   const body = await request.json()
@@ -12,75 +12,104 @@ export async function POST(request) {
   const dir    = siiData?.direccion || `${form.direccion}${form.depto ? ' '+form.depto : ''}, ${form.comuna}`
   const comuna = form.comuna || ''
   const tipo   = extras?.tipo || 'propiedad'
-  const m2     = siiData?.m2_construido || null
+  const m2     = siiData?.m2_construido || siiData?.m2_util || null
+  const m2Util = siiData?.m2_util || null
+  const rol    = siiData?.rol || null
+  const anio   = siiData?.anio_construccion || null
+  const avaluo = siiData?.avaluo_fiscal_uf || null
   const caracts = (extras?.caracteristicas || []).filter(c => c !== 'ninguna')
 
-  const systemPrompt = `Eres un experto tasador inmobiliario del mercado chileno con 20 años de experiencia en la Región Metropolitana.
-Conoces a fondo los precios de mercado por comunas: Vitacura, Las Condes, Lo Barnechea, Providencia, Ñuñoa, La Reina, La Florida, Maipú, Santiago, etc.
-Respondes SOLO con un JSON válido, sin texto adicional, sin backticks, sin markdown.
+  const systemPrompt = `Eres Valentina, tasadora inmobiliaria experta con 20 años de experiencia en la Región Metropolitana de Chile.
 
-Estructura de respuesta:
+PERFIL:
+- Conoces en profundidad el mercado inmobiliario chileno 2024-2025: precios reales por comuna, tendencias, factores que mueven el mercado.
+- Manejas los planes reguladores comunales de la RM: zonificación, usos de suelo permitidos, alturas máximas, coeficientes de constructibilidad y ocupación.
+- Sabes cómo afectan las normativas al valor: una zona con mayor constructibilidad vale más, una zona de conservación histórica tiene restricciones, etc.
+- Conoces los valores de estacionamientos, bodegas, terrazas y jardines en cada mercado.
+- Entiendes cómo la remodelación impacta el valor según calidad y antigüedad.
+
+PRECIOS DE REFERENCIA 2025 (UF/m² construido):
+- Vitacura: 85-130 | Las Condes: 70-115 | Lo Barnechea: 60-100
+- Providencia: 65-100 | Ñuñoa: 55-82 | La Reina: 50-75
+- Macul, San Miguel, Quinta Normal: 35-55 | La Florida, Maipú, Pudahuel: 28-50
+- Santiago Centro: 45-72 | Peñalolén, La Granja: 30-48 | Puente Alto: 25-40
+- San Bernardo, El Bosque: 22-38 | Lo Prado, Renca: 25-42
+
+AJUSTA según:
+- Piso: +2% cada 5 pisos sobre el 5to, penaliza piso 1-2 en deptos sin vista
+- Orientación norte: +3-5%, sur: -3%
+- Estado conservación: excelente +8%, deteriorado -10%
+- Año construcción: post-2010 neutro, 2000-2010 -3%, pre-2000 -5 a -10%
+- Terraza: 40-60% del precio/m² construido
+- Estacionamiento: 200-350 UF según comuna y demanda
+- Bodega: 50-100 UF
+- Remodelación completa reciente: +10-18% sobre base
+
+RESPONDE SOLO con JSON válido, sin texto adicional, sin backticks:
 {
-  "valor_uf": number (estimación del valor de mercado total en UF),
-  "precio_m2": number (UF por m² construido),
+  "valor_uf": number,
+  "precio_m2": number,
   "confianza": "Alta" | "Media" | "Baja",
   "plan_regulador": {
     "zona": string,
+    "nombre_zona": string,
     "uso_suelo": string,
-    "altura_max": string,
-    "coeficiente_constructibilidad": string,
-    "densidad_max": string
+    "altura_max_pisos": number,
+    "altura_max_m": number,
+    "coef_constructibilidad": string,
+    "coef_ocupacion_suelo": string,
+    "densidad_max": string,
+    "adosamiento": string,
+    "antejardín_m": number,
+    "observaciones": string,
+    "impacto_valor": string
   },
-  "analisis": string (2-3 oraciones sobre el mercado actual en esa zona y el valor estimado),
   "comparables": [
     {
-      "direccion": string (inventa una dirección cercana realista),
+      "direccion": string,
+      "tipo": string,
       "m2": number,
-      "fecha": string (últimos 12 meses),
+      "fecha": string,
       "precio_uf": number,
       "uf_m2": number,
+      "similitud": string,
       "mismo_edificio": false
     }
-  ]
+  ],
+  "desglose": [
+    { "concepto": string, "calculo": string, "valor_uf": number }
+  ],
+  "analisis": string,
+  "factores_positivos": [string],
+  "factores_negativos": [string],
+  "recomendacion_precio_venta": string
 }
 
-Para la estimación usa tu conocimiento de precios de mercado reales en Chile 2024-2025.
-Rangos de referencia por comuna (UF/m²):
-- Vitacura: 80-120 UF/m²
-- Las Condes: 70-110 UF/m²
-- Lo Barnechea: 60-95 UF/m²
-- Providencia: 65-100 UF/m²
-- Ñuñoa: 55-80 UF/m²
-- La Reina: 50-75 UF/m²
-- Macul, San Miguel: 35-55 UF/m²
-- La Florida, Maipú: 30-50 UF/m²
-- Santiago Centro: 45-70 UF/m²
-Ajusta según tipo de propiedad, características y condición.
-Genera 3-5 comparables ficticios pero realistas basados en el mercado real.`
+Para plan_regulador: usa tu conocimiento real de la normativa comunal vigente. Si no tienes certeza de la zona exacta, indica la zona más probable y marca confianza "Media".
+Para comparables: genera 3-5 transacciones representativas del mercado real reciente (últimos 12 meses), realistas en precio y ubicación.
+Para desglose: desglosa cada componente del valor (base m², ajuste remodelación, estacionamiento, bodega, terraza, etc.) con su cálculo explícito.
+La recomendacion_precio_venta debe ser directa y honesta: si el mercado está bajando, dilo; si conviene esperar, explícalo.`
 
   const detalles = [
-    `Tipo: ${tipo}`,
+    `Tipo de propiedad: ${tipo}`,
     `Dirección: ${dir}`,
     `Comuna: ${comuna}`,
-    m2 ? `M² construidos: ${m2}` : null,
+    rol ? `ROL SII: ${rol}` : null,
+    m2Util ? `M² útiles: ${m2Util}` : null,
+    m2 ? `M² construidos/totales: ${m2}` : null,
     siiData?.m2_terreno ? `M² terreno: ${siiData.m2_terreno}` : null,
-    siiData?.anio_construccion ? `Año construcción: ${siiData.anio_construccion}` : null,
-    siiData?.avaluo_fiscal_uf ? `Avalúo fiscal: ${siiData.avaluo_fiscal_uf} UF` : null,
-    `Remodelación: ${answers?.remodelacion || 'ninguna'}`,
-    answers?.conservacion ? `Conservación: ${answers.conservacion}` : null,
-    caracts.length ? `Características: ${caracts.join(', ')}` : null,
-    extras?.tiempo_remo ? `Tiempo remodelación: ${extras.tiempo_remo}` : null,
-    extras?.precio_idea ? `Precio ideal vendedor: ${extras.precio_idea}` : null,
-    // Datos específicos por tipo
+    anio ? `Año construcción: ${anio}` : null,
+    avaluo ? `Avalúo fiscal: ${avaluo} UF` : null,
+    siiData?.destino ? `Destino SII: ${siiData.destino}` : null,
+    answers?.remodelacion && answers.remodelacion !== 'ninguna' ? `Remodelación: ${answers.remodelacion}${answers.tiempo_remo ? ', hace '+answers.tiempo_remo : ''}` : 'Sin remodelación',
+    answers?.terraza_m2 > 0 ? `Terraza: ${answers.terraza_m2} m²` : null,
+    answers?.estacionamientos > 0 ? `Estacionamientos: ${answers.estacionamientos}` : null,
+    answers?.bodegas > 0 ? `Bodegas: ${answers.bodegas}` : null,
     extras?.piso ? `Piso: ${extras.piso}` : null,
     extras?.orientacion ? `Orientación: ${extras.orientacion}` : null,
-    extras?.terraza_m2 && extras.terraza_m2 > 0 ? `Terraza: ${extras.terraza_m2} m²` : null,
-    extras?.jardin_m2 && parseFloat(extras.jardin_m2) > 0 ? `Jardín/patio privado: ${extras.jardin_m2} m²` : null,
-    extras?.estacionamientos && extras.estacionamientos > 0 ? `Estacionamientos: ${extras.estacionamientos}` : null,
-    extras?.bodega && extras.bodega > 0 ? `Bodegas: ${extras.bodega}` : null,
-    extras?.superficie_ha ? `Hectáreas: ${extras.superficie_ha}` : null,
-    extras?.derechos_agua ? `Derechos de agua: ${extras.derechos_agua}` : null,
-    extras?.plantacion ? `Plantación: ${extras.plantacion}` : null,
+    extras?.jardin_m2 > 0 ? `Jardín/patio: ${extras.jardin_m2} m²` : null,
+    caracts.length ? `Características: ${caracts.join(', ')}` : null,
+    extras?.precio_idea ? `Precio esperado por vendedor: ${extras.precio_idea}` : null,
   ].filter(Boolean).join('\n')
 
   try {
@@ -92,13 +121,10 @@ Genera 3-5 comparables ficticios pero realistas basados en el mercado real.`
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-6',
-        max_tokens: 1500,
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 2000,
         system: systemPrompt,
-        messages: [{
-          role: 'user',
-          content: `Tasa esta propiedad con los siguientes datos:\n\n${detalles}\n\nProporciona una tasación profesional basada en el mercado actual de ${comuna}.`
-        }],
+        messages: [{ role: 'user', content: `Tasa esta propiedad y entrega el plan regulador:\n\n${detalles}` }],
       }),
     })
 
@@ -106,8 +132,9 @@ Genera 3-5 comparables ficticios pero realistas basados en el mercado real.`
     if (!res.ok) return Response.json({ error: data.error?.message || 'Error Anthropic' }, { status: 500 })
 
     const text = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n')
-    const match = text.replace(/```json|```/g, '').trim().match(/\{[\s\S]*\}/)
-    if (!match) return Response.json({ error: 'Sin JSON en respuesta' }, { status: 500 })
+    const clean = text.replace(/```json|```/g, '').trim()
+    const match = clean.match(/\{[\s\S]*\}/)
+    if (!match) return Response.json({ error: 'Sin JSON en respuesta', raw: text.slice(0, 300) }, { status: 500 })
 
     return Response.json(JSON.parse(match[0]))
   } catch (err) {
