@@ -781,6 +781,23 @@ function ChatVendedor({ onBack }) {
           </>
         )}
 
+        {inputMode === 'multi_comuna' && (
+          <>
+            <div className="options-hint">Selecciona una o más comunas</div>
+            <div className="comunas-grid">
+              {options.map(opt => (
+                <button key={opt.id} className={`comuna-btn${multiSel.includes(opt.id)?' selected':''}`}
+                  onClick={() => setMultiSel(p => p.includes(opt.id) ? p.filter(x=>x!==opt.id) : [...p, opt.id])}>
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+            <button className="opt" style={{background:'var(--gold-dim)',borderColor:'var(--gold)',color:'var(--gold-light)',marginTop:8}} onClick={handleMultiConfirm}>
+              Confirmar →
+            </button>
+          </>
+        )}
+
         {inputMode === 'multi' && (
           <>
             <div className="options-hint">Selecciona todo lo que aplique</div>
@@ -899,12 +916,41 @@ const FLUJOS_COMPRADOR = {
     { id:'dormitorios', msg:'¿Cuántos dormitorios necesitas?', tipo:'options', opts:[
       {id:'1',label:'1 dormitorio',icon:'🛏️'},{id:'2',label:'2 dormitorios',icon:'🛏️🛏️'},
       {id:'3',label:'3 dormitorios',icon:'🏠'},{id:'4+',label:'4 o más',icon:'🏡'}]},
-    { id:'zona', msg:'¿Qué zona de Santiago prefieres?', tipo:'multi', opts:[
-      {id:'oriente',label:'Sector oriente (Las Condes, Vitacura, La Reina)',icon:'🏔️'},
-      {id:'centro',label:'Centro / Providencia / Ñuñoa',icon:'🏙️'},
-      {id:'sur',label:'Sector sur (San Miguel, La Florida, Maipú)',icon:'🌆'},
-      {id:'norte',label:'Sector norte (Huechuraba, Recoleta)',icon:'🌇'},
-      {id:'sin_preferencia',label:'Sin preferencia, me adapto',icon:'🗺️'}]},
+    { id:'zona', msg:'¿En qué comunas te interesa buscar? Puedes seleccionar más de una.', tipo:'multi_comuna', opts:[
+      {id:'cerrillos',label:'Cerrillos',icon:'📍'},
+      {id:'cerro_navia',label:'Cerro Navia',icon:'📍'},
+      {id:'conchalí',label:'Conchalí',icon:'📍'},
+      {id:'el_bosque',label:'El Bosque',icon:'📍'},
+      {id:'estación_central',label:'Estación Central',icon:'📍'},
+      {id:'huechuraba',label:'Huechuraba',icon:'📍'},
+      {id:'independencia',label:'Independencia',icon:'📍'},
+      {id:'la_cisterna',label:'La Cisterna',icon:'📍'},
+      {id:'la_florida',label:'La Florida',icon:'📍'},
+      {id:'la_granja',label:'La Granja',icon:'📍'},
+      {id:'la_pintana',label:'La Pintana',icon:'📍'},
+      {id:'la_reina',label:'La Reina',icon:'📍'},
+      {id:'las_condes',label:'Las Condes',icon:'📍'},
+      {id:'lo_barnechea',label:'Lo Barnechea',icon:'📍'},
+      {id:'lo_espejo',label:'Lo Espejo',icon:'📍'},
+      {id:'lo_prado',label:'Lo Prado',icon:'📍'},
+      {id:'macul',label:'Macul',icon:'📍'},
+      {id:'maipú',label:'Maipú',icon:'📍'},
+      {id:'nunoa',label:'Ñuñoa',icon:'📍'},
+      {id:'penalolén',label:'Peñalolén',icon:'📍'},
+      {id:'providencia',label:'Providencia',icon:'📍'},
+      {id:'pudahuel',label:'Pudahuel',icon:'📍'},
+      {id:'puente_alto',label:'Puente Alto',icon:'📍'},
+      {id:'quilicura',label:'Quilicura',icon:'📍'},
+      {id:'quinta_normal',label:'Quinta Normal',icon:'📍'},
+      {id:'recoleta',label:'Recoleta',icon:'📍'},
+      {id:'renca',label:'Renca',icon:'📍'},
+      {id:'san_bernardo',label:'San Bernardo',icon:'📍'},
+      {id:'san_joaquín',label:'San Joaquín',icon:'📍'},
+      {id:'san_miguel',label:'San Miguel',icon:'📍'},
+      {id:'san_ramón',label:'San Ramón',icon:'📍'},
+      {id:'santiago',label:'Santiago',icon:'📍'},
+      {id:'vitacura',label:'Vitacura',icon:'📍'},
+    ]},
     { id:'uso', msg:'¿Para qué es el departamento?', tipo:'options', opts:[
       {id:'vivir',label:'Para vivir yo / mi familia',icon:'🏠'},{id:'invertir',label:'Para arrendar / inversión',icon:'💰'},
       {id:'ambos',label:'Vivir ahora, arrendar después',icon:'🔄'}]},
@@ -929,12 +975,41 @@ const FLUJOS_COMPRADOR = {
     { id:'dormitorios', msg:'¿Cuántos dormitorios necesitas?', tipo:'options', opts:[
       {id:'3',label:'3 dormitorios',icon:'🏠'},{id:'4',label:'4 dormitorios',icon:'🏡'},
       {id:'5+',label:'5 o más',icon:'🏰'}]},
-    { id:'zona', msg:'¿Qué zona prefieres?', tipo:'multi', opts:[
-      {id:'precordillera',label:'Precordillera (Lo Barnechea, La Dehesa)',icon:'🏔️'},
-      {id:'oriente',label:'Oriente (Las Condes, Vitacura)',icon:'🌟'},
-      {id:'centro_sur',label:'Centro-sur (La Reina, Ñuñoa, Macul)',icon:'🏙️'},
-      {id:'sur',label:'Sur (La Florida, Puente Alto)',icon:'🌆'},
-      {id:'sin_preferencia',label:'Sin preferencia',icon:'🗺️'}]},
+    { id:'zona', msg:'¿En qué comunas te interesa buscar? Puedes seleccionar más de una.', tipo:'multi_comuna', opts:[
+      {id:'cerrillos',label:'Cerrillos',icon:'📍'},
+      {id:'cerro_navia',label:'Cerro Navia',icon:'📍'},
+      {id:'conchalí',label:'Conchalí',icon:'📍'},
+      {id:'el_bosque',label:'El Bosque',icon:'📍'},
+      {id:'estación_central',label:'Estación Central',icon:'📍'},
+      {id:'huechuraba',label:'Huechuraba',icon:'📍'},
+      {id:'independencia',label:'Independencia',icon:'📍'},
+      {id:'la_cisterna',label:'La Cisterna',icon:'📍'},
+      {id:'la_florida',label:'La Florida',icon:'📍'},
+      {id:'la_granja',label:'La Granja',icon:'📍'},
+      {id:'la_pintana',label:'La Pintana',icon:'📍'},
+      {id:'la_reina',label:'La Reina',icon:'📍'},
+      {id:'las_condes',label:'Las Condes',icon:'📍'},
+      {id:'lo_barnechea',label:'Lo Barnechea',icon:'📍'},
+      {id:'lo_espejo',label:'Lo Espejo',icon:'📍'},
+      {id:'lo_prado',label:'Lo Prado',icon:'📍'},
+      {id:'macul',label:'Macul',icon:'📍'},
+      {id:'maipú',label:'Maipú',icon:'📍'},
+      {id:'nunoa',label:'Ñuñoa',icon:'📍'},
+      {id:'penalolén',label:'Peñalolén',icon:'📍'},
+      {id:'providencia',label:'Providencia',icon:'📍'},
+      {id:'pudahuel',label:'Pudahuel',icon:'📍'},
+      {id:'puente_alto',label:'Puente Alto',icon:'📍'},
+      {id:'quilicura',label:'Quilicura',icon:'📍'},
+      {id:'quinta_normal',label:'Quinta Normal',icon:'📍'},
+      {id:'recoleta',label:'Recoleta',icon:'📍'},
+      {id:'renca',label:'Renca',icon:'📍'},
+      {id:'san_bernardo',label:'San Bernardo',icon:'📍'},
+      {id:'san_joaquín',label:'San Joaquín',icon:'📍'},
+      {id:'san_miguel',label:'San Miguel',icon:'📍'},
+      {id:'san_ramón',label:'San Ramón',icon:'📍'},
+      {id:'santiago',label:'Santiago',icon:'📍'},
+      {id:'vitacura',label:'Vitacura',icon:'📍'},
+    ]},
     { id:'caracteristicas', msg:'¿Qué necesita tener la casa?', tipo:'multi', opts:[
       {id:'piscina',label:'Piscina',icon:'🏊'},{id:'jardin_grande',label:'Jardín grande',icon:'🌳'},
       {id:'quincho',label:'Quincho / BBQ',icon:'🔥'},{id:'estacionamiento',label:'Estacionamiento cubierto',icon:'🚗'},
@@ -953,10 +1028,41 @@ const FLUJOS_COMPRADOR = {
     { id:'superficie', msg:'¿Cuántos m² necesitas?', tipo:'options', opts:[
       {id:'hasta_50',label:'Hasta 50 m²',icon:'🏢'},{id:'50_100',label:'50 – 100 m²',icon:'🏢'},
       {id:'100_300',label:'100 – 300 m²',icon:'🏬'},{id:'mas_300',label:'Más de 300 m²',icon:'🏦'}]},
-    { id:'zona', msg:'¿En qué sector necesitas la oficina?', tipo:'multi', opts:[
-      {id:'el_golf',label:'El Golf / Las Condes',icon:'💼'},{id:'providencia',label:'Providencia',icon:'🏙️'},
-      {id:'vitacura',label:'Vitacura / Av. Costanera',icon:'✨'},{id:'santiago_centro',label:'Santiago Centro',icon:'🏛️'},
-      {id:'otros',label:'Otro / flexible',icon:'📍'}]},
+    { id:'zona', msg:'¿En qué comunas te interesa buscar? Puedes seleccionar más de una.', tipo:'multi_comuna', opts:[
+      {id:'cerrillos',label:'Cerrillos',icon:'📍'},
+      {id:'cerro_navia',label:'Cerro Navia',icon:'📍'},
+      {id:'conchalí',label:'Conchalí',icon:'📍'},
+      {id:'el_bosque',label:'El Bosque',icon:'📍'},
+      {id:'estación_central',label:'Estación Central',icon:'📍'},
+      {id:'huechuraba',label:'Huechuraba',icon:'📍'},
+      {id:'independencia',label:'Independencia',icon:'📍'},
+      {id:'la_cisterna',label:'La Cisterna',icon:'📍'},
+      {id:'la_florida',label:'La Florida',icon:'📍'},
+      {id:'la_granja',label:'La Granja',icon:'📍'},
+      {id:'la_pintana',label:'La Pintana',icon:'📍'},
+      {id:'la_reina',label:'La Reina',icon:'📍'},
+      {id:'las_condes',label:'Las Condes',icon:'📍'},
+      {id:'lo_barnechea',label:'Lo Barnechea',icon:'📍'},
+      {id:'lo_espejo',label:'Lo Espejo',icon:'📍'},
+      {id:'lo_prado',label:'Lo Prado',icon:'📍'},
+      {id:'macul',label:'Macul',icon:'📍'},
+      {id:'maipú',label:'Maipú',icon:'📍'},
+      {id:'nunoa',label:'Ñuñoa',icon:'📍'},
+      {id:'penalolén',label:'Peñalolén',icon:'📍'},
+      {id:'providencia',label:'Providencia',icon:'📍'},
+      {id:'pudahuel',label:'Pudahuel',icon:'📍'},
+      {id:'puente_alto',label:'Puente Alto',icon:'📍'},
+      {id:'quilicura',label:'Quilicura',icon:'📍'},
+      {id:'quinta_normal',label:'Quinta Normal',icon:'📍'},
+      {id:'recoleta',label:'Recoleta',icon:'📍'},
+      {id:'renca',label:'Renca',icon:'📍'},
+      {id:'san_bernardo',label:'San Bernardo',icon:'📍'},
+      {id:'san_joaquín',label:'San Joaquín',icon:'📍'},
+      {id:'san_miguel',label:'San Miguel',icon:'📍'},
+      {id:'san_ramón',label:'San Ramón',icon:'📍'},
+      {id:'santiago',label:'Santiago',icon:'📍'},
+      {id:'vitacura',label:'Vitacura',icon:'📍'},
+    ]},
     { id:'caracteristicas', msg:'¿Qué necesita la oficina?', tipo:'multi', opts:[
       {id:'estacionamientos',label:'Estacionamientos',icon:'🚗'},{id:'recepcion',label:'Recepción en edificio',icon:'🤵'},
       {id:'divisiones',label:'Ya con divisiones',icon:'🚪'},{id:'open_space',label:'Open space',icon:'🏞️'},
@@ -975,10 +1081,41 @@ const FLUJOS_COMPRADOR = {
     { id:'uso', msg:'¿Para qué usarás el terreno?', tipo:'options', opts:[
       {id:'casa_propia',label:'Construir mi casa',icon:'🏡'},{id:'condominio',label:'Desarrollar condominio / proyecto',icon:'🏗️'},
       {id:'comercial',label:'Proyecto comercial',icon:'🏪'},{id:'inversion',label:'Inversión / plusvalía',icon:'💰'}]},
-    { id:'zona', msg:'¿Qué zona prefieres?', tipo:'multi', opts:[
-      {id:'precordillera',label:'Precordillera / Lo Barnechea',icon:'🏔️'},{id:'oriente',label:'Sector oriente',icon:'🌟'},
-      {id:'centro',label:'Zona central / Providencia',icon:'🏙️'},{id:'sur_poniente',label:'Sur / poniente',icon:'🌆'},
-      {id:'flexible',label:'Flexible según precio',icon:'🗺️'}]},
+    { id:'zona', msg:'¿En qué comunas te interesa buscar? Puedes seleccionar más de una.', tipo:'multi_comuna', opts:[
+      {id:'cerrillos',label:'Cerrillos',icon:'📍'},
+      {id:'cerro_navia',label:'Cerro Navia',icon:'📍'},
+      {id:'conchalí',label:'Conchalí',icon:'📍'},
+      {id:'el_bosque',label:'El Bosque',icon:'📍'},
+      {id:'estación_central',label:'Estación Central',icon:'📍'},
+      {id:'huechuraba',label:'Huechuraba',icon:'📍'},
+      {id:'independencia',label:'Independencia',icon:'📍'},
+      {id:'la_cisterna',label:'La Cisterna',icon:'📍'},
+      {id:'la_florida',label:'La Florida',icon:'📍'},
+      {id:'la_granja',label:'La Granja',icon:'📍'},
+      {id:'la_pintana',label:'La Pintana',icon:'📍'},
+      {id:'la_reina',label:'La Reina',icon:'📍'},
+      {id:'las_condes',label:'Las Condes',icon:'📍'},
+      {id:'lo_barnechea',label:'Lo Barnechea',icon:'📍'},
+      {id:'lo_espejo',label:'Lo Espejo',icon:'📍'},
+      {id:'lo_prado',label:'Lo Prado',icon:'📍'},
+      {id:'macul',label:'Macul',icon:'📍'},
+      {id:'maipú',label:'Maipú',icon:'📍'},
+      {id:'nunoa',label:'Ñuñoa',icon:'📍'},
+      {id:'penalolén',label:'Peñalolén',icon:'📍'},
+      {id:'providencia',label:'Providencia',icon:'📍'},
+      {id:'pudahuel',label:'Pudahuel',icon:'📍'},
+      {id:'puente_alto',label:'Puente Alto',icon:'📍'},
+      {id:'quilicura',label:'Quilicura',icon:'📍'},
+      {id:'quinta_normal',label:'Quinta Normal',icon:'📍'},
+      {id:'recoleta',label:'Recoleta',icon:'📍'},
+      {id:'renca',label:'Renca',icon:'📍'},
+      {id:'san_bernardo',label:'San Bernardo',icon:'📍'},
+      {id:'san_joaquín',label:'San Joaquín',icon:'📍'},
+      {id:'san_miguel',label:'San Miguel',icon:'📍'},
+      {id:'san_ramón',label:'San Ramón',icon:'📍'},
+      {id:'santiago',label:'Santiago',icon:'📍'},
+      {id:'vitacura',label:'Vitacura',icon:'📍'},
+    ]},
     { id:'urgencia', msg:'¿Cuándo quieres comprar?', tipo:'options', opts:[
       {id:'inmediato',label:'Lo antes posible',icon:'⚡'},{id:'3_6_meses',label:'En 3 a 6 meses',icon:'📅'},
       {id:'sin_prisa',label:'Sin apuro',icon:'🔍'}]},
@@ -993,10 +1130,41 @@ const FLUJOS_COMPRADOR = {
     { id:'superficie', msg:'¿Qué superficie necesitas?', tipo:'options', opts:[
       {id:'hasta_100',label:'Hasta 100 m²',icon:'📐'},{id:'100_500',label:'100 – 500 m²',icon:'📏'},
       {id:'500_2000',label:'500 – 2.000 m²',icon:'🗺️'},{id:'mas_2000',label:'Más de 2.000 m²',icon:'🏞️'}]},
-    { id:'zona', msg:'¿En qué sector?', tipo:'multi', opts:[
-      {id:'santiago_centro',label:'Santiago Centro',icon:'🏛️'},{id:'oriente',label:'Sector oriente',icon:'🌟'},
-      {id:'sur',label:'Sector sur',icon:'🌆'},{id:'industrial',label:'Zona industrial / Pudahuel',icon:'🏭'},
-      {id:'flexible',label:'Flexible',icon:'🗺️'}]},
+    { id:'zona', msg:'¿En qué comunas te interesa buscar? Puedes seleccionar más de una.', tipo:'multi_comuna', opts:[
+      {id:'cerrillos',label:'Cerrillos',icon:'📍'},
+      {id:'cerro_navia',label:'Cerro Navia',icon:'📍'},
+      {id:'conchalí',label:'Conchalí',icon:'📍'},
+      {id:'el_bosque',label:'El Bosque',icon:'📍'},
+      {id:'estación_central',label:'Estación Central',icon:'📍'},
+      {id:'huechuraba',label:'Huechuraba',icon:'📍'},
+      {id:'independencia',label:'Independencia',icon:'📍'},
+      {id:'la_cisterna',label:'La Cisterna',icon:'📍'},
+      {id:'la_florida',label:'La Florida',icon:'📍'},
+      {id:'la_granja',label:'La Granja',icon:'📍'},
+      {id:'la_pintana',label:'La Pintana',icon:'📍'},
+      {id:'la_reina',label:'La Reina',icon:'📍'},
+      {id:'las_condes',label:'Las Condes',icon:'📍'},
+      {id:'lo_barnechea',label:'Lo Barnechea',icon:'📍'},
+      {id:'lo_espejo',label:'Lo Espejo',icon:'📍'},
+      {id:'lo_prado',label:'Lo Prado',icon:'📍'},
+      {id:'macul',label:'Macul',icon:'📍'},
+      {id:'maipú',label:'Maipú',icon:'📍'},
+      {id:'nunoa',label:'Ñuñoa',icon:'📍'},
+      {id:'penalolén',label:'Peñalolén',icon:'📍'},
+      {id:'providencia',label:'Providencia',icon:'📍'},
+      {id:'pudahuel',label:'Pudahuel',icon:'📍'},
+      {id:'puente_alto',label:'Puente Alto',icon:'📍'},
+      {id:'quilicura',label:'Quilicura',icon:'📍'},
+      {id:'quinta_normal',label:'Quinta Normal',icon:'📍'},
+      {id:'recoleta',label:'Recoleta',icon:'📍'},
+      {id:'renca',label:'Renca',icon:'📍'},
+      {id:'san_bernardo',label:'San Bernardo',icon:'📍'},
+      {id:'san_joaquín',label:'San Joaquín',icon:'📍'},
+      {id:'san_miguel',label:'San Miguel',icon:'📍'},
+      {id:'san_ramón',label:'San Ramón',icon:'📍'},
+      {id:'santiago',label:'Santiago',icon:'📍'},
+      {id:'vitacura',label:'Vitacura',icon:'📍'},
+    ]},
     { id:'uso', msg:'¿Para qué es?', tipo:'options', opts:[
       {id:'operar',label:'Operar mi negocio',icon:'💼'},{id:'arrendar',label:'Arrendar / inversión',icon:'💰'},
       {id:'desarrollar',label:'Desarrollar proyecto',icon:'🏗️'}]},
@@ -1026,7 +1194,7 @@ function ChatComprador({ onBack }) {
   })
   const addUser = (text) => setMessages(m => [...m, { role:'user', content: text }])
 
-  const askValentina = async (userMsg, currentData) => {
+  const askIsidora = async (userMsg, currentData) => {
     const newHistory = [...chatHistory, { role:'user', content: userMsg }]
     setChatHistory(newHistory)
     setTyping(true)
@@ -1051,7 +1219,7 @@ function ChatComprador({ onBack }) {
   // Inicio
   useEffect(() => {
     const init = async () => {
-      await addAgent('¡Hola! Soy Valentina, tu asesora inmobiliaria 👋\n\nEstoy aquí para ayudarte a encontrar la propiedad perfecta en Santiago. Cuéntame, ¿qué tipo de propiedad estás buscando?', 800)
+      await addAgent('¡Hola! Soy Isidora, tu asesora inmobiliaria 👋\n\nEstoy aquí para ayudarte a encontrar la propiedad perfecta en Santiago. Cuéntame, ¿qué tipo de propiedad estás buscando?', 800)
       setInputMode('options')
       setOptions(TIPOS)
       setStage('tipo')
@@ -1063,11 +1231,11 @@ function ChatComprador({ onBack }) {
     const tipo = currentData.tipo
     const flujo = FLUJOS_COMPRADOR[tipo] || []
     if (idx >= flujo.length) {
-      // Fin del flujo — pasar a conversación libre con Valentina
+      // Fin del flujo — pasar a conversación libre con Isidora
       setStage('chat_libre')
       setInputMode(null)
       const resumen = buildResumen(currentData)
-      await askValentina(
+      await askIsidora(
         `He completado mi perfil de búsqueda. Aquí está lo que busco: ${resumen}. Por favor dame tu análisis experto: qué comunas me recomiendas, qué puedo esperar con mi presupuesto, y cuáles son las mejores oportunidades del mercado actual para mi perfil.`,
         currentData
       )
@@ -1138,7 +1306,7 @@ function ChatComprador({ onBack }) {
 
     if (stage === 'chat_libre' || stage === 'text_libre') {
       addUser(val)
-      await askValentina(val, data)
+      await askIsidora(val, data)
       setInputMode('text_libre')
     } else if (stage.startsWith('flujo_')) {
       addUser(val)
@@ -1166,7 +1334,7 @@ function ChatComprador({ onBack }) {
         <button className="back-btn" onClick={onBack}>←</button>
         <div className="agent-avatar">🤵</div>
         <div>
-          <div className="agent-name">Valentina · Asesora de Compra</div>
+          <div className="agent-name">Isidora · Asesora de Compra</div>
           <div className="agent-status"><span className="status-dot"/>En línea</div>
         </div>
         <div className="chat-header-logo">IA <em>Prop</em></div>
