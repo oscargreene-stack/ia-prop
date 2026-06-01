@@ -428,13 +428,14 @@ function ChatVendedor({ onBack }) {
   const fetchSII = async (d) => {
     setMessages(m => [...m, { role:'agent', content:{ type:'loading', text:'Buscando tu propiedad en el SII y catastro…' }}])
     try {
-      // La dirección va SIN el nº de unidad — se pasa por separado para no confundir al SII
-      const q = encodeURIComponent(d.direccion || '')
-      const c = encodeURIComponent(d.comuna || '')
-      const u = encodeURIComponent(d.depto || '')
-      const res = await fetch(`/api/sii?direccion=${q}&comuna=${c}&unidad=${u}`)
+      // Llamada directa a BaseAPI desde el cliente (la key solo funciona desde el browser)
+      const BASEAPI_KEY = 'sk_e6c42f75f5b747c8c00bb5730f4b7a0d67cf1594410232fc'
+      const q = `${d.direccion}${d.depto ? ' '+d.depto : ''}, ${d.comuna}`
+      const res = await fetch(
+        `https://api.baseapi.cl/v1/sii/search?q=${encodeURIComponent(q)}&limit=5`,
+        { headers: { Authorization: `Bearer ${BASEAPI_KEY}` } }
+      )
 
-      // Si el servidor falla, continuar sin datos SII
       if (!res.ok) {
         setMessages(m => m.filter(x => !(x.role==='agent' && x.content?.type==='loading')))
         await addAgent('No pude consultar el SII ahora, pero continuamos sin problema.', 400)
@@ -444,7 +445,29 @@ function ChatVendedor({ onBack }) {
         return
       }
 
-      const json = await res.json()
+      const raw = await res.json()
+      const items = raw?.data || raw?.results || raw?.items || []
+
+      // Normalizar al formato interno
+      const normalizar = item => ({
+        direccion:         item.direccion || item.address || q,
+        rol:               item.rol || item.role || null,
+        m2_construido:     parseFloat(item.superficie_construida || item.m2_construido || item.m2_total || 0) || null,
+        m2_util:           parseFloat(item.superficie_util || item.m2_util || item.superficie || 0) || null,
+        m2_terreno:        parseFloat(item.superficie_terreno || item.m2_terreno || 0) || null,
+        destino:           item.destino || null,
+        avaluo_fiscal_uf:  item.avaluo_fiscal || item.avaluo || null,
+        anio_construccion: item.anio_construccion || item.year || null,
+        piso:              item.piso || null,
+        depto:             item.depto || d.depto || null,
+        comuna:            item.comuna || d.comuna,
+      })
+
+      const json = items.length === 0
+        ? { noEncontrado: true, multiples: false, resultados: [] }
+        : items.length === 1
+          ? { noEncontrado: false, multiples: false, resultados: [normalizar(items[0])] }
+          : { noEncontrado: false, multiples: true, resultados: items.map(normalizar) }
       setMessages(m => m.filter(x => !(x.role==='agent' && x.content?.type==='loading')))
 
       // ── Múltiples resultados → mostrar selector ───────────────────────────
