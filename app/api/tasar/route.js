@@ -252,7 +252,50 @@ La recomendacion_precio_venta debe ser directa y honesta: si el mercado está ba
 
     const sanitized = sanitizeJSON(match[0])
     try {
-      return Response.json(JSON.parse(sanitized))
+      const parsed = JSON.parse(sanitized)
+
+    // Calcular potencial_desarrollo en el servidor (no depender del LLM)
+    // Se agrega siempre para casas/terrenos con m2_terreno > 800
+    if (m2Terreno && m2Terreno > 800 && ['casa','terreno','parcela','agricola'].includes(tipo)) {
+      const pr = parsed.plan_regulador
+      // Densidad: usar la del plan regulador si existe, si no usar referencia por comuna
+      let densidadHabHa = null
+      if (pr?.densidad_max) {
+        // Parsear "50 hab/ha" o "100 hab/ha" o numero directo
+        const dm = String(pr.densidad_max).match(/\d+/)
+        if (dm) densidadHabHa = parseInt(dm[0])
+      }
+      if (!densidadHabHa) {
+        // Referencia conservadora por tipo de zona
+        const comunaLower = comuna.toLowerCase()
+        if (['vitacura','las condes','lo barnechea','la reina'].some(c => comunaLower.includes(c))) {
+          densidadHabHa = 60
+        } else {
+          densidadHabHa = 120
+        }
+      }
+      const personasPorHogar = 3.5
+      const unidadesEstimadas = Math.floor((densidadHabHa / 10000) * m2Terreno / personasPorHogar)
+
+      if (unidadesEstimadas >= 2) {
+        parsed.potencial_desarrollo = {
+          aplica: true,
+          m2_terreno: m2Terreno,
+          densidad_max_hab_ha: densidadHabHa,
+          unidades_estimadas: unidadesEstimadas,
+          descripcion: unidadesEstimadas >= 4
+            ? "El terreno de " + m2Terreno.toLocaleString('es-CL') + " m² permite, según la densidad del plan regulador (" + densidadHabHa + " hab/ha), construir aproximadamente " + unidadesEstimadas + " casas en condominio. Esto significa que es posible demoler la construcción actual y desarrollar un proyecto de " + unidadesEstimadas + " viviendas, multiplicando significativamente el valor del terreno. Un comprador desarrollador puede valorar este predio muy por encima del valor como vivienda individual."
+            : "El terreno de " + m2Terreno.toLocaleString('es-CL') + " m² permitiría subdividir y construir hasta " + unidadesEstimadas + " viviendas según la densidad del plan regulador (" + densidadHabHa + " hab/ha). Esto abre la posibilidad de vender el terreno a un desarrollador o construir una segunda vivienda, aumentando el potencial de valorización.",
+          advertencia: "Cálculo referencial basado en la densidad del plan regulador. Los m² mínimos de subdivisión, la factibilidad real del proyecto y las condiciones específicas deben verificarse con un arquitecto y la Dirección de Obras Municipales (DOM) de " + comuna + "."
+        }
+      } else {
+        parsed.potencial_desarrollo = { aplica: false }
+      }
+    } else if (!parsed.potencial_desarrollo) {
+      parsed.potencial_desarrollo = { aplica: false }
+    }
+
+    return Response.json(parsed)
     } catch(parseErr) {
       console.error('JSON parse error:', parseErr.message)
       // Last resort: extract fields individually with regex
