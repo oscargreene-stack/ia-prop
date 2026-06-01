@@ -121,7 +121,7 @@ La recomendacion_precio_venta debe ser directa y honesta: si el mercado está ba
         'anthropic-version': '2023-06-01',
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: 'claude-sonnet-4-5',
         max_tokens: 2000,
         system: systemPrompt,
         messages: [{ role: 'user', content: `Tasa esta propiedad y entrega el plan regulador:\n\n${detalles}` }],
