@@ -171,7 +171,7 @@ const FLUJOS = {
 }
 
 // ─── Ajustes de tasación ──────────────────────────────────────────────────────
-const AJUSTE_REMO = { alta:20, media:14, baja:7, ninguna:0 }
+const AJUSTE_REMO = { alta:15, media:10, baja:5, ninguna:0 } // UF/m² sobre m² útiles
 const AJUSTE_JARDIN_POR_M2 = 0.35 // Factor sobre precio/m² útil — jardín vale ~35% del precio/m² construido
 const AJUSTE_TIEMPO = { reciente:1.0, hace3:0.85, hace5:0.7 }
 const AJUSTES_CARACT = {
@@ -187,8 +187,10 @@ const AJUSTES_CARACT = {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function calcAjustes(data) {
-  const m2 = parseFloat(data.siiData?.m2_construido) || 60
-  const ajRemo = (AJUSTE_REMO[data.remodelacion] || 0) * m2 * (AJUSTE_TIEMPO[data.tiempo_remo] || 1)
+  // Usar m² útiles para remodelación (lo que el dueño remodeló), m² construidos para base
+  const m2Util  = parseFloat(data.siiData?.m2_util || data.siiData?.m2_construido) || 60
+  const m2Total = parseFloat(data.siiData?.m2_construido) || m2Util
+  const ajRemo = (AJUSTE_REMO[data.remodelacion] || 0) * m2Util * (AJUSTE_TIEMPO[data.tiempo_remo] || 1)
   const caract = [
     ...(data.caracteristicas || []),
     data.derechos_agua || '',
@@ -500,7 +502,7 @@ function ChatVendedor({ onBack }) {
         body: JSON.stringify({
           siiData: finalData.siiData,
           form:{ direccion: finalData.direccion, depto:'', comuna: finalData.comuna || '' },
-          answers:{ remodelacion: finalData.remodelacion || 'ninguna', conservacion:'bueno', terraza_m2: parseInt(finalData.terraza_m2)||0, estacionamientos: parseInt(finalData.estacionamientos)||0, bodegas: parseInt(finalData.bodega)||0 },
+          answers:{ remodelacion: finalData.remodelacion || 'ninguna', tiempo_remo: finalData.tiempo_remo || 'reciente', conservacion:'bueno', terraza_m2: parseInt(finalData.terraza_m2)||0, estacionamientos: parseInt(finalData.estacionamientos)||0, bodegas: parseInt(finalData.bodega)||0, m2_util: finalData.siiData?.m2_util || null },
           extras: finalData,
         })
       })
@@ -508,11 +510,12 @@ function ChatVendedor({ onBack }) {
       if (resultado.error) throw new Error(resultado.error)
       setMessages(m => m.filter(x => !(x.role==='agent' && x.content?.type==='loading')))
       const { ajRemo, ajCar, ajJardin } = calcAjustes(finalData)
+      const m2Util = parseFloat(finalData.siiData?.m2_util || finalData.siiData?.m2_construido) || 60
       const valorBase = resultado.valor_uf || 0
       const valorFinal = valorBase + ajRemo + ajCar + ajJardin
       const rangoMin = Math.round(valorFinal * 0.93)
       const rangoMax = Math.round(valorFinal * 1.07)
-      setMessages(m => [...m, { role:'agent', content:{ type:'tasacion', resultado, valorFinal, rangoMin, rangoMax, ajRemo, ajCar, ajJardin, valorBase }}])
+      setMessages(m => [...m, { role:'agent', content:{ type:'tasacion', resultado, valorFinal, rangoMin, rangoMax, ajRemo, ajCar, ajJardin, valorBase, remoInfo:{ tipo: finalData.remodelacion, m2: m2Util, ufM2: AJUSTE_REMO[finalData.remodelacion]||0, tiempo: finalData.tiempo_remo } }}])
       await addAgent(`¡Tasación lista! El valor de mercado estimado es **${fmtUF(valorFinal)}**.\n\nEste valor refleja transacciones reales recientes en la zona, ajustado por las características que me contaste. ¿Tienes alguna pregunta?`, 1200)
       setInputMode('options')
       setOptions([{id:'nueva',label:'Tasar otra propiedad',icon:'🔄'},{id:'detalle',label:'Quiero más detalle',icon:'🔍'}])
@@ -560,7 +563,7 @@ function ChatVendedor({ onBack }) {
           <div className={`conf-badge ${cc}`}>Confianza {resultado.confianza}</div>
           <div className="tasacion-grid">
             <div className="tasacion-item"><div className="tasacion-item-label">Base CBR</div><div className="tasacion-item-val">{fmtUF(valorBase)}</div></div>
-            {ajRemo>0 && <div className="tasacion-item"><div className="tasacion-item-label">Remodelación</div><div className="tasacion-item-val pos">+{fmtUF(ajRemo)}</div></div>}
+            {ajRemo>0 && <div className="tasacion-item"><div className="tasacion-item-label">Remodelación{content.remoInfo ? ` (${content.remoInfo.ufM2} UF/m² × ${content.remoInfo.m2} m²)` : ''}</div><div className="tasacion-item-val pos">+{fmtUF(ajRemo)}</div></div>}
             {ajCar>0 && <div className="tasacion-item"><div className="tasacion-item-label">Características</div><div className="tasacion-item-val pos">+{fmtUF(ajCar)}</div></div>}
             {ajJardin>0 && <div className="tasacion-item"><div className="tasacion-item-label">Jardín / Patio</div><div className="tasacion-item-val pos">+{fmtUF(ajJardin)}</div></div>}
             {resultado.precio_m2 && <div className="tasacion-item"><div className="tasacion-item-label">Precio/m²</div><div className="tasacion-item-val">{resultado.precio_m2} UF/m²</div></div>}
