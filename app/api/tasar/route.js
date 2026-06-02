@@ -109,7 +109,7 @@ Cuando el terreno es grande, SIEMPRE incluir en el JSON el campo "potencial_desa
 - SIEMPRE aclarar que "estos datos son referenciales y deben ser verificados con un arquitecto y la DOM de la municipalidad"
 - Si densidad_max no está disponible, usar 100 hab/ha como referencia conservadora para Las Condes/Vitacura/Lo Barnechea y 150 hab/ha para otras comunas RM
 
-Ejemplo de cálculo: terreno 3.982m², densidad 50 hab/ha → (50/10000)*3982/3.5 = ~5.7 unidades → "el terreno permitiría construir aproximadamente 5-6 casas en condominio"
+Ejemplo de cálculo: terreno 3.982m², densidad 50 hab/ha → (50/10000)*3982/4 = ~5 unidades → "el terreno permitiría construir aproximadamente 5 casas en condominio"
 
 RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA (sin saltos de línea dentro de strings), sin texto adicional, sin backticks. Todos los strings deben estar en una sola línea. NO uses \n dentro de valores de strings:
 {
@@ -135,6 +135,7 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA (sin saltos de línea dentro d
       "direccion": string,
       "tipo": string,
       "m2": number,
+      "m2_terreno": number | null,
       "fecha": string,
       "precio_uf": number,
       "uf_m2": number,
@@ -160,7 +161,7 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA (sin saltos de línea dentro d
 }
 
 Para plan_regulador: usa tu conocimiento real de la normativa comunal vigente. Si no tienes certeza de la zona exacta, indica la zona más probable y marca confianza "Media".
-Para comparables: genera 3-5 transacciones representativas del mercado real reciente (últimos 12 meses), realistas en precio y ubicación.
+Para comparables: genera 3-5 transacciones REALES representativas del mercado 2024-2025. Usa datos reales de ventas del CBR (Conservador de Bienes Raíces). Para CASAS y TERRENOS incluye SIEMPRE m2_terreno (superficie del predio, no solo construcción) — esto es fundamental para comparar propiedades de forma correcta. Para departamentos, m2_terreno puede ser null. Las fechas deben ser de 2024 o 2025 — hay abundantes transacciones en ambos años.
 Para desglose: desglosa cada componente del valor (base m², ajuste remodelación, estacionamiento, bodega, terraza, etc.) con su cálculo explícito.
 La recomendacion_precio_venta debe ser directa y honesta: si el mercado está bajando, dilo; si conviene esperar, explícalo.`
 
