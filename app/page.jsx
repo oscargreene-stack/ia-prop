@@ -530,12 +530,13 @@ function ChatVendedor({ onBack }) {
         return
       }
 
-      // ── No encontrado → continuar sin SII ──────────────────────────────
+      // ── No encontrado → cont      // ── No encontrado → pedir m² al usuario ─────────────────────────────────
       if (json.noEncontrado || !json.resultados?.length) {
         const newData = { ...d, siiData:{ direccion:`${d.direccion}${d.depto ? ' '+d.depto : ''}, ${d.comuna}` } }
         setData(newData)
-        await addAgent(`Perfecto, registré la propiedad en **${d.comuna}**. Continuamos con las preguntas:`, 400)
-        await nextStep(newData, 0)
+        await addAgent(`No encontré esta propiedad en el catastro del SII con esa dirección. Para una tasación precisa necesito los metros cuadrados reales.\n\n¿Cuántos **m² construidos** tiene la propiedad? (ej: 180)`, 400)
+        setInputMode('text')
+        setStage('ingresar_m2_construido')
         return
       }
 
