@@ -615,6 +615,9 @@ function ChatVendedor({ onBack }) {
           <div className="tasacion-valor">{fmtUF(valorFinal)}</div>
           <div className="tasacion-rango">Rango estimado: {fmtUF(rangoMin)} — {fmtUF(rangoMax)}</div>
           <div className={`conf-badge ${cc}`}>Confianza {resultado.confianza}</div>
+          {content.siiData?.rol && (
+            <div className="tasacion-rol">ROL SII: {content.siiData.rol}</div>
+          )}
 
           {/* Desglose detallado */}
           {resultado.desglose?.length > 0 ? (
@@ -705,7 +708,7 @@ function ChatVendedor({ onBack }) {
               {resultado.comparables.slice(0,4).map((c,i) => (
                 <div key={i} className="comp-mini-item">
                   <div>
-                    <div className="comp-mini-addr">{c.direccion} · {c.m2} m²</div>
+                    <div className="comp-mini-addr">{c.direccion} · {c.m2} m² construidos{c.m2_terreno ? ` · ${c.m2_terreno} m² terreno` : ''}</div>
                     <div className="comp-mini-meta">{c.tipo} · {c.fecha}{c.similitud ? ` · ${c.similitud}` : ''}</div>
                   </div>
                   <div><div className="comp-mini-uf">{fmtUF(c.precio_uf)}</div><div className="comp-mini-m2">{c.uf_m2} UF/m²</div></div>
