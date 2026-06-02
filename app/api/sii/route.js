@@ -71,14 +71,30 @@ export async function GET(request) {
       if (resRol.ok) {
         const dataRol = await resRol.json()
         console.log('[SII ROL] Anthropic response status:', resRol.status, 'content blocks:', dataRol.content?.length)
-        const textRol = (dataRol.content || [])
-          .filter(b => b.type === 'mcp_tool_result' || b.type === 'text')
-          .map(b => b.type === 'mcp_tool_result' ? (b.content?.[0]?.text || '') : (b.text || ''))
-          .join('\n')
-        const arrRol = textRol.match(/\[[\s\S]*\]/)
-        if (arrRol) {
-          const rows = JSON.parse(arrRol[0])
-          if (rows.length > 0) {
+        // Robust MCP result parser — handles all DataInmobiliaria response formats
+        let rows = []
+        let rawDebug = ''
+        for (const block of (dataRol.content || [])) {
+          if (rows.length > 0) break
+          const texts = []
+          if (block.type === 'mcp_tool_result') {
+            for (const item of (block.content || [])) {
+              if (item?.text) texts.push(item.text)
+              if (item?.json) { rows = Array.isArray(item.json) ? item.json : (item.json?.rows || item.json?.data || []); break }
+            }
+          } else if (block.type === 'text' && block.text) {
+            texts.push(block.text)
+          }
+          for (const txt of texts) {
+            if (!rawDebug) rawDebug = txt.slice(0, 300)
+            // Try direct JSON parse first
+            try { const p = JSON.parse(txt); rows = Array.isArray(p) ? p : (p?.rows || p?.data || []); if (rows.length) break } catch(e) {}
+            // Try extracting JSON array
+            const m = txt.match(/\[[\s\S]*\]/)
+            if (m) { try { rows = JSON.parse(m[0]); if (rows.length) break } catch(e) {} }
+          }
+        }
+        if (rows.length > 0) {
             const UF_CLP = 40408
             const resultados = rows.map(row => ({
               direccion:         row.direccion_sii || direccion,
@@ -107,7 +123,7 @@ export async function GET(request) {
       console.error('ROL lookup error:', e.message)
       return Response.json({ noEncontrado: true, multiples: false, resultados: [], _debug: { rol: `${codMz}-${codPr}`, error: e.message, hasAnthropicKey: !!ANTHROPIC_KEY, hasMcpToken: !!DATAINM_TOKEN } })
     }
-    return Response.json({ noEncontrado: true, multiples: false, resultados: [], _debug: { rol: `${codMz}-${codPr}`, reason: 'empty_rows', rawText: _debugTextRol, hasAnthropicKey: !!ANTHROPIC_KEY, hasMcpToken: !!DATAINM_TOKEN } })
+    return Response.json({ noEncontrado: true, multiples: false, resultados: [], _debug: { rol: `${codMz}-${codPr}`, reason: 'empty_rows', rawText: rawDebug, hasAnthropicKey: !!ANTHROPIC_KEY, hasMcpToken: !!DATAINM_TOKEN } })
   }
 
   // Parsear calle y número de la dirección
