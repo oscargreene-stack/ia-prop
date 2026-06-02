@@ -84,7 +84,7 @@ async function mcpQuery(sql) {
       'anthropic-beta': 'mcp-client-2025-04-04',
     },
     body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
+      model: 'claude-sonnet-4-5',
       max_tokens: 2000,
       system: 'Run the SQL using bq_run_query and return ONLY the raw JSON array of rows. No markdown, no explanation.',
       messages: [{ role: 'user', content: `Run this SQL and return only the JSON array of results:\n${sql}` }],
