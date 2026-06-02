@@ -14,14 +14,14 @@ export async function POST(request) {
   const tipo   = extras?.tipo || 'propiedad'
   const rol    = siiData?.rol || null
   const anio   = siiData?.anio_construccion || null
-  const avaluo = siiData?.avaluo_fiscal_uf || null
+  const avaluo = siiData?.avaluo_total_clp ? Math.round(siiData.avaluo_total_clp / 38000) : null  // convertido de CLP
   const caracts = (extras?.caracteristicas || []).filter(c => c !== 'ninguna')
 
   // Validar y enriquecer datos SII con DataInmobiliaria cuando hay ROL
   // BaseAPI a veces devuelve m2_terreno incorrectos — DataInmobiliaria tiene el dato real del SII
   let m2Terreno = parseFloat(siiData?.m2_terreno) || null
   let m2Construido = parseFloat(siiData?.m2_construido) || null
-  let m2Util = parseFloat(siiData?.m2_util) || null
+  let m2Util = null  // campo eliminado en nueva API, usar m2Construido
 
   if (rol) {
     try {
@@ -169,7 +169,6 @@ La recomendacion_precio_venta debe ser directa y honesta: si el mercado está ba
     `Dirección: ${dir}`,
     `Comuna: ${comuna}`,
     rol ? `ROL SII: ${rol}` : null,
-    m2Util ? `M² útiles: ${m2Util}` : null,
     m2Construido ? `M² construidos CONFIRMADOS: ${m2Construido} m² (dato verificado, NO modificar)` : null,
     m2Terreno ? `M² terreno CONFIRMADO: ${m2Terreno} m² (dato verificado, NO modificar)` : null,
     anio ? `Año construcción: ${anio}` : null,
