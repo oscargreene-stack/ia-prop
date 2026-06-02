@@ -107,7 +107,7 @@ export async function GET(request) {
       console.error('ROL lookup error:', e.message)
       return Response.json({ noEncontrado: true, multiples: false, resultados: [], _debug: { rol: `${codMz}-${codPr}`, error: e.message, hasAnthropicKey: !!ANTHROPIC_KEY, hasMcpToken: !!DATAINM_TOKEN } })
     }
-    return Response.json({ noEncontrado: true, multiples: false, resultados: [], _debug: { rol: `${codMz}-${codPr}`, reason: 'empty_rows', hasAnthropicKey: !!ANTHROPIC_KEY, hasMcpToken: !!DATAINM_TOKEN } })
+    return Response.json({ noEncontrado: true, multiples: false, resultados: [], _debug: { rol: `${codMz}-${codPr}`, reason: 'empty_rows', rawText: _debugTextRol, hasAnthropicKey: !!ANTHROPIC_KEY, hasMcpToken: !!DATAINM_TOKEN } })
   }
 
   // Parsear calle y número de la dirección
