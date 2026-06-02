@@ -51,6 +51,7 @@ export async function GET(request) {
     const codPr = parseInt(rolMatch[2], 10)
     const comunaNormRol = normalizarComuna(comuna)
     try {
+      console.log('[SII ROL] Calling Anthropic MCP for ROL:', codMz, codPr, 'comuna:', comunaNormRol)
       const resRol = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -69,6 +70,7 @@ export async function GET(request) {
       })
       if (resRol.ok) {
         const dataRol = await resRol.json()
+        console.log('[SII ROL] Anthropic response status:', resRol.status, 'content blocks:', dataRol.content?.length)
         const textRol = (dataRol.content || [])
           .filter(b => b.type === 'mcp_tool_result' || b.type === 'text')
           .map(b => b.type === 'mcp_tool_result' ? (b.content?.[0]?.text || '') : (b.text || ''))
@@ -101,8 +103,11 @@ export async function GET(request) {
           }
         }
       }
-    } catch(e) { console.error('ROL lookup error:', e.message) }
-    return Response.json({ noEncontrado: true, multiples: false, resultados: [], _debug: { rol: `${codMz}-${codPr}`, hasAnthropicKey: !!ANTHROPIC_KEY, hasMcpToken: !!DATAINM_TOKEN } })
+    } catch(e) {
+      console.error('ROL lookup error:', e.message)
+      return Response.json({ noEncontrado: true, multiples: false, resultados: [], _debug: { rol: `${codMz}-${codPr}`, error: e.message, hasAnthropicKey: !!ANTHROPIC_KEY, hasMcpToken: !!DATAINM_TOKEN } })
+    }
+    return Response.json({ noEncontrado: true, multiples: false, resultados: [], _debug: { rol: `${codMz}-${codPr}`, reason: 'empty_rows', hasAnthropicKey: !!ANTHROPIC_KEY, hasMcpToken: !!DATAINM_TOKEN } })
   }
 
   // Parsear calle y número de la dirección
