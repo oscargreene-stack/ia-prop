@@ -44,6 +44,67 @@ export async function GET(request) {
     return Response.json({ error: 'Faltan parametros' }, { status: 400 })
   }
 
+  // ── Detección de ROL: formato "NNNN-NN" o "NNNN-NNN" o "NNNNN-NN" ────────
+  const rolMatch = direccion.match(/^(\d+)-(\d+)$/)
+  if (rolMatch) {
+    const codMz = parseInt(rolMatch[1], 10)
+    const codPr = parseInt(rolMatch[2], 10)
+    const comunaNormRol = normalizarComuna(comuna)
+    try {
+      const resRol = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': ANTHROPIC_KEY,
+          'anthropic-version': '2023-06-01',
+          'anthropic-beta': 'mcp-client-2025-04-04',
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 1000,
+          system: 'Run the SQL using bq_run_query and return ONLY the raw JSON array of rows. No markdown.',
+          messages: [{ role: 'user', content: `Run this SQL and return only the JSON array:\nSELECT c.cod_com, c.cod_mz, c.cod_pr, c.direccion_sii, c.cod_destino, cd.descripcion_destino AS destino, c.superficie_total_terreno AS m2_terreno, c.superficie_construccion AS m2_construido, c.avaluo_fiscal_clp, c.ano_construccion, ccr.comuna AS comuna_nombre, c.latitud, c.longitud FROM datainmobiliaria.consolidado c JOIN datainmobiliaria.codigo_comuna_region ccr ON c.cod_com = ccr.cod_com JOIN datainmobiliaria.codigo_destino cd ON c.cod_destino = cd.cod_destino WHERE ccr.comuna = '${comunaNormRol}' AND c.cod_mz = ${codMz} AND c.cod_pr = ${codPr} LIMIT 5` }],
+          mcp_servers: [{ type: 'url', url: MCP_URL, name: 'datainmobiliaria', ...(DATAINM_TOKEN ? { authorization_token: DATAINM_TOKEN } : {}) }],
+        }),
+      })
+      if (resRol.ok) {
+        const dataRol = await resRol.json()
+        const textRol = (dataRol.content || [])
+          .filter(b => b.type === 'mcp_tool_result' || b.type === 'text')
+          .map(b => b.type === 'mcp_tool_result' ? (b.content?.[0]?.text || '') : (b.text || ''))
+          .join('\n')
+        const arrRol = textRol.match(/\[[\s\S]*\]/)
+        if (arrRol) {
+          const rows = JSON.parse(arrRol[0])
+          if (rows.length > 0) {
+            const UF_CLP = 40408
+            const resultados = rows.map(row => ({
+              direccion:         row.direccion_sii || direccion,
+              rol:               `${row.cod_com}-${row.cod_mz}-${row.cod_pr}`,
+              manzana:           row.cod_mz,
+              predio:            row.cod_pr,
+              cod_comuna:        row.cod_com,
+              comuna:            row.comuna_nombre || comuna,
+              destino:           row.destino || null,
+              m2_terreno:        row.m2_terreno    ? parseFloat(row.m2_terreno)    : null,
+              m2_construido:     row.m2_construido ? parseFloat(row.m2_construido) : null,
+              avaluo_total_clp:  row.avaluo_fiscal_clp ? parseInt(row.avaluo_fiscal_clp) : null,
+              avaluo_fiscal_uf:  row.avaluo_fiscal_clp ? Math.round(parseInt(row.avaluo_fiscal_clp) / UF_CLP) : null,
+              anio_construccion: row.ano_construccion || null,
+              latitud:           row.latitud  || null,
+              longitud:          row.longitud || null,
+              depto:             unidad || null,
+              link_datainmobiliaria: `https://datainmobiliaria.cl/reports/detalle_propiedad?cod_com=${row.cod_com}&cod_mz=${row.cod_mz}&cod_pr=${row.cod_pr}`,
+            }))
+            if (resultados.length === 1) return Response.json({ multiples: false, resultados, noEncontrado: false })
+            return Response.json({ multiples: true, resultados, noEncontrado: false })
+          }
+        }
+      }
+    } catch(e) { console.error('ROL lookup error:', e.message) }
+    return Response.json({ noEncontrado: true, multiples: false, resultados: [] })
+  }
+
   // Parsear calle y número de la dirección
   const matchDir = direccion.match(/^(.+?)\s+(\d+)(\w*)\s*$/)
   const calleRaw = matchDir ? matchDir[1].trim() : direccion
