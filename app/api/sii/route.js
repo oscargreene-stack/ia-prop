@@ -181,7 +181,14 @@ export async function GET(request) {
     items = items.filter(i => i && (i.rol || i.direccion || i.m2_construido))
 
     if (!items.length) {
-      return Response.json({ noEncontrado: true, multiples: false, resultados: [], _debug: { calle, numero, codCom, rawKeys: Object.keys(data), dataType: Array.isArray(data.data) ? 'array:'+data.data.length : typeof data.data } })
+      const dd = data?.data
+      return Response.json({ noEncontrado: true, multiples: false, resultados: [], _debug: {
+        calle, numero, codCom,
+        rawKeys: Object.keys(data),
+        dataType: Array.isArray(dd) ? 'array:'+dd.length : typeof dd,
+        dataKeys: dd && typeof dd === 'object' ? Object.keys(dd).slice(0,10) : null,
+        dataSlice: JSON.stringify(dd).slice(0, 300)
+      }})
     }
 
     if (unidad && items.length > 1) {
