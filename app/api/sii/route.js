@@ -125,9 +125,9 @@ export async function GET(request) {
         return Response.json({ multiples: resultados.length > 1, resultados, noEncontrado: false })
       }
     } catch(e) {
-      return Response.json({ noEncontrado: true, multiples: false, resultados: [], error: e.message })
+      return Response.json({ noEncontrado: true, multiples: false, resultados: [], error: e.message, tokenDebug })
     }
-    return Response.json({ noEncontrado: true, multiples: false, resultados: [] })
+    return Response.json({ noEncontrado: true, multiples: false, resultados: [], tokenDebug })
   }
 
   // ── Dirección ─────────────────────────────────────────────────────────────
