@@ -147,7 +147,12 @@ export async function GET(request) {
   const numero   = matchDir ? matchDir[2] : ''
 
   try {
-    const predios = await baseapiSearch(calle, numero, codCom, unidad)
+    let predios = await baseapiSearch(calle, numero, codCom, unidad)
+
+    // Si no encontró con número exacto, buscar solo por calle (sin número)
+    if (!predios.length && numero) {
+      predios = await baseapiSearch(calle, '', codCom, unidad)
+    }
 
     if (!predios.length) {
       return Response.json({ noEncontrado: true, multiples: false, resultados: [] })
