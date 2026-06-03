@@ -324,7 +324,24 @@ function ChatVendedor({ onBack }) {
       setStage('direccion')
 
     } else if (stage === 'elegir_unidad') {
-      const sii = opt._sii || data._candidatos?.[parseInt(opt.id)]
+      let sii = opt._sii || data._candidatos?.[parseInt(opt.id)]
+
+      // Si el predio no tiene m², hacer llamada de detalle por ROL
+      if (sii && (!sii.m2_construido && !sii.m2_terreno) && sii.manzana && sii.predio && sii.cod_comuna) {
+        const rolStr = `${sii.manzana}-${sii.predio}`
+        const comunaStr = sii.comuna || data.comuna || ''
+        try {
+          const detRes = await fetch(`/api/sii?direccion=${encodeURIComponent(rolStr)}&comuna=${encodeURIComponent(comunaStr)}`)
+          if (detRes.ok) {
+            const detJson = await detRes.json()
+            const detalle = detJson.resultados?.[0]
+            if (detalle && (detalle.m2_construido || detalle.m2_terreno)) {
+              sii = { ...sii, ...detalle }
+            }
+          }
+        } catch(e) { console.error('detalle fetch', e) }
+      }
+
       const newData = { ...data, siiData: sii }
       setData(newData)
       setMessages(m => [...m, { role:'agent', content:{ type:'sii', data:sii }}])
