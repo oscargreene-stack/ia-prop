@@ -143,13 +143,14 @@ export async function GET(request) {
 
   // ── Búsqueda por dirección ─────────────────────────────────────────────────
   const matchDir = direccion.match(/^(.+?)\s+(\d+\w*)\s*$/)
-  const calle    = matchDir ? matchDir[1].trim() : direccion
+  const calleRaw = matchDir ? matchDir[1].trim() : direccion
+  const calle    = norm(calleRaw)  // BaseAPI espera mayúsculas sin tildes
   const numero   = matchDir ? matchDir[2] : ''
 
   try {
     let predios = await baseapiSearch(calle, numero, codCom, unidad)
 
-    // Si no encontró con número exacto, buscar solo por calle (sin número)
+    // Si no encontró con número exacto, buscar por calle sola (número puede diferir del catastro)
     if (!predios.length && numero) {
       predios = await baseapiSearch(calle, '', codCom, unidad)
     }
