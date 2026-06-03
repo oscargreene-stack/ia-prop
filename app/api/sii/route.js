@@ -1,14 +1,11 @@
-// app/api/sii/route.js  v7
-// Estrategia:
-//   1. ROL (NNNN-NN) + comuna → DataInmobiliaria REST API /propiedades/detalle
-//   2. Dirección + comuna    → BaseAPI /sii/avaluo/buscar (server-side)
-// Ambas llamadas son server-side (Route Handler Next.js), la key nunca llega al browser.
+// app/api/sii/route.js  v8  — FINAL
+// BaseAPI (server-side): { success, data: { total, predios: [...] } }
+// Predio: { rol, manzana, predio, direccion, destino, superficie: { terreno, construida }, avaluo: { total }, periodo, ubicacion: { latitud, longitud } }
 
 const BASEAPI_KEY  = process.env.BASEAPI_KEY
-const DATAINM_KEY  = process.env.DATAINMOBILIARIA_TOKEN   // token REST API de datainmobiliaria
+const DATAINM_KEY  = process.env.DATAINMOBILIARIA_TOKEN
 const UF_CLP       = 40408
 
-// Mapa de communes de la RM: nombre normalizado → cod_com SII
 const COD_COM = {
   'CERRILLOS':15101,'CERRO NAVIA':15102,'CONCHALI':15103,'EL BOSQUE':15104,
   'ESTACION CENTRAL':15105,'HUECHURABA':15106,'INDEPENDENCIA':15107,'LAS CONDES':15108,
@@ -28,7 +25,6 @@ const COD_COM = {
 function norm(s) {
   return (s || '').toUpperCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/\u00D1/g,'N').replace(/\u00F1/g,'N')  // Ñ/ñ → N
     .trim()
 }
 
@@ -36,84 +32,58 @@ function getCodCom(comunaNombre) {
   return COD_COM[norm(comunaNombre)] || null
 }
 
-function buildResultado(item, comunaInput, unidad) {
-  const m2T = item.m2_terreno    ? parseFloat(item.m2_terreno)    : null
-  const m2C = item.m2_construido ? parseFloat(item.m2_construido) : null
-  const av  = item.avaluo_total_clp ? parseInt(item.avaluo_total_clp) : null
-  const cCom = item.cod_com || null
-  const cMz  = item.cod_mz  || null
-  const cPr  = item.cod_pr  || null
+// Convierte un predio de BaseAPI al formato interno
+function prediToResultado(p, comunaInput, unidad) {
+  const sup  = p.superficie || {}
+  const av   = p.avaluo     || {}
+  const ubi  = p.ubicacion  || {}
+  const com  = p.comuna     || {}
+  const codCom = com.codigo || getCodCom(comunaInput)
+  const codMz  = p.manzana
+  const codPr  = p.predio
+  const m2C = sup.construida ? parseFloat(sup.construida) : null
+  const m2T = sup.terreno    ? parseFloat(sup.terreno)    : null
+  const avCLP = av.total && av.total > 0 ? parseInt(av.total) : null
   return {
-    direccion:         item.direccion || '',
-    rol:               item.rol || (cCom && cMz && cPr ? `${cCom}-${cMz}-${cPr}` : null),
-    cod_comuna:        cCom,
-    manzana:           cMz,
-    predio:            cPr,
-    comuna:            item.comuna || comunaInput,
-    destino:           item.destino || null,
+    direccion:         p.direccion || '',
+    rol:               p.rol || (codCom && codMz && codPr ? `${codCom}-${codMz}-${codPr}` : null),
+    cod_comuna:        codCom,
+    manzana:           codMz || null,
+    predio:            codPr || null,
+    comuna:            com.nombre || comunaInput,
+    destino:           p.destino || null,
     m2_terreno:        m2T,
     m2_construido:     m2C,
-    avaluo_total_clp:  av,
-    avaluo_fiscal_uf:  av ? Math.round(av / UF_CLP) : null,
-    anio_construccion: item.ano_construccion || null,
-    latitud:           item.latitud  || null,
-    longitud:          item.longitud || null,
-    depto:             unidad || item.depto || null,
-    link_datainmobiliaria: cCom && cMz && cPr
-      ? `https://datainmobiliaria.cl/reports/detalle_propiedad?cod_com=${cCom}&cod_mz=${cMz}&cod_pr=${cPr}`
+    avaluo_total_clp:  avCLP,
+    avaluo_fiscal_uf:  avCLP ? Math.round(avCLP / UF_CLP) : null,
+    anio_construccion: p.ano_construccion || null,
+    latitud:           ubi.latitud  || null,
+    longitud:          ubi.longitud || null,
+    depto:             unidad || null,
+    link_datainmobiliaria: codCom && codMz && codPr
+      ? `https://datainmobiliaria.cl/reports/detalle_propiedad?cod_com=${codCom}&cod_mz=${codMz}&cod_pr=${codPr}`
       : null,
   }
 }
 
-// ── DataInmobiliaria REST: detalle por ROL ────────────────────────────────────
-async function datainmDetalle(codCom, codMz, codPr) {
-  const url = `https://datainmobiliaria.cl/api/v1/propiedades/detalle?cod_com=${codCom}&cod_mz=${codMz}&cod_pr=${codPr}`
-  const res = await fetch(url, {
-    headers: {
-      'X-API-Key': DATAINM_KEY,
-      'Accept':    'application/json',
-    },
-  })
-  if (!res.ok) {
-    const txt = await res.text()
-    throw new Error(`DataInmobiliaria ${res.status}: ${txt.slice(0, 200)}`)
-  }
-  const data = await res.json()
-  // Normalizar respuesta al formato interno
-  const cat = data.catastro || data
-  return {
-    direccion:         cat.direccion_sii || cat.direccion || '',
-    rol:               `${codCom}-${codMz}-${codPr}`,
-    cod_com:           codCom,
-    cod_mz:            codMz,
-    cod_pr:            codPr,
-    comuna:            cat.comuna || '',
-    destino:           cat.destino || cat.cod_destino || null,
-    m2_terreno:        cat.superficie_total_terreno || cat.m2_terreno || null,
-    m2_construido:     cat.superficie_construccion  || cat.m2_construido || null,
-    avaluo_total_clp:  cat.avaluo_fiscal_clp || null,
-    ano_construccion:  cat.ano_construccion || null,
-    latitud:           cat.latitud  || null,
-    longitud:          cat.longitud || null,
-  }
-}
-
 // ── BaseAPI: buscar por dirección ─────────────────────────────────────────────
-async function baseapiDireccion(calle, numero, codCom, unidad) {
-  const params = { calle, numero: numero || '', comuna: codCom }
-  if (unidad) params.depto = unidad
+async function baseapiSearch(calle, numero, codCom, unidad) {
+  const params = { calle, comuna: codCom }
+  if (numero)  params.numero = numero
+  if (unidad)  params.depto  = unidad
   const qs  = new URLSearchParams(
-    Object.fromEntries(Object.entries(params).filter(([,v]) => v !== '' && v != null))
+    Object.fromEntries(Object.entries(params).filter(([,v]) => v != null && v !== ''))
   ).toString()
-  const url = `https://api.baseapi.cl/api/v1/sii/avaluo/buscar?${qs}`
-  const res = await fetch(url, {
+  const res = await fetch(`https://api.baseapi.cl/api/v1/sii/avaluo/buscar?${qs}`, {
     headers: { 'X-API-Key': BASEAPI_KEY, 'Accept': 'application/json' },
   })
   if (!res.ok) {
     const txt = await res.text()
     throw new Error(`BaseAPI ${res.status}: ${txt.slice(0, 300)}`)
   }
-  return res.json()
+  const json = await res.json()
+  // BaseAPI: { success: true, data: { total: N, predios: [...] } }
+  return json?.data?.predios || []
 }
 
 export async function GET(request) {
@@ -125,79 +95,78 @@ export async function GET(request) {
   if (!direccion || !comuna) {
     return Response.json({ error: 'Faltan parámetros' }, { status: 400 })
   }
+  if (!BASEAPI_KEY) {
+    return Response.json({ noEncontrado: true, multiples: false, resultados: [], error: 'BASEAPI_KEY no configurada' })
+  }
 
   const codCom = getCodCom(comuna)
+  if (!codCom) {
+    return Response.json({ noEncontrado: true, multiples: false, resultados: [], error: `Comuna no reconocida: ${comuna}` })
+  }
 
-  // ── 1. ROL directo: "NNNN-NN" ────────────────────────────────────────────
+  // ── ROL directo: "NNNN-NN" ────────────────────────────────────────────────
   const rolMatch = direccion.match(/^(\d+)-(\d+)$/)
   if (rolMatch) {
-    if (!codCom) {
-      return Response.json({ noEncontrado: true, multiples: false, resultados: [],
-        error: `No se encontró cod_com para: ${comuna}` })
-    }
-    if (!DATAINM_KEY) {
-      return Response.json({ noEncontrado: true, multiples: false, resultados: [],
-        error: 'DATAINMOBILIARIA_TOKEN no configurado' })
-    }
     const codMz = parseInt(rolMatch[1], 10)
     const codPr = parseInt(rolMatch[2], 10)
     try {
-      const item = await datainmDetalle(codCom, codMz, codPr)
-      return Response.json({ multiples: false, resultados: [buildResultado(item, comuna, unidad)], noEncontrado: false })
+      // Buscar por rol: usar BaseAPI con manzana+predio directamente
+      const predios = await baseapiSearch('', '', codCom, unidad)
+      // Si baseapi no soporta búsqueda por ROL, devolvemos el ROL con datos mínimos
+      const match = predios.find(p => p.manzana === codMz && p.predio === codPr)
+      if (match) {
+        return Response.json({ multiples: false, resultados: [prediToResultado(match, comuna, unidad)], noEncontrado: false })
+      }
+      // Fallback: devolver ROL sin datos de superficie (el usuario los confirmará)
+      return Response.json({
+        multiples: false,
+        noEncontrado: false,
+        resultados: [{
+          direccion: '', rol: `${codCom}-${codMz}-${codPr}`,
+          cod_comuna: codCom, manzana: codMz, predio: codPr,
+          comuna, destino: null, m2_terreno: null, m2_construido: null,
+          avaluo_total_clp: null, avaluo_fiscal_uf: null, anio_construccion: null,
+          latitud: null, longitud: null, depto: unidad || null,
+          link_datainmobiliaria: `https://datainmobiliaria.cl/reports/detalle_propiedad?cod_com=${codCom}&cod_mz=${codMz}&cod_pr=${codPr}`,
+        }]
+      })
     } catch(e) {
       console.error('[SII ROL]', e.message)
       return Response.json({ noEncontrado: true, multiples: false, resultados: [], error: e.message })
     }
   }
 
-  // ── 2. Búsqueda por dirección via BaseAPI ─────────────────────────────────
-  if (!BASEAPI_KEY) {
-    return Response.json({ noEncontrado: true, multiples: false, resultados: [],
-      error: 'BASEAPI_KEY no configurada' })
-  }
-  if (!codCom) {
-    return Response.json({ noEncontrado: true, multiples: false, resultados: [],
-      error: `Comuna no reconocida: ${comuna}` })
-  }
-
-  // Separar calle y número
+  // ── Búsqueda por dirección ─────────────────────────────────────────────────
   const matchDir = direccion.match(/^(.+?)\s+(\d+\w*)\s*$/)
-  const calle  = matchDir ? matchDir[1].trim() : direccion
-  const numero = matchDir ? matchDir[2] : ''
+  const calle    = matchDir ? matchDir[1].trim() : direccion
+  const numero   = matchDir ? matchDir[2] : ''
 
   try {
-    console.log('[BaseAPI] calle:', calle, 'numero:', numero, 'codCom:', codCom, 'unidad:', unidad)
-    const data = await baseapiDireccion(calle, numero, codCom, unidad)
-    console.log('[BaseAPI] response:', JSON.stringify(data).slice(0, 300))
+    const predios = await baseapiSearch(calle, numero, codCom, unidad)
 
-    let items = []
-    // BaseAPI devuelve { success: true, data: [...] } o { success: true, data: {...} }
-    const payload = data?.data ?? data
-    if (Array.isArray(payload))                 items = payload
-    else if (Array.isArray(payload.resultados)) items = payload.resultados
-    else if (payload.resultado)                 items = [payload.resultado]
-    else if (payload.rol || payload.direccion || payload.m2_construido) items = [payload]
-
-    items = items.filter(i => i && (i.rol || i.direccion || i.m2_construido))
-
-    if (!items.length) {
-      const dd = data?.data
-      return Response.json({ noEncontrado: true, multiples: false, resultados: [], _debug: {
-        calle, numero, codCom,
-        rawKeys: Object.keys(data),
-        dataType: Array.isArray(dd) ? 'array:'+dd.length : typeof dd,
-        dataKeys: dd && typeof dd === 'object' ? Object.keys(dd).slice(0,10) : null,
-        dataSlice: JSON.stringify(dd).slice(0, 300)
-      }})
+    if (!predios.length) {
+      return Response.json({ noEncontrado: true, multiples: false, resultados: [] })
     }
 
+    // Filtrar resultados que no son útiles (estacionamientos, bodegas) a menos que sean los únicos
+    const habitacionales = predios.filter(p => {
+      const d = (p.destino || '').toUpperCase()
+      return !['ESTACIONAMIENTO','BODEGA','BIEN COMUN'].some(x => d.includes(x))
+    })
+    let items = habitacionales.length > 0 ? habitacionales : predios
+
+    // Filtrar por unidad/depto si hay muchos
     if (unidad && items.length > 1) {
       const uNorm = norm(unidad).replace(/^(DP|DEPTO|DEPARTAMENTO|OF|OFICINA)\s*/, '')
-      const fil = items.filter(i => norm(i.direccion||'').includes(uNorm) || norm(i.depto||'').includes(uNorm))
+      const fil = items.filter(i => norm(i.direccion || '').includes(uNorm))
       if (fil.length) items = fil
     }
 
-    const resultados = items.map(i => buildResultado(i, comuna, unidad))
+    // Preferir el que tenga m2 construida > 0
+    const conM2 = items.filter(i => (i.superficie?.construida || 0) > 0)
+    if (conM2.length > 0 && conM2.length < items.length) items = conM2
+
+    const resultados = items.slice(0, 5).map(p => prediToResultado(p, comuna, unidad))
     return Response.json({ multiples: resultados.length > 1, resultados, noEncontrado: false })
 
   } catch(e) {
