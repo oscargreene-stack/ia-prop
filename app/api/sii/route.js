@@ -106,6 +106,8 @@ export async function GET(request) {
 
   if (!direccion || !comuna) return Response.json({ error: 'Faltan parámetros' }, { status: 400 })
   if (!ANTHROPIC_KEY)        return Response.json({ noEncontrado: true, multiples: false, resultados: [], error: 'API key faltante' })
+  // Token debug (remove after fixing)
+  const tokenDebug = DATAINM_TOKEN ? `${DATAINM_TOKEN.slice(0,4)}...${DATAINM_TOKEN.slice(-4)} (len:${DATAINM_TOKEN.length})` : 'MISSING'
 
   const comunaNorm = norm(comuna)
 
