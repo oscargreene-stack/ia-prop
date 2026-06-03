@@ -1,59 +1,69 @@
-// app/api/sii/route.js
-// Busca propiedades en DataInmobiliaria (tabla consolidado del SII)
-// Soporta: búsqueda por ROL (NNNN-NN), búsqueda por dirección
+// app/api/sii/route.js  v4
+// Llama DIRECTAMENTE al MCP server de DataInmobiliaria via JSON-RPC (sin Anthropic como proxy)
 // Endpoint: GET /api/sii?direccion=...&comuna=...&unidad=...
 
-const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY
 const MCP_URL       = process.env.MCP_URL || 'https://mcp.datainmobiliaria.cl/mcp'
 const DATAINM_TOKEN = process.env.DATAINMOBILIARIA_TOKEN
+const UF_CLP        = 40408
 
-function normalizarComuna(nombre) {
-  return (nombre || '')
-    .toUpperCase()
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/N/g, 'N').replace(/n/g, 'N')  // ñ→N already handled by NFD
+// ─── Llamada directa al MCP via JSON-RPC ────────────────────────────────────
+async function bqQuery(sql) {
+  const headers = { 'Content-Type': 'application/json' }
+  if (DATAINM_TOKEN) headers['Authorization'] = `Bearer ${DATAINM_TOKEN}`
+
+  const body = JSON.stringify({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'tools/call',
+    params: {
+      name: 'bq_run_query',
+      arguments: { sql },
+    },
+  })
+
+  const res = await fetch(MCP_URL, { method: 'POST', headers, body })
+  if (!res.ok) throw new Error(`MCP HTTP error: ${res.status}`)
+
+  const data = await res.json()
+
+  // JSON-RPC result — DataInmobiliaria devuelve { result: { content: [...] } }
+  const content = data?.result?.content || data?.content || []
+  for (const block of content) {
+    const txt = block?.text || ''
+    if (!txt) continue
+    // Intenta JSON directo
+    try {
+      const parsed = JSON.parse(txt)
+      if (parsed?.rows)              return parsed.rows
+      if (Array.isArray(parsed))     return parsed
+      if (parsed?.data)              return parsed.data
+    } catch(e) {}
+    // Extrae array del texto
+    const m = txt.match(/\[[\s\S]*\]/)
+    if (m) { try { return JSON.parse(m[0]) } catch(e) {} }
+  }
+  return []
+}
+
+// ─── Normalización ──────────────────────────────────────────────────────────
+function norm(s) {
+  return (s || '').toUpperCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // tildes
+    .replace(/Ñ/g, 'N').replace(/ñ/g, 'N')
     .trim()
 }
 
-function normalizarCalle(texto) {
-  return normalizarComuna(texto)
-    .replace(/^AV\.?\s+/, 'AV ')
-    .replace(/^AVDA\.?\s+/, 'AV ')
+function normCalle(s) {
+  return norm(s)
+    .replace(/^AV(DA)?\.?\s+/, 'AV ')
     .replace(/^AVENIDA\s+/, 'AV ')
-    .replace(/^PSJE\.?\s+/, 'PASAJE ')
-    .replace(/^PJE\.?\s+/, 'PASAJE ')
+    .replace(/^(PSJE|PJE)\.?\s+/, 'PASAJE ')
     .replace(/^CALLE\s+/, '')
     .replace(/^CAM\.?\s+/, 'CAM ')
     .trim()
 }
 
-// Extract rows from Anthropic+MCP response
-function extractRows(content) {
-  for (const block of (content || [])) {
-    if (block.type === 'mcp_tool_result') {
-      for (const item of (block.content || [])) {
-        if (item?.json) {
-          const j = item.json
-          if (Array.isArray(j)) return j
-          if (j?.rows) return j.rows
-          if (j?.data) return j.data
-        }
-        if (item?.text) {
-          try { const p = JSON.parse(item.text); if (Array.isArray(p)) return p; if (p?.rows) return p.rows } catch(e) {}
-          const m = item.text.match(/\[[\s\S]*\]/)
-          if (m) { try { return JSON.parse(m[0]) } catch(e) {} }
-        }
-      }
-    } else if (block.type === 'text' && block.text) {
-      const m = block.text.match(/\[[\s\S]*\]/)
-      if (m) { try { const r = JSON.parse(m[0]); if (Array.isArray(r) && r.length > 0) return r } catch(e) {} }
-    }
-  }
-  return []
-}
-
 function buildResultado(row, comunaInput, unidad) {
-  const UF_CLP = 40408
   return {
     direccion:         row.direccion_sii || '',
     rol:               `${row.cod_com}-${row.cod_mz}-${row.cod_pr}`,
@@ -74,27 +84,21 @@ function buildResultado(row, comunaInput, unidad) {
   }
 }
 
-async function mcpQuery(sql) {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': ANTHROPIC_KEY,
-      'anthropic-version': '2023-06-01',
-      'anthropic-beta': 'mcp-client-2025-04-04',
-    },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4-5',
-      max_tokens: 2000,
-      system: 'Run the SQL using bq_run_query and return ONLY the raw JSON array of rows. No markdown, no explanation.',
-      messages: [{ role: 'user', content: `Run this SQL and return only the JSON array of results:\n${sql}` }],
-      mcp_servers: [{ type: 'url', url: MCP_URL, name: 'datainmobiliaria', authorization_token: DATAINM_TOKEN }],
-    }),
-  })
-  if (!res.ok) throw new Error(`Anthropic error: ${res.status}`)
-  const data = await res.json()
-  return extractRows(data.content)
-}
+const SELECT_COLS = `
+  c.cod_com, c.cod_mz, c.cod_pr,
+  c.direccion_sii,
+  c.cod_destino,
+  cd.descripcion_destino            AS destino,
+  c.superficie_total_terreno        AS m2_terreno,
+  c.superficie_construccion         AS m2_construido,
+  c.avaluo_fiscal_clp,
+  c.ano_construccion,
+  ccr.comuna                        AS comuna_nombre,
+  c.latitud,
+  c.longitud
+FROM datainmobiliaria.consolidado c
+JOIN datainmobiliaria.codigo_comuna_region ccr ON c.cod_com = ccr.cod_com
+JOIN datainmobiliaria.codigo_destino       cd  ON c.cod_destino = cd.cod_destino`
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url)
@@ -103,66 +107,79 @@ export async function GET(request) {
   const unidad    = (searchParams.get('unidad')    || '').trim()
 
   if (!direccion || !comuna) {
-    return Response.json({ error: 'Faltan parametros' }, { status: 400 })
+    return Response.json({ error: 'Faltan parámetros' }, { status: 400 })
   }
 
-  if (!ANTHROPIC_KEY) {
-    return Response.json({ noEncontrado: true, multiples: false, resultados: [], error: 'API key no configurada' })
-  }
+  const comunaNorm = norm(comuna)
 
-  const comunaNorm = normalizarComuna(comuna)
-
-  // ── ROL detection: formato NNNN-NN or NNNNN-NNN ──────────────────────────
+  // ── 1. Detectar ROL: formato NNNN-NN ────────────────────────────────────
   const rolMatch = direccion.match(/^(\d+)-(\d+)$/)
   if (rolMatch) {
     const codMz = parseInt(rolMatch[1], 10)
     const codPr = parseInt(rolMatch[2], 10)
     try {
-      const sql = `SELECT c.cod_com, c.cod_mz, c.cod_pr, c.direccion_sii, c.cod_destino, cd.descripcion_destino AS destino, c.superficie_total_terreno AS m2_terreno, c.superficie_construccion AS m2_construido, c.avaluo_fiscal_clp, c.ano_construccion, ccr.comuna AS comuna_nombre, c.latitud, c.longitud FROM datainmobiliaria.consolidado c JOIN datainmobiliaria.codigo_comuna_region ccr ON c.cod_com = ccr.cod_com JOIN datainmobiliaria.codigo_destino cd ON c.cod_destino = cd.cod_destino WHERE ccr.comuna = '${comunaNorm}' AND c.cod_mz = ${codMz} AND c.cod_pr = ${codPr} LIMIT 5`
-      const rows = await mcpQuery(sql)
+      const sql = `SELECT ${SELECT_COLS}
+        WHERE ccr.comuna = '${comunaNorm}' AND c.cod_mz = ${codMz} AND c.cod_pr = ${codPr}
+        LIMIT 5`
+      const rows = await bqQuery(sql)
       if (rows.length > 0) {
         const resultados = rows.map(r => buildResultado(r, comuna, unidad))
         return Response.json({ multiples: resultados.length > 1, resultados, noEncontrado: false })
       }
     } catch(e) {
-      console.error('ROL lookup error:', e.message)
+      console.error('[SII] ROL lookup error:', e.message)
+      return Response.json({ noEncontrado: true, multiples: false, resultados: [], error: e.message })
     }
     return Response.json({ noEncontrado: true, multiples: false, resultados: [] })
   }
 
-  // ── Address search ───────────────────────────────────────────────────────
+  // ── 2. Búsqueda por dirección ────────────────────────────────────────────
   const matchDir = direccion.match(/^(.+?)\s+(\d+)(\w*)\s*$/)
   const calleRaw = matchDir ? matchDir[1].trim() : direccion
   const numero   = matchDir ? matchDir[2] : null
-  const calle    = normalizarCalle(calleRaw)
-  const tokenCalle = calle.split(/\s+/).sort((a, b) => b.length - a.length)[0] || calle
+  const calle    = normCalle(calleRaw)
 
-  let numeroCondition = ''
+  // Token más largo y distintivo (evita tokens cortos como "AV")
+  const tokens   = calle.split(/\s+/).filter(t => t.length >= 4)
+  const token    = tokens.sort((a, b) => b.length - a.length)[0] || calle
+
+  let numCondition = ''
   if (numero) {
     const n = parseInt(numero, 10)
     const nums = [n, n-2, n+2, n-4, n+4].filter(x => x > 0)
-    const numPatterns = nums.map(x => `c.direccion_sii LIKE '%${x}'`).join(' OR ')
-    numeroCondition = `AND (${numPatterns})`
+    numCondition = `AND (${nums.map(x => `c.direccion_sii LIKE '% ${x}'`).join(' OR ')} OR c.direccion_sii LIKE '%${numero}')`
   }
 
-  const sql = `SELECT c.cod_com, c.cod_mz, c.cod_pr, c.direccion_sii, c.cod_destino, cd.descripcion_destino AS destino, c.superficie_total_terreno AS m2_terreno, c.superficie_construccion AS m2_construido, c.avaluo_fiscal_clp, c.ano_construccion, ccr.comuna AS comuna_nombre, c.latitud, c.longitud FROM datainmobiliaria.consolidado c JOIN datainmobiliaria.codigo_comuna_region ccr ON c.cod_com = ccr.cod_com JOIN datainmobiliaria.codigo_destino cd ON c.cod_destino = cd.cod_destino WHERE ccr.comuna = '${comunaNorm}' AND UPPER(c.direccion_sii) LIKE '%${tokenCalle}%' ${numeroCondition} ORDER BY CASE WHEN c.superficie_construccion > 0 THEN 0 ELSE 1 END, c.avaluo_fiscal_clp DESC LIMIT 8`
-
   try {
-    const rows = await mcpQuery(sql)
+    const sql = `SELECT ${SELECT_COLS}
+      WHERE ccr.comuna = '${comunaNorm}'
+        AND UPPER(c.direccion_sii) LIKE '%${token}%'
+        ${numCondition}
+      ORDER BY
+        CASE WHEN c.superficie_construccion > 0 THEN 0 ELSE 1 END,
+        c.avaluo_fiscal_clp DESC
+      LIMIT 10`
+
+    const rows = await bqQuery(sql)
     if (!rows.length) {
       return Response.json({ noEncontrado: true, multiples: false, resultados: [] })
     }
-    // Filter by unit if multiple results
+
     let filas = rows
+    // Si hay departamento, filtrar por unidad
     if (unidad && filas.length > 1) {
-      const uNorm = normalizarComuna(unidad).replace(/^(DP|DEPTO|DEPARTAMENTO|OF|OFICINA)\s*/, '')
-      const filtrado = filas.filter(f => normalizarComuna(f.direccion_sii || '').includes(uNorm))
+      const uNorm = norm(unidad).replace(/^(DP|DEPTO|DEPARTAMENTO|OF|OFICINA)\s*/, '')
+      const filtrado = filas.filter(f => norm(f.direccion_sii || '').includes(uNorm))
       if (filtrado.length > 0) filas = filtrado
     }
+
     const resultados = filas.map(r => buildResultado(r, comuna, unidad))
-    return Response.json({ multiples: resultados.length > 1, resultados, noEncontrado: false })
+    const multiples  = resultados.length > 1
+
+    return Response.json({ multiples, resultados, noEncontrado: false })
+
   } catch(e) {
-    console.error('Address lookup error:', e.message)
+    console.error('[SII] address lookup error:', e.message)
     return Response.json({ noEncontrado: true, multiples: false, resultados: [], error: e.message })
   }
 }
