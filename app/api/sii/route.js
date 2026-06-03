@@ -100,7 +100,7 @@ async function datainmDetalle(codCom, codMz, codPr) {
 
 // ── BaseAPI: buscar por dirección ─────────────────────────────────────────────
 async function baseapiDireccion(calle, numero, codCom, unidad) {
-  const params = { calle, numero: numero || '', cod_com: codCom }
+  const params = { calle, numero: numero || '', comuna: codCom }
   if (unidad) params.depto = unidad
   const qs  = new URLSearchParams(
     Object.fromEntries(Object.entries(params).filter(([,v]) => v !== '' && v != null))
