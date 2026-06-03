@@ -171,15 +171,17 @@ export async function GET(request) {
     console.log('[BaseAPI] response:', JSON.stringify(data).slice(0, 300))
 
     let items = []
-    if (Array.isArray(data))                 items = data
-    else if (Array.isArray(data.resultados)) items = data.resultados
-    else if (data.resultado)                 items = [data.resultado]
-    else if (data.rol || data.direccion)     items = [data]
+    // BaseAPI devuelve { success: true, data: [...] } o { success: true, data: {...} }
+    const payload = data?.data ?? data
+    if (Array.isArray(payload))                 items = payload
+    else if (Array.isArray(payload.resultados)) items = payload.resultados
+    else if (payload.resultado)                 items = [payload.resultado]
+    else if (payload.rol || payload.direccion || payload.m2_construido) items = [payload]
 
     items = items.filter(i => i && (i.rol || i.direccion || i.m2_construido))
 
     if (!items.length) {
-      return Response.json({ noEncontrado: true, multiples: false, resultados: [], _debug: { calle, numero, codCom, rawKeys: Object.keys(data) } })
+      return Response.json({ noEncontrado: true, multiples: false, resultados: [], _debug: { calle, numero, codCom, rawKeys: Object.keys(data), dataType: Array.isArray(data.data) ? 'array:'+data.data.length : typeof data.data } })
     }
 
     if (unidad && items.length > 1) {
