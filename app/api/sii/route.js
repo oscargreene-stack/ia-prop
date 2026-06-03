@@ -110,30 +110,35 @@ export async function GET(request) {
     const codMz = parseInt(rolMatch[1], 10)
     const codPr = parseInt(rolMatch[2], 10)
     try {
-      // Buscar por rol: usar BaseAPI con manzana+predio directamente
-      const predios = await baseapiSearch('', '', codCom, unidad)
-      // Si baseapi no soporta búsqueda por ROL, devolvemos el ROL con datos mínimos
-      const match = predios.find(p => p.manzana === codMz && p.predio === codPr)
-      if (match) {
-        return Response.json({ multiples: false, resultados: [prediToResultado(match, comuna, unidad)], noEncontrado: false })
-      }
-      // Fallback: devolver ROL sin datos de superficie (el usuario los confirmará)
-      return Response.json({
-        multiples: false,
-        noEncontrado: false,
-        resultados: [{
-          direccion: '', rol: `${codCom}-${codMz}-${codPr}`,
-          cod_comuna: codCom, manzana: codMz, predio: codPr,
-          comuna, destino: null, m2_terreno: null, m2_construido: null,
-          avaluo_total_clp: null, avaluo_fiscal_uf: null, anio_construccion: null,
-          latitud: null, longitud: null, depto: unidad || null,
-          link_datainmobiliaria: `https://datainmobiliaria.cl/reports/detalle_propiedad?cod_com=${codCom}&cod_mz=${codMz}&cod_pr=${codPr}`,
-        }]
+      // Buscar por manzana+predio en BaseAPI para obtener datos completos incluyendo m²
+      const params = { cod_manzana: codMz, cod_predio: codPr, comuna: codCom }
+      const qs = new URLSearchParams(
+        Object.fromEntries(Object.entries(params).filter(([,v]) => v != null))
+      ).toString()
+      const res = await fetch(`https://api.baseapi.cl/api/v1/sii/avaluo/buscar?${qs}`, {
+        headers: { 'X-API-Key': BASEAPI_KEY, 'Accept': 'application/json' },
       })
-    } catch(e) {
-      console.error('[SII ROL]', e.message)
-      return Response.json({ noEncontrado: true, multiples: false, resultados: [], error: e.message })
-    }
+      if (res.ok) {
+        const json = await res.json()
+        const predios = json?.data?.predios || []
+        const match = predios.find(p => p.manzana === codMz && p.predio === codPr) || predios[0]
+        if (match) {
+          return Response.json({ multiples: false, resultados: [prediToResultado(match, comuna, unidad)], noEncontrado: false })
+        }
+      }
+    } catch(e) { console.error('[SII ROL detail]', e.message) }
+    // Fallback: devolver ROL con datos mínimos — el flujo pedirá m² al usuario
+    return Response.json({
+      multiples: false, noEncontrado: false,
+      resultados: [{
+        direccion: '', rol: `${codCom}-${codMz}-${codPr}`,
+        cod_comuna: codCom, manzana: codMz, predio: codPr,
+        comuna, destino: null, m2_terreno: null, m2_construido: null,
+        avaluo_total_clp: null, avaluo_fiscal_uf: null, anio_construccion: null,
+        latitud: null, longitud: null, depto: unidad || null,
+        link_datainmobiliaria: `https://datainmobiliaria.cl/reports/detalle_propiedad?cod_com=${codCom}&cod_mz=${codMz}&cod_pr=${codPr}`,
+      }]
+    })
   }
 
   // ── Búsqueda por dirección ─────────────────────────────────────────────────
