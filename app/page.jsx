@@ -413,6 +413,12 @@ function ChatVendedor({ onBack }) {
     } else if (stage === 'confirmar_terreno') {
       if (opt.id === 'si_terreno') {
         await addAgent('Perfecto ✓', 300)
+        const m2C = parseFloat(data.siiData?.m2_construido) || 0
+        if (!m2C && ['casa','departamento'].includes(data.tipo)) {
+          await addAgent('¿Cuántos **m² construidos** tiene la propiedad? (superficie total construida)', 400)
+          setInputMode('text'); setPlaceholder('Ej: 440')
+          setStage('ingresar_m2_construido'); return
+        }
         await nextStep(data, 0)
       } else {
         await addAgent('¿Cuántos m² de terreno tiene realmente la propiedad?', 400)
@@ -487,6 +493,12 @@ function ChatVendedor({ onBack }) {
         const newData = { ...data, siiData: newSiiData }
         setData(newData)
         await addAgent(`Anotado: **${m2Corregido.toLocaleString('es-CL')} m² de terreno** ✓`, 300)
+        const m2C = parseFloat(newData.siiData?.m2_construido) || 0
+        if (!m2C && ['casa','departamento'].includes(newData.tipo)) {
+          await addAgent('¿Cuántos **m² construidos** tiene la propiedad? (superficie total construida)', 400)
+          setInputMode('text'); setPlaceholder('Ej: 440')
+          setStage('ingresar_m2_construido'); return
+        }
         await nextStep(newData, 0)
       } else {
         await addAgent('Ingresa un número válido (ej: 3982)', 300)
