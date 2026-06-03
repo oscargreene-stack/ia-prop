@@ -1,102 +1,60 @@
-// app/api/sii/route.js  v5
-// Busca propiedades via Anthropic+MCP DataInmobiliaria
+// app/api/sii/route.js  v6
+// Usa BaseAPI desde el servidor (server-side) — nunca expone la key al browser
+// BaseAPI endpoint: https://api.baseapi.cl/api/v1/sii/avaluo/buscar
+// La llamada se hace desde el Route Handler de Next.js (servidor), no desde el frontend
 
-const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY
-const MCP_URL       = process.env.MCP_URL || 'https://mcp.datainmobiliaria.cl/mcp'
-const DATAINM_TOKEN = process.env.DATAINMOBILIARIA_TOKEN
-const UF_CLP        = 40408
+const BASEAPI_KEY = process.env.BASEAPI_KEY
+const UF_CLP      = 40408
 
 function norm(s) {
   return (s || '').toUpperCase()
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/N\u0303/g, 'N')
     .trim()
 }
 
-function normCalle(s) {
-  return norm(s)
-    .replace(/^AV(DA)?\.?\s+/, 'AV ')
-    .replace(/^AVENIDA\s+/, 'AV ')
-    .replace(/^(PSJE|PJE)\.?\s+/, 'PASAJE ')
-    .replace(/^CALLE\s+/, '')
-    .replace(/^CAM\.?\s+/, 'CAM ')
-    .trim()
-}
-
-function extractRows(content) {
-  for (const block of (content || [])) {
-    if (block.type === 'mcp_tool_result') {
-      for (const item of (block.content || [])) {
-        if (item?.text) {
-          try { const p = JSON.parse(item.text); if (Array.isArray(p) && p.length) return p; if (p?.rows?.length) return p.rows } catch(e) {}
-          const m = item.text.match(/\[[\s\S]*?\]/)
-          if (m) { try { const r = JSON.parse(m[0]); if (Array.isArray(r) && r.length) return r } catch(e) {} }
-        }
-      }
-    }
-    if (block.type === 'text' && block.text) {
-      const m = block.text.match(/\[[\s\S]*\]/)
-      if (m) { try { const r = JSON.parse(m[0]); if (Array.isArray(r) && r.length) return r } catch(e) {} }
-    }
+function buildResultado(item, comunaInput, unidad) {
+  // BaseAPI devuelve: rol, direccion, m2_terreno, m2_construido, avaluo_total_clp,
+  //                   destino, ano_construccion, latitud, longitud, etc.
+  const m2T = item.m2_terreno    ? parseFloat(item.m2_terreno)    : null
+  const m2C = item.m2_construido ? parseFloat(item.m2_construido) : null
+  const av  = item.avaluo_total_clp ? parseInt(item.avaluo_total_clp) : null
+  return {
+    direccion:         item.direccion || '',
+    rol:               item.rol || null,
+    cod_comuna:        item.cod_com || null,
+    manzana:           item.cod_mz  || null,
+    predio:            item.cod_pr  || null,
+    comuna:            item.comuna  || comunaInput,
+    destino:           item.destino || null,
+    m2_terreno:        m2T,
+    m2_construido:     m2C,
+    avaluo_total_clp:  av,
+    avaluo_fiscal_uf:  av ? Math.round(av / UF_CLP) : null,
+    anio_construccion: item.ano_construccion || null,
+    latitud:           item.latitud  || null,
+    longitud:          item.longitud || null,
+    depto:             unidad || item.depto || null,
+    link_datainmobiliaria: item.cod_com && item.cod_mz && item.cod_pr
+      ? `https://datainmobiliaria.cl/reports/detalle_propiedad?cod_com=${item.cod_com}&cod_mz=${item.cod_mz}&cod_pr=${item.cod_pr}`
+      : null,
   }
-  return []
 }
 
-async function mcpQuery(sql) {
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
+async function baseapiSearch(params) {
+  const qs = new URLSearchParams(params).toString()
+  const url = `https://api.baseapi.cl/api/v1/sii/avaluo/buscar?${qs}`
+  const res = await fetch(url, {
     headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': ANTHROPIC_KEY,
-      'anthropic-version': '2023-06-01',
-      'anthropic-beta': 'mcp-client-2025-04-04',
+      'Authorization': `Bearer ${BASEAPI_KEY}`,
+      'Accept': 'application/json',
     },
-    body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 2000,
-      system: 'You are a BigQuery assistant. Run the SQL using bq_run_query and return ONLY the raw JSON array of rows from the result. No markdown, no explanation, just the JSON array.',
-      messages: [{ role: 'user', content: `Run this SQL and return only the JSON array of results:\n${sql}` }],
-      mcp_servers: [{ type: 'url', url: MCP_URL, name: 'datainmobiliaria', authorization_token: DATAINM_TOKEN }],
-    }),
   })
   if (!res.ok) {
     const txt = await res.text()
-    throw new Error(`Anthropic ${res.status}: ${txt.slice(0, 200)}`)
+    throw new Error(`BaseAPI ${res.status}: ${txt.slice(0, 200)}`)
   }
-  const data = await res.json()
-  return extractRows(data.content)
+  return res.json()
 }
-
-function buildResultado(row, comunaInput, unidad) {
-  return {
-    direccion:         row.direccion_sii || '',
-    rol:               `${row.cod_com}-${row.cod_mz}-${row.cod_pr}`,
-    manzana:           row.cod_mz,
-    predio:            row.cod_pr,
-    cod_comuna:        row.cod_com,
-    comuna:            row.comuna_nombre || comunaInput,
-    destino:           row.destino || null,
-    m2_terreno:        row.m2_terreno    ? parseFloat(row.m2_terreno)    : null,
-    m2_construido:     row.m2_construido ? parseFloat(row.m2_construido) : null,
-    avaluo_total_clp:  row.avaluo_fiscal_clp ? parseInt(row.avaluo_fiscal_clp) : null,
-    avaluo_fiscal_uf:  row.avaluo_fiscal_clp ? Math.round(parseInt(row.avaluo_fiscal_clp) / UF_CLP) : null,
-    anio_construccion: row.ano_construccion || null,
-    latitud:           row.latitud  || null,
-    longitud:          row.longitud || null,
-    depto:             unidad || null,
-    link_datainmobiliaria: `https://datainmobiliaria.cl/reports/detalle_propiedad?cod_com=${row.cod_com}&cod_mz=${row.cod_mz}&cod_pr=${row.cod_pr}`,
-  }
-}
-
-const COLS = `c.cod_com, c.cod_mz, c.cod_pr, c.direccion_sii,
-  cd.descripcion_destino AS destino,
-  c.superficie_total_terreno AS m2_terreno,
-  c.superficie_construccion AS m2_construido,
-  c.avaluo_fiscal_clp, c.ano_construccion,
-  ccr.comuna AS comuna_nombre, c.latitud, c.longitud
-FROM datainmobiliaria.consolidado c
-JOIN datainmobiliaria.codigo_comuna_region ccr ON c.cod_com = ccr.cod_com
-JOIN datainmobiliaria.codigo_destino cd ON c.cod_destino = cd.cod_destino`
 
 export async function GET(request) {
   const { searchParams } = new URL(request.url)
@@ -104,62 +62,58 @@ export async function GET(request) {
   const comuna    = (searchParams.get('comuna')    || '').trim()
   const unidad    = (searchParams.get('unidad')    || '').trim()
 
-  if (!direccion || !comuna) return Response.json({ error: 'Faltan parámetros' }, { status: 400 })
-  if (!ANTHROPIC_KEY)        return Response.json({ noEncontrado: true, multiples: false, resultados: [], error: 'API key faltante' })
-  // Token debug (remove after fixing)
-  const tokenDebug = DATAINM_TOKEN ? `${DATAINM_TOKEN.slice(0,4)}...${DATAINM_TOKEN.slice(-4)} (len:${DATAINM_TOKEN.length})` : 'MISSING'
+  if (!direccion || !comuna) {
+    return Response.json({ error: 'Faltan parámetros' }, { status: 400 })
+  }
+  if (!BASEAPI_KEY) {
+    return Response.json({ noEncontrado: true, multiples: false, resultados: [], error: 'BASEAPI_KEY no configurada' })
+  }
 
   const comunaNorm = norm(comuna)
 
-  // ── ROL: NNNN-NN ─────────────────────────────────────────────────────────
-  const rolMatch = direccion.match(/^(\d+)-(\d+)$/)
-  if (rolMatch) {
-    const codMz = parseInt(rolMatch[1], 10)
-    const codPr = parseInt(rolMatch[2], 10)
-    try {
-      const rows = await mcpQuery(
-        `SELECT ${COLS} WHERE ccr.comuna = '${comunaNorm}' AND c.cod_mz = ${codMz} AND c.cod_pr = ${codPr} LIMIT 5`
-      )
-      if (rows.length) {
-        const resultados = rows.map(r => buildResultado(r, comuna, unidad))
-        return Response.json({ multiples: resultados.length > 1, resultados, noEncontrado: false })
-      }
-    } catch(e) {
-      return Response.json({ noEncontrado: true, multiples: false, resultados: [], error: e.message, tokenDebug })
-    }
-    return Response.json({ noEncontrado: true, multiples: false, resultados: [], tokenDebug })
-  }
-
-  // ── Dirección ─────────────────────────────────────────────────────────────
-  const matchDir = direccion.match(/^(.+?)\s+(\d+)\w*\s*$/)
-  const calleRaw = matchDir ? matchDir[1].trim() : direccion
-  const numero   = matchDir ? matchDir[2] : null
-  const calle    = normCalle(calleRaw)
-  const tokens   = calle.split(/\s+/).filter(t => t.length >= 4)
-  const token    = tokens.sort((a, b) => b.length - a.length)[0] || calle
-
-  let numWhere = ''
-  if (numero) {
-    const n = parseInt(numero, 10)
-    const ns = [n, n-2, n+2, n-4, n+4].filter(x => x > 0)
-    numWhere = `AND (${ns.map(x => `c.direccion_sii LIKE '% ${x}'`).join(' OR ')} OR c.direccion_sii LIKE '%${numero}')`
-  }
-
   try {
-    const rows = await mcpQuery(
-      `SELECT ${COLS} WHERE ccr.comuna = '${comunaNorm}' AND UPPER(c.direccion_sii) LIKE '%${token}%' ${numWhere} ORDER BY CASE WHEN c.superficie_construccion > 0 THEN 0 ELSE 1 END, c.avaluo_fiscal_clp DESC LIMIT 10`
-    )
-    if (!rows.length) return Response.json({ noEncontrado: true, multiples: false, resultados: [] })
+    // BaseAPI busca por dirección + comuna
+    const data = await baseapiSearch({
+      direccion: direccion,
+      comuna:    comunaNorm,
+      ...(unidad ? { depto: unidad } : {}),
+    })
 
-    let filas = rows
-    if (unidad && filas.length > 1) {
-      const uNorm = norm(unidad).replace(/^(DP|DEPTO|DEPARTAMENTO|OF|OFICINA)\s*/, '')
-      const filtrado = filas.filter(f => norm(f.direccion_sii || '').includes(uNorm))
-      if (filtrado.length) filas = filtrado
+    // BaseAPI puede devolver: { resultados: [...] } o { resultado: {...} } o array directo
+    let items = []
+    if (Array.isArray(data))                 items = data
+    else if (Array.isArray(data.resultados)) items = data.resultados
+    else if (data.resultado)                 items = [data.resultado]
+    else if (data.rol || data.direccion)     items = [data]
+
+    // Filtrar resultados sin datos útiles
+    items = items.filter(i => i && (i.rol || i.direccion || i.m2_construido))
+
+    if (!items.length) {
+      return Response.json({ noEncontrado: true, multiples: false, resultados: [] })
     }
-    const resultados = filas.map(r => buildResultado(r, comuna, unidad))
-    return Response.json({ multiples: resultados.length > 1, resultados, noEncontrado: false })
+
+    // Si hay unidad/depto, filtrar por ella
+    if (unidad && items.length > 1) {
+      const uNorm = norm(unidad).replace(/^(DP|DEPTO|DEPARTAMENTO|OF|OFICINA)\s*/, '')
+      const filtrado = items.filter(i => norm(i.direccion || '').includes(uNorm) || norm(i.depto || '').includes(uNorm))
+      if (filtrado.length) items = filtrado
+    }
+
+    const resultados = items.map(i => buildResultado(i, comuna, unidad))
+    return Response.json({
+      multiples:    resultados.length > 1,
+      resultados,
+      noEncontrado: false,
+    })
+
   } catch(e) {
-    return Response.json({ noEncontrado: true, multiples: false, resultados: [], error: e.message })
+    console.error('[SII BaseAPI]', e.message)
+    return Response.json({
+      noEncontrado: true,
+      multiples:    false,
+      resultados:   [],
+      error:        e.message,
+    })
   }
 }
