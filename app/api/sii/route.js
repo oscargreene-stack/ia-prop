@@ -45,7 +45,7 @@ async function baseapiSearch(params) {
   const url = `https://api.baseapi.cl/api/v1/sii/avaluo/buscar?${qs}`
   const res = await fetch(url, {
     headers: {
-      'Authorization': `Bearer ${BASEAPI_KEY}`,
+      'X-API-Key': BASEAPI_KEY,
       'Accept': 'application/json',
     },
   })
