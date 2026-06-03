@@ -166,7 +166,9 @@ export async function GET(request) {
   const numero = matchDir ? matchDir[2] : ''
 
   try {
+    console.log('[BaseAPI] calle:', calle, 'numero:', numero, 'codCom:', codCom, 'unidad:', unidad)
     const data = await baseapiDireccion(calle, numero, codCom, unidad)
+    console.log('[BaseAPI] response:', JSON.stringify(data).slice(0, 300))
 
     let items = []
     if (Array.isArray(data))                 items = data
@@ -177,7 +179,7 @@ export async function GET(request) {
     items = items.filter(i => i && (i.rol || i.direccion || i.m2_construido))
 
     if (!items.length) {
-      return Response.json({ noEncontrado: true, multiples: false, resultados: [] })
+      return Response.json({ noEncontrado: true, multiples: false, resultados: [], _debug: { calle, numero, codCom, rawKeys: Object.keys(data) } })
     }
 
     if (unidad && items.length > 1) {
