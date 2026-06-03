@@ -477,12 +477,13 @@ function ChatVendedor({ onBack }) {
       }
       addUser(`${m2C.toLocaleString('es-CL')} m² construidos`)
       const siiConM2 = { ...data.siiData, m2_construido: m2C }
-      if (['casa','terreno','parcela'].includes(data.tipo)) {
-        const nd = { ...data, siiData: siiConM2 }; setData(nd)
+      const nd = { ...data, siiData: siiConM2 }; setData(nd)
+      // Solo pedir terreno si no fue ingresado antes
+      const terrenoYa = parseFloat(siiConM2.m2_terreno) || 0
+      if (!terrenoYa && ['casa','terreno','parcela'].includes(data.tipo)) {
         await addAgent('¿Y cuántos **m² de terreno** tiene? (superficie total del sitio, ej: 500)', 400)
         setInputMode('text'); setStage('ingresar_terreno'); return
       }
-      const nd = { ...data, siiData: siiConM2 }; setData(nd)
       await nextStep(nd, 0); return
 
     } else if (stage === 'ingresar_terreno') {
