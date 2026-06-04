@@ -241,6 +241,45 @@ function ChatVendedor({ onBack }) {
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior:'smooth' }) }, [messages, typing])
 
+  // Google Places Autocomplete para campo de dirección
+  useEffect(() => {
+    if (stage !== 'direccion' || searchTab !== 'direccion') return
+    const GKEY = process.env.NEXT_PUBLIC_GOOGLE_PLACES_KEY
+    if (!GKEY || typeof window === 'undefined') return
+    function initAC() {
+      const input = document.getElementById('places-input')
+      if (!input || input._acInit) return
+      input._acInit = true
+      const ac = new window.google.maps.places.Autocomplete(input, {
+        componentRestrictions: { country: 'cl' },
+        fields: ['address_components', 'formatted_address'],
+        types: ['address'],
+      })
+      ac.addListener('place_changed', () => {
+        const place = ac.getPlace()
+        if (!place.address_components) return
+        let streetName = '', streetNumber = '', comunaLong = ''
+        for (const c of place.address_components) {
+          if (c.types.includes('route'))            streetName   = c.long_name
+          if (c.types.includes('street_number'))    streetNumber = c.long_name
+          if (c.types.includes('locality') || c.types.includes('administrative_area_level_3'))
+            comunaLong = c.long_name
+        }
+        const nfd = s => s.toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/Ñ/g,'N').replace(/ñ/g,'N').trim()
+        setPlacesResult({ calle: nfd(streetName), numero: streetNumber, comunaNorm: nfd(comunaLong), fullAddress: place.formatted_address })
+        setInputVal(place.formatted_address)
+      })
+    }
+    if (window.google?.maps?.places) { initAC(); return }
+    if (!document.getElementById('gplaces-script')) {
+      const s = document.createElement('script')
+      s.id = 'gplaces-script'
+      s.src = `https://maps.googleapis.com/maps/api/js?key=${GKEY}&libraries=places&language=es&region=CL`
+      s.async = true; s.onload = initAC
+      document.head.appendChild(s)
+    }
+  }, [stage, searchTab])
+
   const addAgent = (content, delay=600) => new Promise(res => {
     setTyping(true)
     setTimeout(() => { setTyping(false); setMessages(m => [...m, { role:'agent', content }]); res() }, delay)
