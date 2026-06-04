@@ -230,7 +230,8 @@ export async function GET(request) {
 
     if (!predios.length) {
       // Fallback: buscar en BigQuery via Anthropic MCP
-      const bqResult = await bqFallback(calle, numero, codCom, comunaNorm)
+      const comunaNormFb = norm(comuna)
+      const bqResult = await bqFallback(calle, numero, codCom, comunaNormFb)
       if (bqResult.length) {
         const resultados = bqResult.map(r => buildResultado(r, comuna, unidad))
         return Response.json({ multiples: resultados.length > 1, resultados, noEncontrado: false })
