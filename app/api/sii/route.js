@@ -223,19 +223,22 @@ export async function GET(request) {
   try {
     let predios = await baseapiSearch(calle, numero, codCom, unidad)
 
-    // Si no encontró con número exacto, buscar por calle sola (número puede diferir del catastro)
+    // Intento 2: sin número (número catastral puede diferir del número postal)
     if (!predios.length && numero) {
       predios = await baseapiSearch(calle, '', codCom, unidad)
     }
 
-    if (!predios.length) {
-      // Fallback: buscar en BigQuery via Anthropic MCP
-      const comunaNormFb = norm(comuna)
-      const bqResult = await bqFallback(calle, numero, codCom, comunaNormFb)
-      if (bqResult.length) {
-        const resultados = bqResult.map(r => buildResultado(r, comuna, unidad))
-        return Response.json({ multiples: resultados.length > 1, resultados, noEncontrado: false })
+    // Intento 3: solo el apellido de la calle (última palabra larga)
+    const palabras = calle.split(/\s+/)
+    const apellido = palabras.length > 1 ? palabras[palabras.length - 1] : ''
+    if (!predios.length && apellido && apellido.length >= 4) {
+      predios = await baseapiSearch(apellido, numero, codCom, unidad)
+      if (!predios.length) {
+        predios = await baseapiSearch(apellido, '', codCom, unidad)
       }
+    }
+
+    if (!predios.length) {
       return Response.json({ noEncontrado: true, multiples: false, resultados: [] })
     }
 
