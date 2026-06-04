@@ -526,10 +526,17 @@ function ChatVendedor({ onBack }) {
     setMessages(m => [...m, { role:'agent', content:{ type:'loading', text:'Buscando tu propiedad en el SII y catastro…' }}])
     try {
       // Proxy server-side — la key nunca sale al browser
-      const params = new URLSearchParams({
+      // Si tenemos datos de Google Places, usarlos directamente para mejor matching
+      const pr = d.placesResult
+      const params = new URLSearchParams(pr ? {
+        calle:      pr.calle,
+        numero:     pr.numero,
+        comunaNorm: pr.comunaNorm,
+        unidad:     d.depto || '',
+      } : {
         direccion: d.direccion || '',
-        comuna: d.comuna || '',
-        unidad: d.depto || '',
+        comuna:    d.comuna || '',
+        unidad:    d.depto || '',
       })
       const res = await fetch(`/api/sii?${params}`)
 
@@ -778,7 +785,7 @@ function ChatVendedor({ onBack }) {
     const resumen = conDepto ? `${busqueda} ${label} ${conDepto}, ${comunaForm}` : `${busqueda}, ${comunaForm}`
     addUser(resumen)
     setInputVal(''); setDeptoVal(''); setComunaForm(''); setInputMode(null)
-    const newData = { ...data, direccion: busqueda, depto: conDepto, comuna: comunaForm }
+    const newData = { ...data, direccion: busqueda, depto: conDepto, comuna: placesResult?.comunaNorm || comunaForm, placesResult: placesResult || null }
     setData(newData)
     await fetchSII(newData)
   }
