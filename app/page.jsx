@@ -234,6 +234,7 @@ function ChatVendedor({ onBack }) {
   const [deptoVal, setDeptoVal] = useState('')
   const [placeholder, setPlaceholder] = useState('')
   const [searchTab, setSearchTab] = useState('direccion')
+  const [placesResult, setPlacesResult] = useState(null) // {calle, numero, comunaNorm, fullAddress}
   const [comunaForm, setComunaForm] = useState('')
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
@@ -883,7 +884,7 @@ function ChatVendedor({ onBack }) {
                 <div className="search-row">
                   <div className="search-field" style={{flex:1}}>
                     <div className="search-field-label">Dirección Completa<span>*</span></div>
-                    <input value={inputVal} onChange={e => setInputVal(e.target.value)}
+                    <input id="places-input" value={inputVal} onChange={e => { setInputVal(e.target.value); setPlacesResult(null) }}
                       placeholder="Ej. Lo Fontecilla 267" autoFocus
                       onKeyDown={e => { if (e.key==='Enter') handleSearchForm() }} />
                   </div>
