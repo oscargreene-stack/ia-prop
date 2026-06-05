@@ -267,7 +267,7 @@ function ChatVendedor({ onBack }) {
         }
         const nfd = s => s.toUpperCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/Ñ/g,'N').replace(/ñ/g,'N').trim()
         setPlacesResult({ calle: nfd(streetName), numero: streetNumber, comunaNorm: nfd(comunaLong), fullAddress: place.formatted_address })
-        setInputVal(place.formatted_address)
+        const calleNumero = [streetName, streetNumber].filter(Boolean).join(' ').trim(); setInputVal(calleNumero || place.formatted_address); const comunaMatch = COMUNAS_RM.find(c => nfd(c) === nfd(comunaLong)); if (comunaMatch) setComunaForm(comunaMatch);
       })
     }
     if (window.google?.maps?.places) { initAC(); return }
