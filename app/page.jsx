@@ -562,26 +562,18 @@ function ChatVendedor({ onBack }) {
   }
 
   const fetchSII = async (d) => {
-    setMessages(m => [...m, { role:'agent', content:{ type:'loading', text:'Buscando tu propiedad en el SII y catastro…' }}])
+    setMessages(m => [...m, { role:'agent', content:{ type:'loading', text:'Buscando tu propiedad en el catastro…' }}])
     try {
-      // Proxy server-side — la key nunca sale al browser
-      // Si tenemos datos de Google Places, usarlos directamente para mejor matching
-      const pr = d.placesResult
-      const params = new URLSearchParams(pr ? {
-        calle:      pr.calle,
-        numero:     pr.numero,
-        comunaNorm: pr.comunaNorm,
-        unidad:     d.depto || '',
-      } : {
-        direccion: d.direccion || '',
-        comuna:    d.comuna || '',
-        unidad:    d.depto || '',
+      // Catastro vía DataInmobiliaria (reemplaza BaseAPI). Con dirección + comuna basta.
+      const res = await fetch('/api/predio', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ direccion: d.direccion || '', comuna: d.comuna || '' }),
       })
-      const res = await fetch(`/api/sii?${params}`)
+      setMessages(m => m.filter(x => !(x.role==='agent' && x.content?.type==='loading')))
 
       if (!res.ok) {
-        setMessages(m => m.filter(x => !(x.role==='agent' && x.content?.type==='loading')))
-        await addAgent('No pude consultar el SII ahora, pero continuamos sin problema.', 400)
+        await addAgent('No pude consultar el catastro ahora, pero continuamos sin problema.', 400)
         const fallback = { ...d, siiData:{ direccion:`${d.direccion}${d.depto ? ' '+d.depto : ''}, ${d.comuna}` } }
         setData(fallback)
         await nextStep(fallback, 0)
@@ -589,40 +581,50 @@ function ChatVendedor({ onBack }) {
       }
 
       const json = await res.json()
-            setMessages(m => m.filter(x => !(x.role==='agent' && x.content?.type==='loading')))
+      // Mapear candidatos de /api/predio a la forma que ya usa el flujo
+      const resultados = (json.candidatos || []).map(c => ({
+        rol: c.rol,
+        direccion: c.direccion,
+        destino: c.destino || 'Habitacional',
+        m2_construido: c.m2_construidos,
+        m2_terreno: c.m2_terreno,
+        es_copropiedad: c.es_copropiedad,
+        terreno_origen: c.terreno_origen,
+        ano_construccion: c.ano_construccion,
+      }))
 
-      // ── Múltiples resultados → mostrar selector ───────────────────────────
-      if (json.multiples && json.resultados?.length > 1) {
-        await addAgent(`Encontré ${json.resultados.length} propiedades en esa dirección. ¿Cuál es la tuya?`, 500)
+      // Multiples resultados -> selector
+      if (resultados.length > 1) {
+        await addAgent(`Encontré ${resultados.length} propiedades en esa dirección. ¿Cuál es la tuya?`, 500)
         setInputMode('options')
-        setOptions(json.resultados.map((r, i) => ({
+        setOptions(resultados.map((r, i) => ({
           id: String(i),
           label: [r.direccion, r.destino, r.m2_construido && `${r.m2_construido} m²`, r.rol && `ROL ${r.rol}`].filter(Boolean).join(' · '),
           icon: '🏠',
           _sii: r,
         })))
-        // Guardar candidatos para el handler
-        setData(prev => ({ ...prev, _candidatos: json.resultados, _pendingData: d }))
+        setData(prev => ({ ...prev, _candidatos: resultados, _pendingData: d }))
         setStage('elegir_unidad')
         return
       }
 
-      // ── No encontrado → cont      // ── No encontrado → pedir m² al usuario ─────────────────────────────────
-      if (json.noEncontrado || !json.resultados?.length) {
+      // No encontrado -> pedir m2
+      if (!resultados.length) {
         const newData = { ...d, siiData:{ direccion:`${d.direccion}${d.depto ? ' '+d.depto : ''}, ${d.comuna}` } }
         setData(newData)
-        await addAgent(`No encontré esta propiedad en el catastro del SII con esa dirección. Para una tasación precisa necesito los metros cuadrados reales.\n\n¿Cuántos **m² construidos** tiene la propiedad? (ej: 180)`, 400)
+        await addAgent(`No encontré esta propiedad en el catastro con esa dirección. Para una tasación precisa necesito los metros cuadrados reales.\n\n¿Cuántos **m² construidos** tiene la propiedad? (ej: 180)`, 400)
         setInputMode('text')
         setStage('ingresar_m2_construido')
         return
       }
 
-      // ── Un solo resultado ─────────────────────────────────────────────────
-      const sii = json.resultados[0]
+      // Un solo resultado
+      const sii = resultados[0]
       const newData = { ...d, siiData: sii }
       setData(newData)
       setMessages(m => [...m, { role:'agent', content:{ type:'sii', data:sii }}])
-      await addAgent('¿Estos datos son correctos?', 400)
+      const terrenoTxt = sii.terreno_origen === 'bien_comun' ? ' (el terreno corresponde al bien común del edificio)' : ''
+      await addAgent(`¿Estos datos son correctos?${terrenoTxt}`, 400)
       setInputMode('options')
       setOptions([{id:'si',label:'Sí, son correctos',icon:'✅'},{id:'no',label:'No, quiero corregir',icon:'✏️'}])
       setStage('confirmar_sii')
@@ -630,7 +632,7 @@ function ChatVendedor({ onBack }) {
     } catch(err) {
       console.error('fetchSII catch:', err.name, err.message)
       setMessages(m => m.filter(x => !(x.role==='agent' && x.content?.type==='loading')))
-      await addAgent('Tuve un problema conectándome al SII. No te preocupes, continuamos con lo que me cuentes directamente.', 600)
+      await addAgent('Tuve un problema conectándome al catastro. No te preocupes, continuamos con lo que me cuentes directamente.', 600)
       const newData = { ...d, siiData:{ direccion:`${d.direccion}, ${d.comuna}` } }
       setData(newData)
       await nextStep(newData, 0)
