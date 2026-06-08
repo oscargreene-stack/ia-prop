@@ -815,7 +815,7 @@ function ChatVendedor({ onBack }) {
           {resultado.comparables?.length>0 && (
             <div className="comp-mini">
               <div className="tas-section-title">Transacciones de referencia</div>
-              {resultado.comparables.slice(0,4).map((c,i) => (
+              {resultado.comparables.slice(0,6).map((c,i) => (
                 <div key={i} className="comp-mini-item">
                   <div>
                     <div className="comp-mini-addr">{c.direccion} · {c.m2} m² construidos{c.m2_terreno ? ` · ${c.m2_terreno} m² terreno` : ''}</div>
