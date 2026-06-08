@@ -52,13 +52,11 @@ export async function POST(request) {
 
   // ── 1. Obtener comparables REALES del CBR via BigQuery ──────────────────
   let comparablesReales = []
-  const _dbg = {}
   try {
     const codCom = siiData?.cod_comuna
       || (rol ? parseInt(String(rol).split('-')[0], 10) : null)
       || COD_COMUNA[normalizaComuna(comuna)]
       || null
-    _dbg.codCom = codCom
     if (codCom && m2Construido && process.env.BASEAPI_KEY) {
       const rolParts = String(rol || '').split('-')
       const ccom = rolParts[0] || String(codCom)
@@ -73,13 +71,11 @@ export async function POST(request) {
       }).toString()
       const restUrl = 'https://datainmobiliaria.cl/api/v1/propiedades/detalle?' + qs
       const restRes = await fetch(restUrl, { headers: { Authorization: 'Bearer ' + process.env.BASEAPI_KEY } })
-      _dbg.restOk = restRes.ok; _dbg.restStatus = restRes.status
       if (restRes.ok) {
         const data = await restRes.json()
         const ventas = Array.isArray(data.detalle_ventas_recientes) ? data.detalle_ventas_recientes : []
         const filtro = Array.isArray(data.comparables_filtro) ? data.comparables_filtro : []
         const fuente = filtro.length > 0 ? filtro : ventas
-        _dbg.ventasCount = ventas.length; _dbg.filtroCount = filtro.length
         comparablesReales = fuente
           .filter(v => parseFloat(v.superficie_construccion) > 0 && parseFloat(v.price) > 0 && (v.unit === 'UF' || !v.unit))
           .map(v => {
@@ -102,13 +98,10 @@ export async function POST(request) {
           .filter(c => c.uf_m2 && c.uf_m2 >= 20 && c.uf_m2 <= 400)
           .sort((a, b) => (a.distancia_m != null && b.distancia_m != null) ? (a.distancia_m - b.distancia_m) : 0)
           .slice(0, 12)
-        _dbg.rowsFound = comparablesReales.length
       } else {
-        try { _dbg.restErr = (await restRes.text()).slice(0, 300) } catch (e) {}
       }
     }
   } catch (e) {
-    _dbg.fetchErr = e.message
     console.error('Error fetching comparables (REST):', e.message)
   }
 
@@ -323,7 +316,6 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
         parsed.potencial_desarrollo = { aplica: false }
       }
 
-      parsed._debug = _dbg
       return Response.json(parsed)
     } catch(parseErr) {
       console.error('JSON parse error:', parseErr.message)
