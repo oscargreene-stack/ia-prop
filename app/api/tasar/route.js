@@ -96,7 +96,7 @@ export async function POST(request) {
             ${terrenoWhere}
             ${copropWhere}
           ORDER BY cbr.fecha_inscripcion DESC
-          LIMIT 8
+          LIMIT 12
         `
 
         const bqRes = await fetch('https://api.anthropic.com/v1/messages', {
@@ -118,34 +118,54 @@ export async function POST(request) {
 
         if (bqRes.ok) {
           const bqData = await bqRes.json()
-          const bqText = (bqData.content || [])
-            .filter(b => b.type === 'mcp_tool_result' || b.type === 'text')
-            .map(b => b.type === 'mcp_tool_result' ? (b.content?.[0]?.text || '') : (b.text || ''))
-            .join('\n')
-
-          const arrMatch = bqText.match(/\[[\s\S]*\]/)
-          if (arrMatch) {
-            try {
-              const rows = JSON.parse(arrMatch[0])
-              comparablesReales = rows
-                .filter(r => r.precio_uf > 0 && r.m2_construido > 0)
-                .map(r => ({
-                  direccion:    r.direccion_sii || 'Sin dirección',
-                  tipo:         tipo,
-                  m2:           Math.round(parseFloat(r.m2_construido)),
-                  m2_terreno:   r.m2_terreno ? Math.round(parseFloat(r.m2_terreno)) : null,
-                  fecha:        r.fecha_inscripcion ? r.fecha_inscripcion.toString().slice(0, 7) : 'N/D',
-                  precio_uf:    Math.round(parseFloat(r.precio_uf)),
-                  uf_m2:        parseFloat(r.m2_construido) > 0
-                                  ? Math.round(parseFloat(r.precio_uf) / parseFloat(r.m2_construido))
-                                  : null,
-                  ano_construccion: r.ano_construccion || null,
-                  mismo_edificio: false,
-                  similitud: calcularSimilitud(r, m2Construido, m2Terreno),
-                }))
-            } catch(e) {
-              console.error('Error parsing comparables:', e.message)
+          // Extrae filas de forma robusta, sin depender de que el modelo
+          // reescriba el JSON:
+          //  1) resultado ESTRUCTURADO del tool MCP (bq_run_query => {rows:[...]})
+          //  2) fallback: primer array JSON con precio_uf en cualquier bloque de texto
+          let rows = []
+          for (const b of (bqData.content || [])) {
+            if (b.type === 'mcp_tool_result') {
+              const t = b.content?.[0]?.text || ''
+              try {
+                const obj = JSON.parse(t)
+                if (obj && Array.isArray(obj.rows)) { rows = obj.rows; break }
+                if (Array.isArray(obj)) { rows = obj; break }
+              } catch(e) {}
             }
+          }
+          if (rows.length === 0) {
+            const bqText = (bqData.content || [])
+              .map(b => b.type === 'mcp_tool_result' ? (b.content?.[0]?.text || '') : (b.text || ''))
+              .join('\n')
+            const cands = bqText.match(/\[[\s\S]*?\]/g) || []
+            cands.sort((a, b) => b.length - a.length)
+            for (const c of cands) {
+              try {
+                const arr = JSON.parse(c)
+                if (Array.isArray(arr) && arr.length && arr[0] && ('precio_uf' in arr[0])) { rows = arr; break }
+              } catch(e) {}
+            }
+          }
+
+          try {
+            comparablesReales = rows
+              .filter(r => r.precio_uf > 0 && r.m2_construido > 0)
+              .map(r => ({
+                direccion:    r.direccion_sii || 'Sin dirección',
+                tipo:         tipo,
+                m2:           Math.round(parseFloat(r.m2_construido)),
+                m2_terreno:   r.m2_terreno ? Math.round(parseFloat(r.m2_terreno)) : null,
+                fecha:        r.fecha_inscripcion ? r.fecha_inscripcion.toString().slice(0, 7) : 'N/D',
+                precio_uf:    Math.round(parseFloat(r.precio_uf)),
+                uf_m2:        parseFloat(r.m2_construido) > 0
+                                ? Math.round(parseFloat(r.precio_uf) / parseFloat(r.m2_construido))
+                                : null,
+                ano_construccion: r.ano_construccion || null,
+                mismo_edificio: false,
+                similitud: calcularSimilitud(r, m2Construido, m2Terreno),
+              }))
+          } catch(e) {
+            console.error('Error parsing comparables:', e.message)
           }
         }
       }
