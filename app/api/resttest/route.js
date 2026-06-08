@@ -19,7 +19,21 @@ export async function GET(request) {
     try {
       const rr = await fetch(url, { headers: { Authorization: 'Bearer ' + tok } })
       const txt = await rr.text()
-      results[name] = { status: rr.status, body: txt.slice(0, 500) }
+      let struct = null
+      try {
+        const j = JSON.parse(txt)
+        const cf = j.comparables_filtro || []
+        const vr = j.detalle_ventas_recientes || []
+        struct = {
+          keys: Object.keys(j),
+          comparables_filtro_count: Array.isArray(cf) ? cf.length : null,
+          comparables_filtro_0: Array.isArray(cf) && cf[0] ? cf[0] : null,
+          ventas_recientes_count: Array.isArray(vr) ? vr.length : null,
+          ventas_recientes_0: Array.isArray(vr) && vr[0] ? vr[0] : null,
+          detalle_mercado: j.detalle_mercado || null
+        }
+      } catch (e) { struct = { parseErr: String(e).slice(0,120) } }
+      results[name] = { status: rr.status, struct, bodyLen: txt.length }
     } catch (e) {
       results[name] = { err: String(e).slice(0, 200) }
     }
