@@ -52,12 +52,14 @@ export async function POST(request) {
 
   // ── 1. Obtener comparables REALES del CBR via BigQuery ──────────────────
   let comparablesReales = []
+  const _dbg = {}
   try {
     if (DATAINM_TOKEN) {
       const codCom = siiData?.cod_comuna
         || (rol ? parseInt(String(rol).split('-')[0], 10) : null)
         || COD_COMUNA[normalizaComuna(comuna)]
         || null
+      _dbg.codCom = codCom
 
       // SQL para comparables: casas/terrenos en misma comuna, últimos 18 meses, con m2 similares
       // Para casas: buscar propiedades con m2_construido similar ±40% Y m2_terreno si existe
@@ -116,8 +118,11 @@ export async function POST(request) {
           }),
         })
 
+        _dbg.bqOk = bqRes.ok
+        _dbg.bqStatus = bqRes.status
         if (bqRes.ok) {
           const bqData = await bqRes.json()
+          _dbg.contentTypes = (bqData.content || []).map(b => b.type)
           // Extrae filas de forma robusta, sin depender de que el modelo
           // reescriba el JSON:
           //  1) resultado ESTRUCTURADO del tool MCP (bq_run_query => {rows:[...]})
@@ -147,6 +152,7 @@ export async function POST(request) {
             }
           }
 
+          _dbg.rowsFound = rows.length
           try {
             comparablesReales = rows
               .filter(r => r.precio_uf > 0 && r.m2_construido > 0)
@@ -171,8 +177,9 @@ export async function POST(request) {
       }
     }
   } catch(e) {
+    _dbg.fetchErr = e.message
     console.error('Error fetching comparables:', e.message)
-    // Continúa sin comparables — Claude generará estimados con advertencia
+    // Continua sin comparables — Claude generará estimados con advertencia
   }
 
   function calcularSimilitud(row, m2C, m2T) {
@@ -386,6 +393,7 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
         parsed.potencial_desarrollo = { aplica: false }
       }
 
+      parsed._debug = _dbg
       return Response.json(parsed)
     } catch(parseErr) {
       console.error('JSON parse error:', parseErr.message)
