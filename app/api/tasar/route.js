@@ -120,6 +120,7 @@ export async function POST(request) {
 
         _dbg.bqOk = bqRes.ok
         _dbg.bqStatus = bqRes.status
+        if (!bqRes.ok) { try { _dbg.bqErr = (await bqRes.text()).slice(0, 500) } catch(e) {} }
         if (bqRes.ok) {
           const bqData = await bqRes.json()
           _dbg.contentTypes = (bqData.content || []).map(b => b.type)
