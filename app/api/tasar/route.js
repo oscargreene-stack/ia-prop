@@ -5,6 +5,21 @@
 //  2. Obtiene comparables REALES del CBR via DataInmobiliaria BigQuery
 //  3. Claude analiza y valoriza usando esos comparables reales
 
+const COD_COMUNA = {
+  'CERRILLOS':14166,'CERRO NAVIA':14156,'CONCHALI':14127,'EL BOSQUE':16165,'ESTACION CENTRAL':14157,
+  'HUECHURABA':14158,'INDEPENDENCIA':13167,'LA CISTERNA':16110,'LA FLORIDA':15128,'LA GRANJA':16131,
+  'LA PINTANA':16154,'LA REINA':15132,'LAS CONDES':15108,'LO BARNECHEA':15161,'LO ESPEJO':16164,
+  'LO PRADO':14155,'MACUL':15151,'MAIPU':14109,'NUNOA':15105,'PEDRO AGUIRRE CERDA':16162,
+  'PENALOLEN':15152,'PROVIDENCIA':15103,'PUDAHUEL':14111,'PUENTE ALTO':16301,'QUILICURA':14114,
+  'QUINTA NORMAL':14107,'RECOLETA':13159,'RENCA':14113,'SAN BERNARDO':16401,'SAN JOAQUIN':16163,
+  'SAN MIGUEL':16106,'SAN RAMON':16153,'SANTIAGO':13101,'VITACURA':15160,
+}
+function normalizaComuna(s) {
+  return String(s || '').trim().toUpperCase()
+    .replace(/Á/g,'A').replace(/É/g,'E').replace(/Í/g,'I').replace(/Ó/g,'O').replace(/Ú/g,'U')
+    .replace(/Ñ/g,'N')
+}
+
 export async function POST(request) {
   const body = await request.json()
   const { siiData, form, answers, extras } = body
@@ -39,7 +54,10 @@ export async function POST(request) {
   let comparablesReales = []
   try {
     if (DATAINM_TOKEN) {
-      const codCom = siiData?.cod_comuna || null
+      const codCom = siiData?.cod_comuna
+        || (rol ? parseInt(String(rol).split('-')[0], 10) : null)
+        || COD_COMUNA[normalizaComuna(comuna)]
+        || null
 
       // SQL para comparables: casas/terrenos en misma comuna, últimos 18 meses, con m2 similares
       // Para casas: buscar propiedades con m2_construido similar ±40% Y m2_terreno si existe
@@ -54,6 +72,9 @@ export async function POST(request) {
         const terrenoWhere = m2Terreno && esCasa
           ? `AND c.superficie_total_terreno BETWEEN ${Math.round(m2Terreno * 0.4)} AND ${Math.round(m2Terreno * 2.5)}`
           : ''
+        const copropWhere = (tipo === 'departamento' || tipo === 'oficina')
+          ? 'AND c.copropiedad = TRUE'
+          : tipo === 'casa' ? 'AND c.copropiedad = FALSE' : ''
 
         sqlComparables = `
           SELECT
@@ -73,6 +94,7 @@ export async function POST(request) {
             AND cbr.precio_uf BETWEEN 500 AND 100000
             AND c.superficie_construccion BETWEEN ${m2Min} AND ${m2Max}
             ${terrenoWhere}
+            ${copropWhere}
           ORDER BY cbr.fecha_inscripcion DESC
           LIMIT 8
         `
@@ -174,7 +196,7 @@ ANÁLISIS DE POTENCIAL DE DESARROLLO (solo casas/terrenos con m² terreno > 800m
 - Si permite 2+ unidades: incluir potencial_desarrollo
 
 COMPARABLES: Se te proporcionan transacciones REALES del CBR (Conservador de Bienes Raíces).
-Úsalas como base principal para tu análisis. Si no hay suficientes, indica que son limitadas.
+El valor_uf y precio_m2 DEBEN derivarse de la MEDIANA de UF/m² de esas transacciones reales, NO de tus referencias generales: precio_m2 = mediana(UF/m² de los comparables) y valor_uf = precio_m2 × m² construidos confirmados. Tus rangos de referencia por comuna SOLO aplican si NO hay comparables. Tu análisis, factores y recomendación deben ser coherentes con ese valor anclado en transacciones reales.
 
 RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
 {
@@ -300,6 +322,19 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
       // Si hay comparables reales, reemplazar los del LLM con los reales
       if (comparablesReales.length > 0) {
         parsed.comparables = comparablesReales
+        // Ancla determinística: valor base = mediana(UF/m2) de comparables x m2 construidos
+        const ufm2List = comparablesReales.map(c => c.uf_m2).filter(x => x > 0).sort((a, b) => a - b)
+        if (ufm2List.length && m2Construido) {
+          const mid = Math.floor(ufm2List.length / 2)
+          const medianaUfM2 = ufm2List.length % 2 ? ufm2List[mid] : Math.round((ufm2List[mid - 1] + ufm2List[mid]) / 2)
+          const baseUf = Math.round(medianaUfM2 * m2Construido)
+          parsed.valor_uf = baseUf
+          parsed.precio_m2 = medianaUfM2
+          parsed.desglose = [
+            { concepto: 'Valor base por comparables CBR', calculo: `mediana ${medianaUfM2} UF/m2 x ${m2Construido} m2 (${comparablesReales.length} ventas reales)`, valor_uf: baseUf }
+          ]
+          parsed.confianza = comparablesReales.length >= 5 ? 'Alta' : (comparablesReales.length >= 3 ? 'Media' : 'Baja')
+        }
       }
 
       // Calcular potencial_desarrollo en servidor
