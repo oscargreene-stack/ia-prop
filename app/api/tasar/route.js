@@ -54,133 +54,62 @@ export async function POST(request) {
   let comparablesReales = []
   const _dbg = {}
   try {
-    if (DATAINM_TOKEN) {
-      const codCom = siiData?.cod_comuna
-        || (rol ? parseInt(String(rol).split('-')[0], 10) : null)
-        || COD_COMUNA[normalizaComuna(comuna)]
-        || null
-      _dbg.codCom = codCom
-
-      // SQL para comparables: casas/terrenos en misma comuna, últimos 18 meses, con m2 similares
-      // Para casas: buscar propiedades con m2_construido similar ±40% Y m2_terreno si existe
-      let sqlComparables
-      const esTerreno = ['terreno', 'parcela', 'agricola'].includes(tipo)
-      const esCasa    = tipo === 'casa'
-
-      if (codCom && (m2Construido || m2Terreno)) {
-        const m2Base = m2Construido || m2Terreno
-        const m2Min  = Math.round(m2Base * 0.55)
-        const m2Max  = Math.round(m2Base * 1.45)
-        const terrenoWhere = m2Terreno && esCasa
-          ? `AND c.superficie_total_terreno BETWEEN ${Math.round(m2Terreno * 0.4)} AND ${Math.round(m2Terreno * 2.5)}`
-          : ''
-        const copropWhere = (tipo === 'departamento' || tipo === 'oficina')
-          ? 'AND c.copropiedad = TRUE'
-          : tipo === 'casa' ? 'AND c.copropiedad = FALSE' : ''
-
-        sqlComparables = `
-          SELECT
-            cbr.fecha_inscripcion,
-            cbr.precio_uf,
-            c.superficie_construccion AS m2_construido,
-            c.superficie_total_terreno AS m2_terreno,
-            c.direccion_sii,
-            c.cod_destino,
-            c.ano_construccion,
-            c.cod_com, c.cod_mz, c.cod_pr
-          FROM datainmobiliaria.cbr_limpio cbr
-          JOIN datainmobiliaria.consolidado c
-            ON cbr.cod_com = c.cod_com AND cbr.cod_mz = c.cod_mz AND cbr.cod_pr = c.cod_pr
-          WHERE cbr.cod_com = ${codCom}
-            AND cbr.fecha_inscripcion >= DATE_SUB(CURRENT_DATE(), INTERVAL 24 MONTH)
-            AND cbr.precio_uf BETWEEN 500 AND 100000
-            AND c.superficie_construccion BETWEEN ${m2Min} AND ${m2Max}
-            ${terrenoWhere}
-            ${copropWhere}
-          ORDER BY cbr.fecha_inscripcion DESC
-          LIMIT 12
-        `
-
-        const bqRes = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': ANTHROPIC_KEY,
-            'anthropic-version': '2023-06-01',
-            'anthropic-beta': 'mcp-client-2025-04-04',
-          },
-          body: JSON.stringify({
-            model: 'claude-haiku-4-5-20251001',
-            max_tokens: 3000,
-            system: 'Run the SQL using bq_run_query and return ONLY the raw JSON array of rows. No markdown, no explanation.',
-            messages: [{ role: 'user', content: `Run this SQL and return only the JSON array:\n${sqlComparables}` }],
-            mcp_servers: [{ type: 'url', url: MCP_URL, name: 'datainmobiliaria', authorization_token: DATAINM_TOKEN }],
-          }),
-        })
-
-        _dbg.bqOk = bqRes.ok
-        _dbg.bqStatus = bqRes.status
-        if (!bqRes.ok) { try { _dbg.bqErr = (await bqRes.text()).slice(0, 500) } catch(e) {} }
-        if (bqRes.ok) {
-          const bqData = await bqRes.json()
-          _dbg.contentTypes = (bqData.content || []).map(b => b.type)
-          // Extrae filas de forma robusta, sin depender de que el modelo
-          // reescriba el JSON:
-          //  1) resultado ESTRUCTURADO del tool MCP (bq_run_query => {rows:[...]})
-          //  2) fallback: primer array JSON con precio_uf en cualquier bloque de texto
-          let rows = []
-          for (const b of (bqData.content || [])) {
-            if (b.type === 'mcp_tool_result') {
-              const t = b.content?.[0]?.text || ''
-              try {
-                const obj = JSON.parse(t)
-                if (obj && Array.isArray(obj.rows)) { rows = obj.rows; break }
-                if (Array.isArray(obj)) { rows = obj; break }
-              } catch(e) {}
+    const codCom = siiData?.cod_comuna
+      || (rol ? parseInt(String(rol).split('-')[0], 10) : null)
+      || COD_COMUNA[normalizaComuna(comuna)]
+      || null
+    _dbg.codCom = codCom
+    if (codCom && m2Construido && process.env.BASEAPI_KEY) {
+      const rolParts = String(rol || '').split('-')
+      const ccom = rolParts[0] || String(codCom)
+      const cmz  = rolParts[1] || ''
+      const cpr  = rolParts[2] || ''
+      const m2Min = Math.round(m2Construido * 0.6)
+      const m2Max = Math.round(m2Construido * 1.5)
+      const cd = (tipo === 'oficina') ? 'O' : 'H'
+      const qs = new URLSearchParams({
+        cod_com: String(ccom), cod_mz: String(cmz), cod_pr: String(cpr),
+        radio: '2000', superficie_min: String(m2Min), superficie_max: String(m2Max), cod_destino: cd,
+      }).toString()
+      const restUrl = 'https://datainmobiliaria.cl/api/v1/propiedades/detalle?' + qs
+      const restRes = await fetch(restUrl, { headers: { Authorization: 'Bearer ' + process.env.BASEAPI_KEY } })
+      _dbg.restOk = restRes.ok; _dbg.restStatus = restRes.status
+      if (restRes.ok) {
+        const data = await restRes.json()
+        const ventas = Array.isArray(data.detalle_ventas_recientes) ? data.detalle_ventas_recientes : []
+        const filtro = Array.isArray(data.comparables_filtro) ? data.comparables_filtro : []
+        const fuente = filtro.length > 0 ? filtro : ventas
+        _dbg.ventasCount = ventas.length; _dbg.filtroCount = filtro.length
+        comparablesReales = fuente
+          .filter(v => parseFloat(v.superficie_construccion) > 0 && parseFloat(v.price) > 0 && (v.unit === 'UF' || !v.unit))
+          .map(v => {
+            const m2 = Math.round(parseFloat(v.superficie_construccion))
+            const uf = Math.round(parseFloat(v.price))
+            return {
+              direccion: (v.direccion_sii || 'Sin direccion').toString().trim(),
+              tipo: tipo,
+              m2: m2,
+              m2_terreno: null,
+              fecha: (v.fecha || 'N/D').toString().slice(0, 7),
+              precio_uf: uf,
+              uf_m2: m2 > 0 ? Math.round(uf / m2) : null,
+              ano_construccion: null,
+              mismo_edificio: cmz !== '' && String(v.cod_mz) === String(cmz),
+              distancia_m: v.distancia_metros != null ? Math.round(v.distancia_metros) : null,
+              similitud: calcularSimilitud({ m2_construido: v.superficie_construccion }, m2Construido, m2Terreno),
             }
-          }
-          if (rows.length === 0) {
-            const bqText = (bqData.content || [])
-              .map(b => b.type === 'mcp_tool_result' ? (b.content?.[0]?.text || '') : (b.text || ''))
-              .join('\n')
-            const cands = bqText.match(/\[[\s\S]*?\]/g) || []
-            cands.sort((a, b) => b.length - a.length)
-            for (const c of cands) {
-              try {
-                const arr = JSON.parse(c)
-                if (Array.isArray(arr) && arr.length && arr[0] && ('precio_uf' in arr[0])) { rows = arr; break }
-              } catch(e) {}
-            }
-          }
-
-          _dbg.rowsFound = rows.length
-          try {
-            comparablesReales = rows
-              .filter(r => r.precio_uf > 0 && r.m2_construido > 0)
-              .map(r => ({
-                direccion:    r.direccion_sii || 'Sin dirección',
-                tipo:         tipo,
-                m2:           Math.round(parseFloat(r.m2_construido)),
-                m2_terreno:   r.m2_terreno ? Math.round(parseFloat(r.m2_terreno)) : null,
-                fecha:        r.fecha_inscripcion ? r.fecha_inscripcion.toString().slice(0, 7) : 'N/D',
-                precio_uf:    Math.round(parseFloat(r.precio_uf)),
-                uf_m2:        parseFloat(r.m2_construido) > 0
-                                ? Math.round(parseFloat(r.precio_uf) / parseFloat(r.m2_construido))
-                                : null,
-                ano_construccion: r.ano_construccion || null,
-                mismo_edificio: false,
-                similitud: calcularSimilitud(r, m2Construido, m2Terreno),
-              }))
-          } catch(e) {
-            console.error('Error parsing comparables:', e.message)
-          }
-        }
+          })
+          .filter(c => c.uf_m2 && c.uf_m2 >= 20 && c.uf_m2 <= 400)
+          .sort((a, b) => (a.distancia_m != null && b.distancia_m != null) ? (a.distancia_m - b.distancia_m) : 0)
+          .slice(0, 12)
+        _dbg.rowsFound = comparablesReales.length
+      } else {
+        try { _dbg.restErr = (await restRes.text()).slice(0, 300) } catch (e) {}
       }
     }
-  } catch(e) {
+  } catch (e) {
     _dbg.fetchErr = e.message
-    console.error('Error fetching comparables:', e.message)
-    // Continua sin comparables — Claude generará estimados con advertencia
+    console.error('Error fetching comparables (REST):', e.message)
   }
 
   function calcularSimilitud(row, m2C, m2T) {
