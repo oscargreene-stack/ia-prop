@@ -59,9 +59,29 @@ function flatten(j) {
 }
 
 // Cache del mapa nombre_comuna -> codigo (en memoria del server)
+// Códigos de comuna del catastro SII (INE) — Región Metropolitana
+const COMUNA_RM = {
+  'SANTIAGO': '13101', 'CERRILLOS': '13102', 'CERRO NAVIA': '13103', 'CONCHALI': '13104',
+  'EL BOSQUE': '13105', 'ESTACION CENTRAL': '13106', 'HUECHURABA': '13107', 'INDEPENDENCIA': '13108',
+  'LA CISTERNA': '13109', 'LA FLORIDA': '13110', 'LA GRANJA': '13111', 'LA PINTANA': '13112',
+  'LA REINA': '13113', 'LAS CONDES': '13114', 'LO BARNECHEA': '13115', 'LO ESPEJO': '13116',
+  'LO PRADO': '13117', 'MACUL': '13118', 'MAIPU': '13119', 'NUNOA': '13120',
+  'PEDRO AGUIRRE CERDA': '13121', 'PENALOLEN': '13122', 'PROVIDENCIA': '13123', 'PUDAHUEL': '13124',
+  'QUILICURA': '13125', 'QUINTA NORMAL': '13126', 'RECOLETA': '13127', 'RENCA': '13128',
+  'SAN JOAQUIN': '13129', 'SAN MIGUEL': '13130', 'SAN RAMON': '13131', 'VITACURA': '13132',
+  'PUENTE ALTO': '13201', 'PIRQUE': '13202', 'SAN JOSE DE MAIPO': '13203',
+  'COLINA': '13301', 'LAMPA': '13302', 'TILTIL': '13303',
+  'SAN BERNARDO': '13401', 'BUIN': '13402', 'CALERA DE TANGO': '13403', 'PAINE': '13404',
+  'MELIPILLA': '13501', 'ALHUE': '13502', 'CURACAVI': '13503', 'MARIA PINTO': '13504', 'SAN PEDRO': '13505',
+  'TALAGANTE': '13601', 'EL MONTE': '13602', 'ISLA DE MAIPO': '13603', 'PADRE HURTADO': '13604', 'PENAFLOR': '13605',
+}
+
 let COMUNA_MAP = null
 async function getComunaCode(nombre, dbg) {
   const target = norm(nombre)
+  if (COMUNA_RM[target]) return COMUNA_RM[target]
+  const hitRm = Object.keys(COMUNA_RM).find(k => k.includes(target) || target.includes(k))
+  if (hitRm) return COMUNA_RM[hitRm]
   if (!COMUNA_MAP) {
     COMUNA_MAP = {}
     try {
