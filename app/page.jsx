@@ -658,7 +658,7 @@ function ChatVendedor({ onBack }) {
       const resultado = await res.json()
       if (resultado.error) throw new Error(resultado.error)
       setMessages(m => m.filter(x => !(x.role==='agent' && x.content?.type==='loading')))
-      const { ajRemo, ajCar, ajJardin } = calcAjustes(finalData)
+      const { ajRemo, ajCar, ajJardin } = resultado.ajustes || calcAjustes(finalData)
       const m2Util = parseFloat(finalData.siiData?.m2_util || finalData.siiData?.m2_construido) || 60
       const valorBase = resultado.valor_uf || 0
       const valorFinal = valorBase + ajRemo + ajCar + ajJardin
