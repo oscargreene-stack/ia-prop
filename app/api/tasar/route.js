@@ -2,8 +2,10 @@
 // Agente Valentina — tasadora inmobiliaria experta
 // FLUJO:
 //  1. Requiere m2_construido real del SII (no estimado)
-//  2. Obtiene comparables REALES del CBR via DataInmobiliaria BigQuery
-//  3. Claude analiza y valoriza usando esos comparables reales
+//  2. Obtiene comparables REALES del CBR via DataInmobiliaria (REST)
+//  3. Calcula el valor DE FORMA DETERMINÍSTICA (mediana CBR + ajustes)
+//  4. Claude SOLO narra: análisis, factores, plan regulador y recomendación,
+//     coherentes con el valor determinístico (no recalcula valor)
 
 const COD_COMUNA = {
   'CERRILLOS':14166,'CERRO NAVIA':14156,'CONCHALI':14127,'EL BOSQUE':16165,'ESTACION CENTRAL':14157,
@@ -14,10 +16,99 @@ const COD_COMUNA = {
   'QUINTA NORMAL':14107,'RECOLETA':13159,'RENCA':14113,'SAN BERNARDO':16401,'SAN JOAQUIN':16163,
   'SAN MIGUEL':16106,'SAN RAMON':16153,'SANTIAGO':13101,'VITACURA':15160,
 }
+
 function normalizaComuna(s) {
   return String(s || '').trim().toUpperCase()
     .replace(/Á/g,'A').replace(/É/g,'E').replace(/Í/g,'I').replace(/Ó/g,'O').replace(/Ú/g,'U')
     .replace(/Ñ/g,'N')
+}
+
+// ── Fix #3: AJUSTES DETERMINÍSTICOS ───────────────────────────────────────────
+// Config aislada y tuneable. El Fix #4 reemplazará estos valores por un store
+// editable (Vercel KV / Postgres); la firma de aplicarAjustes() no debería cambiar.
+const AJUSTES_CONFIG = {
+  piso: {
+    tiposAplica: ['departamento', 'depto', 'oficina'],
+    pctPorCada5SobreEl5: 0.02,   // +2% por cada 5 pisos completos por encima del 5º
+    pisoBajoUmbral: 2,           // pisos 1–2
+    pctPisoBajo: -0.02,          // -2% en pisos bajos (default conservador; tunear con dato "sin vista")
+  },
+  orientacion: {
+    norte: 0.04,                 // punto medio del rango +3–5%
+    sur: -0.03,
+    // oriente / poniente / otras → 0
+  },
+  remodelacion: {
+    completa: 0.14,              // punto medio del rango +10–18%
+    parcial: 0.07,
+    // ninguna → 0
+  },
+}
+
+// Fix #4: lee los ajustes desde Vercel Edge Config (editables por el admin),
+// con AJUSTES_CONFIG como respaldo si el store está vacío o no responde.
+// Usa la connection string EDGE_CONFIG que Vercel inyecta; sin dependencias extra.
+async function getAjustesConfig() {
+  try {
+    const ec = process.env.EDGE_CONFIG
+    if (!ec) return AJUSTES_CONFIG
+    const u = new URL(ec)
+    const id = u.pathname.split('/').filter(Boolean)[0]
+    const token = u.searchParams.get('token')
+    if (!id || !token) return AJUSTES_CONFIG
+    const res = await fetch(`https://edge-config.vercel.com/${id}/item/ajustes?token=${token}`)
+    if (!res.ok) return AJUSTES_CONFIG
+    const stored = await res.json()
+    if (!stored || typeof stored !== 'object') return AJUSTES_CONFIG
+    // Overlay de los valores guardados sobre el respaldo (claves faltantes caen al default)
+    return {
+      piso: { ...AJUSTES_CONFIG.piso, ...(stored.piso || {}) },
+      orientacion: { ...AJUSTES_CONFIG.orientacion, ...(stored.orientacion || {}) },
+      remodelacion: { ...AJUSTES_CONFIG.remodelacion, ...(stored.remodelacion || {}) },
+    }
+  } catch (e) {
+    return AJUSTES_CONFIG
+  }
+}
+
+// Devuelve { factor, lineas[] } a partir del baseUf.
+// lineas[] son items de desglose ya calculados en UF.
+function aplicarAjustes({ baseUf, tipo, extras, answers, cfg }) {
+  const lineas = []
+  let acumUf = baseUf
+
+  const addPct = (concepto, pct, detalle) => {
+    if (!pct) return
+    const delta = Math.round(acumUf * pct)
+    if (delta === 0) return
+    const signo = pct > 0 ? '+' : ''
+    lineas.push({ concepto, calculo: `${detalle} (${signo}${Math.round(pct * 100)}%)`, valor_uf: delta })
+    acumUf += delta
+  }
+
+  // Piso (solo deptos/oficinas)
+  const tipoNorm = String(tipo || '').toLowerCase()
+  const piso = extras?.piso != null ? parseInt(String(extras.piso).match(/-?\d+/)?.[0] ?? '', 10) : null
+  if (cfg.piso.tiposAplica.includes(tipoNorm) && Number.isFinite(piso)) {
+    if (piso >= 5) {
+      const tramos = Math.floor((piso - 5) / 5)
+      if (tramos > 0) addPct('Ajuste por piso', tramos * cfg.piso.pctPorCada5SobreEl5, `piso ${piso}`)
+    } else if (piso >= 1 && piso <= cfg.piso.pisoBajoUmbral) {
+      addPct('Ajuste por piso', cfg.piso.pctPisoBajo, `piso bajo (${piso})`)
+    }
+  }
+
+  // Orientación
+  const ori = String(extras?.orientacion || '').toLowerCase()
+  if (ori.includes('norte')) addPct('Ajuste por orientación', cfg.orientacion.norte, 'orientación norte')
+  else if (ori.includes('sur')) addPct('Ajuste por orientación', cfg.orientacion.sur, 'orientación sur')
+
+  // Remodelación
+  const remo = String(answers?.remodelacion || '').toLowerCase()
+  if (remo.includes('completa')) addPct('Ajuste por remodelación', cfg.remodelacion.completa, `remodelación completa${answers?.tiempo_remo ? ', hace ' + answers.tiempo_remo : ''}`)
+  else if (remo.includes('parcial')) addPct('Ajuste por remodelación', cfg.remodelacion.parcial, 'remodelación parcial')
+
+  return { finalUf: acumUf, lineas }
 }
 
 export async function POST(request) {
@@ -25,22 +116,22 @@ export async function POST(request) {
   const { siiData, form, answers, extras } = body
 
   const ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY
-  const MCP_URL       = process.env.MCP_URL || 'https://mcp.datainmobiliaria.cl/mcp'
+  const MCP_URL = process.env.MCP_URL || 'https://mcp.datainmobiliaria.cl/mcp'
   const DATAINM_TOKEN = process.env.DATAINMOBILIARIA_TOKEN
 
   if (!ANTHROPIC_KEY) return Response.json({ error: 'ANTHROPIC_API_KEY no configurada' }, { status: 500 })
 
-  const dir       = siiData?.direccion || `${form.direccion}${form.depto ? ' '+form.depto : ''}, ${form.comuna}`
-  const comuna    = form.comuna || ''
-  const tipo      = extras?.tipo || 'propiedad'
-  const rol       = siiData?.rol || null
-  const anio      = siiData?.anio_construccion || null
-  const avaluo    = siiData?.avaluo_total_clp ? Math.round(siiData.avaluo_total_clp / 40408) : null
-  const caracts   = (extras?.caracteristicas || []).filter(c => c !== 'ninguna')
+  const dir = siiData?.direccion || `${form.direccion}${form.depto ? ' '+form.depto : ''}, ${form.comuna}`
+  const comuna = form.comuna || ''
+  const tipo = extras?.tipo || 'propiedad'
+  const rol = siiData?.rol || null
+  const anio = siiData?.anio_construccion || null
+  const avaluo = siiData?.avaluo_total_clp ? Math.round(siiData.avaluo_total_clp / 40408) : null
+  const caracts = (extras?.caracteristicas || []).filter(c => c !== 'ninguna')
 
   // ── Superficies confirmadas del SII ──────────────────────────────────────
   const m2Construido = siiData?.m2_construido ? parseFloat(siiData.m2_construido) : null
-  const m2Terreno    = siiData?.m2_terreno    ? parseFloat(siiData.m2_terreno)    : null
+  const m2Terreno = siiData?.m2_terreno ? parseFloat(siiData.m2_terreno) : null
 
   // Si no hay datos SII: no tasamos
   if (!m2Construido && !m2Terreno) {
@@ -50,7 +141,14 @@ export async function POST(request) {
     }, { status: 422 })
   }
 
-  // ── 1. Obtener comparables REALES del CBR via BigQuery ──────────────────
+  function calcularSimilitud(row, m2C, m2T) {
+    const dif = m2C ? Math.abs(parseFloat(row.m2_construido) - m2C) / m2C : 0
+    if (dif < 0.1) return 'Muy similar'
+    if (dif < 0.25) return 'Similar'
+    return 'Referencial'
+  }
+
+  // ── 1. Obtener comparables REALES del CBR via REST ──────────────────────
   let comparablesReales = []
   try {
     const codCom = siiData?.cod_comuna
@@ -60,8 +158,8 @@ export async function POST(request) {
     if (codCom && m2Construido && process.env.BASEAPI_KEY) {
       const rolParts = String(rol || '').split('-')
       const ccom = rolParts[0] || String(codCom)
-      const cmz  = rolParts[1] || ''
-      const cpr  = rolParts[2] || ''
+      const cmz = rolParts[1] || ''
+      const cpr = rolParts[2] || ''
       const m2Min = Math.round(m2Construido * 0.6)
       const m2Max = Math.round(m2Construido * 1.5)
       const cd = (tipo === 'oficina') ? 'O' : 'H'
@@ -98,21 +196,39 @@ export async function POST(request) {
           .filter(c => c.uf_m2 && c.uf_m2 >= 20 && c.uf_m2 <= 400)
           .sort((a, b) => (a.distancia_m != null && b.distancia_m != null) ? (a.distancia_m - b.distancia_m) : 0)
           .slice(0, 12)
-      } else {
       }
     }
   } catch (e) {
     console.error('Error fetching comparables (REST):', e.message)
   }
 
-  function calcularSimilitud(row, m2C, m2T) {
-    const dif = m2C ? Math.abs(parseFloat(row.m2_construido) - m2C) / m2C : 0
-    if (dif < 0.1) return 'Muy similar'
-    if (dif < 0.25) return 'Similar'
-    return 'Referencial'
+  // ── 2. VALOR DETERMINÍSTICO (Fix #3) ──────────────────────────────────────
+  // Se calcula ANTES del LLM para poder pasárselo como dato autoritativo.
+  let valorDet = null      // { valor_uf, precio_m2, confianza, desglose[] }
+  if (comparablesReales.length > 0 && m2Construido) {
+    const ufm2List = comparablesReales.map(c => c.uf_m2).filter(x => x > 0).sort((a, b) => a - b)
+    if (ufm2List.length) {
+      const mid = Math.floor(ufm2List.length / 2)
+      const medianaUfM2 = ufm2List.length % 2 ? ufm2List[mid] : Math.round((ufm2List[mid - 1] + ufm2List[mid]) / 2)
+      const baseUf = Math.round(medianaUfM2 * m2Construido)
+
+      const ajustesCfg = await getAjustesConfig()
+      const { finalUf, lineas } = aplicarAjustes({ baseUf, tipo, extras, answers, cfg: ajustesCfg })
+
+      const desglose = [
+        { concepto: 'Valor base por comparables CBR', calculo: `mediana ${medianaUfM2} UF/m2 x ${m2Construido} m2 (${comparablesReales.length} ventas reales)`, valor_uf: baseUf },
+        ...lineas,
+      ]
+      valorDet = {
+        valor_uf: finalUf,
+        precio_m2: Math.round(finalUf / m2Construido),
+        confianza: comparablesReales.length >= 5 ? 'Alta' : (comparablesReales.length >= 3 ? 'Media' : 'Baja'),
+        desglose,
+      }
+    }
   }
 
-  // ── 2. Armar prompt con datos confirmados y comparables reales ─────────
+  // ── 3. Armar prompt: el LLM SOLO narra ─────────────────────────────────────
   const systemPrompt = `Eres Valentina, tasadora inmobiliaria experta con 20 años de experiencia en la Región Metropolitana de Chile.
 
 REGLAS CRÍTICAS — DATOS CONFIRMADOS DEL SII:
@@ -120,33 +236,27 @@ REGLAS CRÍTICAS — DATOS CONFIRMADOS DEL SII:
 - USA EXACTAMENTE esos m² en todos los cálculos y el desglose.
 - Si no hay un dato confirmado de m², NO lo estimes — usa solo lo que tienes.
 
+VALOR DETERMINÍSTICO (AUTORITATIVO):
+- Cuando se te entregue un "VALOR FINAL" y un "DESGLOSE" calculados por el sistema, son DEFINITIVOS.
+- COPIA exactamente valor_uf, precio_m2, confianza y desglose tal como se te entregan. NO los recalcules ni los modifiques.
+- Tu trabajo es NARRAR: análisis, factores positivos/negativos, plan regulador y recomendación de precio, todo COHERENTE con ese valor final. La prosa NO puede contradecir el número (no menciones un valor distinto al entregado).
+- Si NO se te entrega un valor determinístico (no hubo comparables), recién ahí estima tú con tus rangos de referencia por comuna y confianza Media.
+
 PERFIL:
 - Conoces el mercado inmobiliario chileno 2023-2025: precios reales por comuna, tendencias, factores.
 - Manejas los planes reguladores comunales de la RM: zonificación, alturas, constructibilidad.
-- Entiendes cómo la remodelación, piso, orientación y características impactan el valor.
 
-PRECIOS DE REFERENCIA 2025 (UF/m² construido):
+PRECIOS DE REFERENCIA 2025 (UF/m² construido) — SOLO como respaldo si NO hay comparables:
 - Vitacura: 85-130 | Las Condes: 70-115 | Lo Barnechea: 60-100
 - Providencia: 65-100 | Ñuñoa: 55-82 | La Reina: 50-75
 - Macul, San Miguel, Quinta Normal: 35-55 | La Florida, Maipú, Pudahuel: 28-50
 - Santiago Centro: 45-72 | Peñalolén, La Granja: 30-48 | Puente Alto: 25-40
 - San Bernardo, El Bosque: 22-38 | Lo Prado, Renca: 25-42
 
-AJUSTES según características:
-- Piso: +2% cada 5 pisos sobre el 5to, penaliza piso 1-2 en deptos sin vista
-- Orientación norte: +3-5%, sur: -3%
-- Estado conservación: excelente +8%, deteriorado -10%
-- Año construcción: post-2010 neutro, 2000-2010 -3%, pre-2000 -5 a -10%
-- Terraza: 40-60% del precio/m² construido | Estacionamiento: 200-350 UF | Bodega: 50-100 UF
-- Remodelación completa reciente: +10-18%
-
 ANÁLISIS DE POTENCIAL DE DESARROLLO (solo casas/terrenos con m² terreno > 800m²):
 - Calcular unidades: (densidad_max_hab/ha ÷ 10000 × m2_terreno) ÷ 4 personas/hogar
 - Ejemplo: 3.982m², densidad 50 hab/ha → (50/10000)×3982÷4 = ~5 unidades
 - Si permite 2+ unidades: incluir potencial_desarrollo
-
-COMPARABLES: Se te proporcionan transacciones REALES del CBR (Conservador de Bienes Raíces).
-El valor_uf y precio_m2 DEBEN derivarse de la MEDIANA de UF/m² de esas transacciones reales, NO de tus referencias generales: precio_m2 = mediana(UF/m² de los comparables) y valor_uf = precio_m2 × m² construidos confirmados. Tus rangos de referencia por comuna SOLO aplican si NO hay comparables. Tu análisis, factores y recomendación deben ser coherentes con ese valor anclado en transacciones reales.
 
 RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
 {
@@ -188,26 +298,36 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
     ? `\n\nTRANSACCIONES REALES CBR (datos confirmados del Conservador de Bienes Raíces):\n${JSON.stringify(comparablesReales, null, 2)}`
     : '\n\nNOTA: No se encontraron comparables reales en el CBR para este segmento. Usa tus referencias de mercado con confianza Media.'
 
+  // Fix #3: el valor final determinístico se entrega al LLM como autoritativo.
+  const valorTexto = valorDet
+    ? `\n\nVALOR FINAL (AUTORITATIVO — cópialo tal cual, no recalcules):\n${JSON.stringify({
+        valor_uf: valorDet.valor_uf,
+        precio_m2: valorDet.precio_m2,
+        confianza: valorDet.confianza,
+        desglose: valorDet.desglose,
+      }, null, 2)}\nTu análisis, factores y recomendación deben ser coherentes con este valor.`
+    : ''
+
   const detalles = [
     `Tipo de propiedad: ${tipo}`,
     `Dirección: ${dir}`,
     `Comuna: ${comuna}`,
-    rol       ? `ROL SII: ${rol}` : null,
+    rol ? `ROL SII: ${rol}` : null,
     m2Construido ? `M² construidos CONFIRMADOS (SII): ${m2Construido} m²` : null,
-    m2Terreno    ? `M² terreno CONFIRMADO (SII): ${m2Terreno} m²` : null,
-    anio      ? `Año construcción: ${anio}` : null,
-    avaluo    ? `Avalúo fiscal: ${avaluo} UF` : null,
+    m2Terreno ? `M² terreno CONFIRMADO (SII): ${m2Terreno} m²` : null,
+    anio ? `Año construcción: ${anio}` : null,
+    avaluo ? `Avalúo fiscal: ${avaluo} UF` : null,
     siiData?.destino ? `Destino SII: ${siiData.destino}` : null,
     answers?.remodelacion && answers.remodelacion !== 'ninguna'
       ? `Remodelación: ${answers.remodelacion}${answers.tiempo_remo ? ', hace '+answers.tiempo_remo : ''}`
       : 'Sin remodelación',
-    answers?.terraza_m2 > 0   ? `Terraza: ${answers.terraza_m2} m²` : null,
+    answers?.terraza_m2 > 0 ? `Terraza: ${answers.terraza_m2} m²` : null,
     answers?.estacionamientos > 0 ? `Estacionamientos: ${answers.estacionamientos}` : null,
-    answers?.bodegas > 0      ? `Bodegas: ${answers.bodegas}` : null,
-    extras?.piso        ? `Piso: ${extras.piso}` : null,
+    answers?.bodegas > 0 ? `Bodegas: ${answers.bodegas}` : null,
+    extras?.piso ? `Piso: ${extras.piso}` : null,
     extras?.orientacion ? `Orientación: ${extras.orientacion}` : null,
     extras?.jardin_m2 > 0 ? `Jardín/patio: ${extras.jardin_m2} m²` : null,
-    caracts.length      ? `Características: ${caracts.join(', ')}` : null,
+    caracts.length ? `Características: ${caracts.join(', ')}` : null,
     extras?.precio_idea ? `Precio esperado por vendedor: ${extras.precio_idea}` : null,
   ].filter(Boolean).join('\n')
 
@@ -223,7 +343,7 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
         model: 'claude-sonnet-4-5',
         max_tokens: 3000,
         system: systemPrompt,
-        messages: [{ role: 'user', content: `Tasa esta propiedad:\n\n${detalles}${comparablesTexto}` }],
+        messages: [{ role: 'user', content: `Tasa esta propiedad:\n\n${detalles}${comparablesTexto}${valorTexto}` }],
       }),
     })
 
@@ -269,22 +389,15 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
     try {
       const parsed = JSON.parse(sanitized)
 
-      // Si hay comparables reales, reemplazar los del LLM con los reales
-      if (comparablesReales.length > 0) {
+      // Fix #3: el valor determinístico SIEMPRE manda sobre lo que devuelva el LLM.
+      if (valorDet) {
         parsed.comparables = comparablesReales
-        // Ancla determinística: valor base = mediana(UF/m2) de comparables x m2 construidos
-        const ufm2List = comparablesReales.map(c => c.uf_m2).filter(x => x > 0).sort((a, b) => a - b)
-        if (ufm2List.length && m2Construido) {
-          const mid = Math.floor(ufm2List.length / 2)
-          const medianaUfM2 = ufm2List.length % 2 ? ufm2List[mid] : Math.round((ufm2List[mid - 1] + ufm2List[mid]) / 2)
-          const baseUf = Math.round(medianaUfM2 * m2Construido)
-          parsed.valor_uf = baseUf
-          parsed.precio_m2 = medianaUfM2
-          parsed.desglose = [
-            { concepto: 'Valor base por comparables CBR', calculo: `mediana ${medianaUfM2} UF/m2 x ${m2Construido} m2 (${comparablesReales.length} ventas reales)`, valor_uf: baseUf }
-          ]
-          parsed.confianza = comparablesReales.length >= 5 ? 'Alta' : (comparablesReales.length >= 3 ? 'Media' : 'Baja')
-        }
+        parsed.valor_uf = valorDet.valor_uf
+        parsed.precio_m2 = valorDet.precio_m2
+        parsed.confianza = valorDet.confianza
+        parsed.desglose = valorDet.desglose
+      } else if (comparablesReales.length > 0) {
+        parsed.comparables = comparablesReales
       }
 
       // Calcular potencial_desarrollo en servidor
@@ -322,12 +435,13 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
       const extract = (key) => { const m = sanitized.match(new RegExp('"' + key + '"\\s*:\\s*([\\d.]+)')); return m ? parseFloat(m[1]) : null }
       const extractStr = (key) => { const m = sanitized.match(new RegExp('"' + key + '"\\s*:\\s*"([^"]*)"')); return m ? m[1] : null }
       const fallback = {
-        valor_uf: extract('valor_uf'), precio_m2: extract('precio_m2'),
-        confianza: extractStr('confianza') || 'Baja',
+        valor_uf: valorDet?.valor_uf ?? extract('valor_uf'),
+        precio_m2: valorDet?.precio_m2 ?? extract('precio_m2'),
+        confianza: valorDet?.confianza ?? extractStr('confianza') ?? 'Baja',
         analisis: extractStr('analisis') || 'Tasación completada.',
         recomendacion_precio_venta: extractStr('recomendacion_precio_venta') || '',
         comparables: comparablesReales,
-        desglose: [], factores_positivos: [], factores_negativos: [], plan_regulador: null
+        desglose: valorDet?.desglose ?? [], factores_positivos: [], factores_negativos: [], plan_regulador: null
       }
       if (fallback.valor_uf) return Response.json(fallback)
       return Response.json({ error: 'JSON invalido: ' + parseErr.message, raw: sanitized.slice(0, 300) }, { status: 500 })
