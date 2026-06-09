@@ -1,9 +1,8 @@
 // app/api/predio/route.js
-// Búsqueda de propiedad en el catastro REAL (SII/DataInmobiliaria).
-// Consulta la tabla `consolidado` vía el MCP de DataInmobiliaria (tool bq_run_query)
-// por dirección + comuna, o por ROL. Devuelve `candidatos` en la forma que el
-// frontend ya espera (rol, direccion, comuna, m2_construido, m2_terreno,
-// ano_construccion, destino, es_copropiedad, terreno_origen).
+// Búsqueda de propiedad en el catastro SII vía BaseAPI (REST), llamada DESDE EL SERVIDOR.
+// Endpoint: GET https://datainmobiliaria.cl/api/v1/sii/avaluo/buscar  (Authorization: Bearer BASEAPI_KEY)
+// Devuelve `candidatos` en la forma que el frontend ya espera:
+//   rol, direccion, comuna, m2_construido, m2_terreno, ano_construccion, destino, es_copropiedad, terreno_origen
 //   - 1 candidato  -> el chat lo usa directo
 //   - >1 candidato -> el chat muestra opciones
 //   - 0 candidatos -> el chat pide los m² a mano
@@ -13,215 +12,124 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const maxDuration = 30
 
-const MCP_URL = process.env.MCP_URL || 'https://mcp.datainmobiliaria.cl/mcp'
-const MCP_TOKEN = process.env.DATAINMOBILIARIA_TOKEN
+const API_BASE = 'https://datainmobiliaria.cl/api/v1'
+const KEY = process.env.BASEAPI_KEY
 
-// MAYÚSCULAS, sin tildes, sin ñ (igual que las tablas de referencia)
 function norm(s) {
   return String(s || '')
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-    .replace(/ñ/gi, 'N').replace(/Ñ/g, 'N')
+    .replace(/ñ/gi, 'N')
     .toUpperCase().trim()
-}
-// solo deja A-Z 0-9 y espacios -> seguro para inyectar en SQL
-function sqlSafe(s) {
-  return norm(s).replace(/[^A-Z0-9 ]/g, ' ').replace(/\s+/g, ' ').trim()
 }
 
 const DESTINO_LABEL = {
   H: 'Habitacional', C: 'Comercial', O: 'Oficina', L: 'Bodega', I: 'Industrial',
   Z: 'Estacionamiento', W: 'Sitio eriazo', K: 'Bienes comunes', A: 'Agrícola',
-  B: 'Agrícola', F: 'Forestal', G: 'Galpón', P: 'Estacionamiento', S: 'Salud',
+  B: 'Agrícola', F: 'Forestal', G: 'Galpón', S: 'Salud',
 }
 
-// ── Cliente MCP mínimo (Streamable HTTP / JSON-RPC) ────────────────────────────
-async function mcpBigQuery(sql, token, dbg) {
-  const headers = {
-    'Content-Type': 'application/json',
-    'Accept': 'application/json, text/event-stream',
-    'Authorization': 'Bearer ' + token,
+// Encuentra el array de resultados dentro de una respuesta de forma flexible
+function pickArray(j) {
+  if (Array.isArray(j)) return j
+  if (!j || typeof j !== 'object') return []
+  for (const k of ['resultados', 'results', 'data', 'propiedades', 'items', 'candidatos', 'avaluos', 'rows', 'predios']) {
+    if (Array.isArray(j[k])) return j[k]
   }
-  const parse = async (res) => {
-    const txt = await res.text()
-    const ct = res.headers.get('content-type') || ''
-    if (ct.includes('text/event-stream')) {
-      const datas = txt.split('\n')
-        .filter(l => l.startsWith('data:'))
-        .map(l => l.slice(5).trim())
-        .filter(Boolean)
-      for (let i = datas.length - 1; i >= 0; i--) {
-        try { return JSON.parse(datas[i]) } catch (e) {}
-      }
-      return null
+  if (j.data && typeof j.data === 'object') {
+    for (const k of ['resultados', 'results', 'propiedades', 'items', 'rows', 'predios']) {
+      if (Array.isArray(j.data[k])) return j.data[k]
     }
-    try { return JSON.parse(txt) } catch (e) { return { _raw: txt.slice(0, 300) } }
   }
-
-  // 1) initialize
-  const initRes = await fetch(MCP_URL, {
-    method: 'POST', headers,
-    body: JSON.stringify({
-      jsonrpc: '2.0', id: 1, method: 'initialize',
-      params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'ia-prop', version: '1.0' } },
-    }),
-  })
-  const sessionId = initRes.headers.get('mcp-session-id') || initRes.headers.get('Mcp-Session-Id')
-  const initJson = await parse(initRes)
-  if (dbg) dbg.init = { status: initRes.status, sessionId: sessionId || null, sample: JSON.stringify(initJson).slice(0, 200) }
-
-  const h2 = sessionId ? { ...headers, 'Mcp-Session-Id': sessionId } : headers
-
-  // 2) notifications/initialized
-  try {
-    await fetch(MCP_URL, {
-      method: 'POST', headers: h2,
-      body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} }),
-    })
-  } catch (e) {}
-
-  // 3) tools/call -> bq_run_query
-  const callRes = await fetch(MCP_URL, {
-    method: 'POST', headers: h2,
-    body: JSON.stringify({
-      jsonrpc: '2.0', id: 2, method: 'tools/call',
-      params: { name: 'bq_run_query', arguments: { sql } },
-    }),
-  })
-  const callJson = await parse(callRes)
-  if (dbg) dbg.call = { status: callRes.status, sample: JSON.stringify(callJson).slice(0, 300) }
-  return callJson
-}
-
-// Extrae el array de filas del resultado del tool MCP
-function extractRows(mcp) {
-  if (!mcp) return []
-  // structuredContent.rows
-  try {
-    const sc = mcp.result && mcp.result.structuredContent
-    if (sc && Array.isArray(sc.rows)) return sc.rows
-  } catch (e) {}
-  // content[].text -> JSON con .rows
-  try {
-    const content = mcp.result && mcp.result.content
-    if (Array.isArray(content)) {
-      for (const c of content) {
-        if (c && typeof c.text === 'string') {
-          try {
-            const j = JSON.parse(c.text)
-            if (Array.isArray(j.rows)) return j.rows
-            if (Array.isArray(j)) return j
-          } catch (e) {}
-        }
-      }
-    }
-  } catch (e) {}
   return []
 }
 
-const SELECT_COLS =
-  'SELECT c.cod_com, c.cod_mz, c.cod_pr, c.direccion_sii, c.cod_destino, ' +
-  'c.superficie_construccion, c.superficie_total_terreno, c.avaluo_fiscal_clp, ' +
-  'c.ano_construccion, c.copropiedad FROM datainmobiliaria.consolidado c'
+const toNum = (...vals) => {
+  for (const v of vals) { const n = parseFloat(v); if (isFinite(n)) return Math.round(n) }
+  return null
+}
+const pick = (o, ...keys) => {
+  for (const k of keys) { if (o && o[k] != null && o[k] !== '') return o[k] }
+  return null
+}
+
+function mapRow(r, comunaIn) {
+  const cc = pick(r, 'cod_com', 'cod_comuna', 'codCom')
+  const cmz = pick(r, 'cod_mz', 'codMz')
+  const cpr = pick(r, 'cod_pr', 'codPr')
+  const rolStr = pick(r, 'rol', 'rol_sii') ||
+    ((cc != null && cmz != null && cpr != null) ? `${cc}-${cmz}-${cpr}` : null)
+  const dest = pick(r, 'cod_destino', 'destino')
+  return {
+    rol: rolStr,
+    cod_comuna: cc != null ? Number(cc) : null,
+    comuna: comunaIn || pick(r, 'comuna') || null,
+    direccion: String(pick(r, 'direccion_sii', 'direccion', 'address') || '').replace(/\s+/g, ' ').trim(),
+    m2_construido: toNum(pick(r, 'superficie_construccion', 'm2_construido', 'sup_construccion', 'superficie_construida', 'metros_construidos')),
+    m2_terreno: toNum(pick(r, 'superficie_total_terreno', 'superficie_terreno', 'm2_terreno', 'sup_terreno')),
+    ano_construccion: toNum(pick(r, 'ano_construccion', 'anio_construccion')),
+    destino: DESTINO_LABEL[dest] || dest || null,
+    es_copropiedad: !!pick(r, 'copropiedad', 'es_copropiedad'),
+    terreno_origen: 'sii',
+    avaluo_total_clp: toNum(pick(r, 'avaluo_fiscal_clp', 'avaluo_fiscal', 'avaluo_total_clp', 'avaluo')),
+  }
+}
 
 export async function POST(request) {
   let body = {}
   try { body = await request.json() } catch (e) {}
   const direccion = body.direccion || ''
   const comuna = body.comuna || ''
-  const rolRaw = body.rol || ''
+  const rol = body.rol || ''
 
   const wantDebug = (() => { try { return new URL(request.url).searchParams.get('debug') === '1' } catch (e) { return false } })()
-  const dbg = wantDebug ? {} : null
+  const dbg = wantDebug ? { intentos: [] } : null
 
-  const TOKENS = [
-    { name: 'DATAINMOBILIARIA_TOKEN', val: process.env.DATAINMOBILIARIA_TOKEN },
-    { name: 'BASEAPI_KEY', val: process.env.BASEAPI_KEY },
-  ].filter(t => t.val)
-  if (!TOKENS.length) {
-    return Response.json({ candidatos: [], total: 0, mensaje: 'No encontré la propiedad. Ingresa los m2 a mano.', _modo: 'sin_token' })
+  if (!KEY) {
+    return Response.json({ candidatos: [], total: 0, mensaje: 'No encontré la propiedad. Ingresa los m2 a mano.', _modo: 'sin_key' })
   }
 
-  // ── Construir SQL ──────────────────────────────────────────────────────────
-  let sql = null
-  let numeroBuscado = ''
+  const numero = (norm(direccion).match(/(\d{1,6})/) || [])[1] || ''
 
-  // ROL explícito: cod_com-cod_mz-cod_pr
-  const rolNums = String(rolRaw).split(/[^0-9]+/).map(x => parseInt(x, 10)).filter(n => Number.isInteger(n))
-  if (rolNums.length >= 3) {
-    sql = `${SELECT_COLS} WHERE c.cod_com=${rolNums[0]} AND c.cod_mz=${rolNums[1]} AND c.cod_pr=${rolNums[2]} LIMIT 5`
+  // Variantes de parámetros a probar contra /sii/avaluo/buscar
+  const variants = []
+  if (rol) variants.push({ rol })
+  if (direccion) {
+    variants.push({ direccion, comuna })
+    variants.push({ q: direccion, comuna })
+    variants.push({ direccion })
+  }
+  if (!variants.length) {
+    return Response.json({ candidatos: [], total: 0, mensaje: 'Ingresa una dirección o un ROL.', _modo: 'sin_input' })
   }
 
-  // Dirección + comuna
-  if (!sql) {
-    const comNorm = sqlSafe(comuna)
-    if (!comNorm) {
-      return Response.json({ candidatos: [], total: 0, mensaje: 'Necesito la comuna para buscar la propiedad.', _modo: 'sin_comuna' })
-    }
-    const dirNorm = sqlSafe(direccion)
-    const numMatch = dirNorm.match(/(\d{1,6})/)
-    numeroBuscado = numMatch ? numMatch[1] : ''
-    const calle = dirNorm.replace(/\d{1,6}/g, ' ').replace(/\s+/g, ' ').trim()
-    if (!calle) {
-      return Response.json({ candidatos: [], total: 0, mensaje: 'Ingresa la calle de la propiedad (o el ROL).', _modo: 'sin_calle' })
-    }
-    const likeCalle = '%' + calle.replace(/ /g, '%') + '%'
-    const order = numeroBuscado
-      ? `ORDER BY CASE WHEN c.direccion_sii LIKE '%${numeroBuscado}%' THEN 0 ELSE 1 END, c.superficie_construccion DESC `
-      : `ORDER BY c.superficie_construccion DESC `
-    sql =
-      `${SELECT_COLS} JOIN datainmobiliaria.codigo_comuna_region r ON c.cod_com = r.cod_com ` +
-      `WHERE r.comuna = '${comNorm}' AND UPPER(c.direccion_sii) LIKE '${likeCalle}' ` +
-      `AND c.cod_destino IN ('H','C','O') ${order} LIMIT 40`
-  }
-
-  if (dbg) dbg.sql = sql
-
-  // ── Ejecutar contra el catastro ──────────────────────────────────────────────
   let rows = []
-  let errInfo = null
-  for (const t of TOKENS) {
-    const d = dbg ? {} : null
+  for (const params of variants) {
+    const clean = Object.fromEntries(Object.entries(params).filter(([, v]) => v != null && v !== ''))
+    const qs = new URLSearchParams(clean).toString()
+    const url = `${API_BASE}/sii/avaluo/buscar?${qs}`
     try {
-      const mcp = await mcpBigQuery(sql, t.val, d)
-      const got = extractRows(mcp)
-      if (dbg) { d.rowCount = got.length; dbg['intento_' + t.name] = d }
-      if (got.length) { rows = got; errInfo = null; if (dbg) dbg.token_ok = t.name; break }
-      if (mcp && mcp.error) errInfo = mcp.error
-      // Si el init NO fue 401, el token es válido (aunque no haya filas): no probar otros.
-      if (d && d.init && d.init.status && d.init.status !== 401) { if (dbg) dbg.token_ok = t.name; break }
+      const res = await fetch(url, { headers: { Authorization: 'Bearer ' + KEY, Accept: 'application/json' } })
+      const txt = await res.text()
+      let j = null
+      try { j = JSON.parse(txt) } catch (e) {}
+      if (dbg) dbg.intentos.push({ params: clean, status: res.status, sample: txt.slice(0, 500) })
+      if (res.ok && j) {
+        const arr = pickArray(j)
+        if (arr.length) { rows = arr; break }
+      }
     } catch (e) {
-      errInfo = String((e && e.message) || e)
-      if (dbg) { if (d) d.exception = errInfo; dbg['intento_' + t.name] = d }
+      if (dbg) dbg.intentos.push({ params: clean, err: String((e && e.message) || e) })
     }
   }
-  if (dbg) { dbg.rowCount = rows.length; dbg.err = errInfo }
 
-  // ── Mapear filas -> candidatos (forma que espera el frontend) ────────────────
-  const mapRow = (r) => ({
-    rol: `${r.cod_com}-${r.cod_mz}-${r.cod_pr}`,
-    cod_comuna: r.cod_com,
-    comuna: comuna || null,
-    direccion: String(r.direccion_sii || '').replace(/\s+/g, ' ').trim(),
-    m2_construido: r.superficie_construccion != null ? Number(r.superficie_construccion) : null,
-    m2_terreno: r.superficie_total_terreno != null ? Number(r.superficie_total_terreno) : null,
-    ano_construccion: r.ano_construccion != null ? Number(r.ano_construccion) : null,
-    destino: DESTINO_LABEL[r.cod_destino] || r.cod_destino || null,
-    es_copropiedad: !!r.copropiedad,
-    terreno_origen: 'sii',
-    avaluo_total_clp: r.avaluo_fiscal_clp != null ? Number(r.avaluo_fiscal_clp) : null,
-  })
-
-  let candidatos = []
-  if (rows.length) {
-    const todos = rows.map(mapRow).filter(c => c.m2_construido && c.m2_construido > 0)
-    if (numeroBuscado) {
-      const re = new RegExp('\\b' + numeroBuscado + '\\b')
-      const exactos = todos.filter(c => re.test(c.direccion))
-      // Coincidencia exacta de número -> esos; si no, ofrecer los cercanos como opciones
-      candidatos = exactos.length ? exactos.slice(0, 6) : todos.slice(0, 8)
-    } else {
-      candidatos = todos.slice(0, 8)
-    }
+  // Mapear y priorizar coincidencia exacta de número
+  let candidatos = rows.map(r => mapRow(r, comuna)).filter(c => c.m2_construido && c.m2_construido > 0)
+  if (numero && candidatos.length) {
+    const re = new RegExp('\\b' + numero + '\\b')
+    const exactos = candidatos.filter(c => re.test(c.direccion))
+    candidatos = exactos.length ? exactos.slice(0, 6) : candidatos.slice(0, 8)
+  } else {
+    candidatos = candidatos.slice(0, 8)
   }
 
   const resp = { candidatos, total: candidatos.length, _modo: 'real' }
