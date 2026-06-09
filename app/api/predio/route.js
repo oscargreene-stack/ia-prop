@@ -35,11 +35,11 @@ const DESTINO_LABEL = {
 }
 
 // ── Cliente MCP mínimo (Streamable HTTP / JSON-RPC) ────────────────────────────
-async function mcpBigQuery(sql, dbg) {
+async function mcpBigQuery(sql, token, dbg) {
   const headers = {
     'Content-Type': 'application/json',
     'Accept': 'application/json, text/event-stream',
-    'Authorization': 'Bearer ' + MCP_TOKEN,
+    'Authorization': 'Bearer ' + token,
   }
   const parse = async (res) => {
     const txt = await res.text()
@@ -133,7 +133,11 @@ export async function POST(request) {
   const wantDebug = (() => { try { return new URL(request.url).searchParams.get('debug') === '1' } catch (e) { return false } })()
   const dbg = wantDebug ? {} : null
 
-  if (!MCP_TOKEN) {
+  const TOKENS = [
+    { name: 'DATAINMOBILIARIA_TOKEN', val: process.env.DATAINMOBILIARIA_TOKEN },
+    { name: 'BASEAPI_KEY', val: process.env.BASEAPI_KEY },
+  ].filter(t => t.val)
+  if (!TOKENS.length) {
     return Response.json({ candidatos: [], total: 0, mensaje: 'No encontré la propiedad. Ingresa los m2 a mano.', _modo: 'sin_token' })
   }
 
@@ -175,12 +179,20 @@ export async function POST(request) {
   // ── Ejecutar contra el catastro ──────────────────────────────────────────────
   let rows = []
   let errInfo = null
-  try {
-    const mcp = await mcpBigQuery(sql, dbg)
-    rows = extractRows(mcp)
-    if (!rows.length && mcp && mcp.error) errInfo = mcp.error
-  } catch (e) {
-    errInfo = String((e && e.message) || e)
+  for (const t of TOKENS) {
+    const d = dbg ? {} : null
+    try {
+      const mcp = await mcpBigQuery(sql, t.val, d)
+      const got = extractRows(mcp)
+      if (dbg) { d.rowCount = got.length; dbg['intento_' + t.name] = d }
+      if (got.length) { rows = got; errInfo = null; if (dbg) dbg.token_ok = t.name; break }
+      if (mcp && mcp.error) errInfo = mcp.error
+      // Si el init NO fue 401, el token es válido (aunque no haya filas): no probar otros.
+      if (d && d.init && d.init.status && d.init.status !== 401) { if (dbg) dbg.token_ok = t.name; break }
+    } catch (e) {
+      errInfo = String((e && e.message) || e)
+      if (dbg) { if (d) d.exception = errInfo; dbg['intento_' + t.name] = d }
+    }
   }
   if (dbg) { dbg.rowCount = rows.length; dbg.err = errInfo }
 
