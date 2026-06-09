@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect, useRef } from 'react'
+import { valorizacionValentina, parseExpectativaUF } from './lib/valentina-valorizacion'
 
 const fmtUF = (n) => n ? `${Number(n).toLocaleString('es-CL', {minimumFractionDigits:0,maximumFractionDigits:0})} UF` : '—'
 
@@ -357,7 +358,7 @@ function ChatVendedor({ onBack }) {
       const newData = { ...data, tipo: opt.id }
       setData(newData)
       const nombre = opt.label.toLowerCase()
-      await addAgent(`Perfecto, ${nombre === 'agrícola' ? 'una propiedad' : 'una'} ${nombre}. Voy a hacerte algunas preguntas para conocerla bien.\n\nIngresa la dirección o el ROL SII de tu propiedad:`, 700)
+      await addAgent(`Perfecto, ${({casa:'una',departamento:'un',oficina:'una',terreno:'un',parcela:'una',agricola:'una',comercial:'una'})[opt.id] || 'una'} ${({agricola:'propiedad agrícola',comercial:'propiedad comercial'})[opt.id] || nombre}. Voy a hacerte algunas preguntas para conocerla bien.\n\nIngresa la dirección o el ROL SII de tu propiedad:`, 700)
       setSearchTab('direccion')
       setInputVal(''); setDeptoVal('')
       setInputMode('search_form')
@@ -657,14 +658,27 @@ function ChatVendedor({ onBack }) {
       const resultado = await res.json()
       if (resultado.error) throw new Error(resultado.error)
       setMessages(m => m.filter(x => !(x.role==='agent' && x.content?.type==='loading')))
-      const { ajRemo, ajCar, ajJardin } = calcAjustes(finalData)
+      const { ajRemo, ajCar, ajJardin } = resultado.ajustes || calcAjustes(finalData)
       const m2Util = parseFloat(finalData.siiData?.m2_util || finalData.siiData?.m2_construido) || 60
       const valorBase = resultado.valor_uf || 0
       const valorFinal = valorBase + ajRemo + ajCar + ajJardin
       const rangoMin = Math.round(valorFinal * 0.93)
       const rangoMax = Math.round(valorFinal * 1.07)
       setMessages(m => [...m, { role:'agent', content:{ type:'tasacion', resultado, valorFinal, rangoMin, rangoMax, ajRemo, ajCar, ajJardin, valorBase, remoInfo:{ tipo: finalData.remodelacion, m2: m2Util, ufM2: AJUSTE_REMO[finalData.remodelacion]||0, tiempo: finalData.tiempo_remo } }}])
-      await addAgent(`¡Tasación lista! El valor de mercado estimado es **${fmtUF(valorFinal)}**.\n\nEste valor refleja transacciones reales recientes en la zona, ajustado por las características que me contaste. ¿Tienes alguna pregunta?`, 1200)
+      const expectativaUF = parseExpectativaUF(finalData.precio_idea)
+      const { mensajes } = valorizacionValentina({
+        comuna: finalData.comuna || '',
+        tipo: finalData.tipo,
+        bandaMinUF: rangoMin,
+        bandaMaxUF: rangoMax,
+        precioSugeridoUF: rangoMax,
+        comparables: resultado.comparables || [],
+        confianza: resultado.confianza,
+        expectativaUF,
+      })
+      for (const msg of mensajes) {
+        await addAgent(msg, 900)
+      }
       setInputMode('options')
       setOptions([{id:'nueva',label:'Tasar otra propiedad',icon:'🔄'},{id:'detalle',label:'Quiero más detalle',icon:'🔍'}])
       setStage('resultado')
@@ -801,7 +815,7 @@ function ChatVendedor({ onBack }) {
           {resultado.comparables?.length>0 && (
             <div className="comp-mini">
               <div className="tas-section-title">Transacciones de referencia</div>
-              {resultado.comparables.slice(0,4).map((c,i) => (
+              {resultado.comparables.slice(0,6).map((c,i) => (
                 <div key={i} className="comp-mini-item">
                   <div>
                     <div className="comp-mini-addr">{c.direccion} · {c.m2} m² construidos{c.m2_terreno ? ` · ${c.m2_terreno} m² terreno` : ''}</div>
