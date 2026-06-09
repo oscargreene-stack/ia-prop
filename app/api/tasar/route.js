@@ -23,25 +23,35 @@ function normalizaComuna(s) {
     .replace(/Ñ/g,'N')
 }
 
-// ── Fix #3: AJUSTES DETERMINÍSTICOS ───────────────────────────────────────────
-// Config aislada y tuneable. El Fix #4 reemplazará estos valores por un store
-// editable (Vercel KV / Postgres); la firma de aplicarAjustes() no debería cambiar.
+// ── AJUSTES DETERMINÍSTICOS (editables desde /admin vía Edge Config) ───────────
+// Estos son los valores de RESPALDO; los efectivos se leen de Edge Config.
 const AJUSTES_CONFIG = {
+  // Piso y orientación: % sobre el valor base (van DENTRO de valor_uf).
   piso: {
     tiposAplica: ['departamento', 'depto', 'oficina'],
     pctPorCada5SobreEl5: 0.02,   // +2% por cada 5 pisos completos por encima del 5º
     pisoBajoUmbral: 2,           // pisos 1–2
-    pctPisoBajo: -0.02,          // -2% en pisos bajos (default conservador; tunear con dato "sin vista")
+    pctPisoBajo: -0.02,          // -2% en pisos bajos
   },
   orientacion: {
-    norte: 0.04,                 // punto medio del rango +3–5%
-    sur: -0.03,
-    // oriente / poniente / otras → 0
+    norte: 0.04, sur: -0.03, oriente: 0.02, poniente: -0.02,
   },
+  // Remodelación: UF/m² sobre m² útiles, multiplicado por antigüedad.
   remodelacion: {
-    completa: 0.14,              // punto medio del rango +10–18%
-    parcial: 0.07,
-    // ninguna → 0
+    baja: 5, media: 10, alta: 20,
+    tiempo: { reciente: 1.0, hace3: 0.85, hace5: 0.7 },
+    // 'ninguna' → 0
+  },
+  // Jardín: cada m² de jardín vale (factor) × precio por m² real de la propiedad.
+  jardin: { factor: 0.3333 },
+  // Características: UF que suma cada una.
+  caracteristicas: {
+    piscina:300, quincho:120, vista:150, jardin:80, doble_altura:100, seguridad:40,
+    vista_despejada:100, piscina_edificio:80, gimnasio:40, conserje:30, calefaccion:50,
+    terraza_of:80, sala_reuniones:60, rio_lago:200, arboles:60, construccion:150,
+    rio:150, galpones:100, luz:80, si_canal:300, si_pozo:200, si_multiple:400,
+    bodega:80, galpon:120, camara_frio:200, riego_tecnificado:300, acceso_camion:150,
+    anden:100, frigorificos:200, tres_fase:100,
   },
 }
 
@@ -64,7 +74,12 @@ async function getAjustesConfig() {
     return {
       piso: { ...AJUSTES_CONFIG.piso, ...(stored.piso || {}) },
       orientacion: { ...AJUSTES_CONFIG.orientacion, ...(stored.orientacion || {}) },
-      remodelacion: { ...AJUSTES_CONFIG.remodelacion, ...(stored.remodelacion || {}) },
+      remodelacion: {
+        ...AJUSTES_CONFIG.remodelacion, ...(stored.remodelacion || {}),
+        tiempo: { ...AJUSTES_CONFIG.remodelacion.tiempo, ...((stored.remodelacion && stored.remodelacion.tiempo) || {}) },
+      },
+      jardin: { ...AJUSTES_CONFIG.jardin, ...(stored.jardin || {}) },
+      caracteristicas: { ...AJUSTES_CONFIG.caracteristicas, ...(stored.caracteristicas || {}) },
     }
   } catch (e) {
     return AJUSTES_CONFIG
@@ -98,17 +113,41 @@ function aplicarAjustes({ baseUf, tipo, extras, answers, cfg }) {
     }
   }
 
-  // Orientación
+  // Orientación (norte / sur / oriente / poniente)
   const ori = String(extras?.orientacion || '').toLowerCase()
   if (ori.includes('norte')) addPct('Ajuste por orientación', cfg.orientacion.norte, 'orientación norte')
   else if (ori.includes('sur')) addPct('Ajuste por orientación', cfg.orientacion.sur, 'orientación sur')
+  else if (ori.includes('oriente')) addPct('Ajuste por orientación', cfg.orientacion.oriente, 'orientación oriente')
+  else if (ori.includes('poniente')) addPct('Ajuste por orientación', cfg.orientacion.poniente, 'orientación poniente')
 
-  // Remodelación
-  const remo = String(answers?.remodelacion || '').toLowerCase()
-  if (remo.includes('completa')) addPct('Ajuste por remodelación', cfg.remodelacion.completa, `remodelación completa${answers?.tiempo_remo ? ', hace ' + answers.tiempo_remo : ''}`)
-  else if (remo.includes('parcial')) addPct('Ajuste por remodelación', cfg.remodelacion.parcial, 'remodelación parcial')
+  // (Remodelación, jardín y características NO van acá: se devuelven aparte como
+  //  ajustes que el frontend suma sobre el valor base — ver calcAjustesExtra.)
 
   return { finalUf: acumUf, lineas }
+}
+
+// Ajustes que se devuelven aparte (el frontend los suma sobre el valor base):
+// remodelación (UF/m² × m² útiles × antigüedad), características (UF c/u) y
+// jardín (factor × precio real por m²). Todo desde la config editable.
+function calcAjustesExtra({ cfg, answers, extras, m2Util, precioM2 }) {
+  const remoKey = String(answers?.remodelacion || '').toLowerCase()
+  const remoUfM2 = (typeof cfg.remodelacion[remoKey] === 'number') ? cfg.remodelacion[remoKey] : 0
+  const tiempoKey = String(answers?.tiempo_remo || '').toLowerCase()
+  const tiempoMult = (cfg.remodelacion.tiempo && typeof cfg.remodelacion.tiempo[tiempoKey] === 'number') ? cfg.remodelacion.tiempo[tiempoKey] : 1
+  const ajRemo = Math.round(remoUfM2 * (m2Util || 0) * tiempoMult)
+
+  const lista = [
+    ...(Array.isArray(extras?.caracteristicas) ? extras.caracteristicas : []),
+    extras?.derechos_agua || answers?.derechos_agua || '',
+    extras?.infraestructura || answers?.infraestructura || '',
+  ].flat().filter(c => c && c !== 'ninguna')
+  const ajCar = lista.reduce((s, c) => s + (cfg.caracteristicas[c] || 0), 0)
+
+  const jardinM2 = parseFloat(extras?.jardin_m2) || 0
+  const factor = (cfg.jardin && typeof cfg.jardin.factor === 'number') ? cfg.jardin.factor : 0
+  const ajJardin = (jardinM2 > 0 && precioM2 > 0) ? Math.round(jardinM2 * precioM2 * factor) : 0
+
+  return { ajRemo, ajCar, ajJardin, remoUfM2 }
 }
 
 export async function POST(request) {
@@ -202,17 +241,19 @@ export async function POST(request) {
     console.error('Error fetching comparables (REST):', e.message)
   }
 
-  // ── 2. VALOR DETERMINÍSTICO (Fix #3) ──────────────────────────────────────
+  // ── 2. VALOR DETERMINÍSTICO ───────────────────────────────────────────────
   // Se calcula ANTES del LLM para poder pasárselo como dato autoritativo.
+  const ajustesCfg = await getAjustesConfig()
   let valorDet = null      // { valor_uf, precio_m2, confianza, desglose[] }
+  let precioM2Base = null  // precio por m² base (mediana CBR), para el jardín
   if (comparablesReales.length > 0 && m2Construido) {
     const ufm2List = comparablesReales.map(c => c.uf_m2).filter(x => x > 0).sort((a, b) => a - b)
     if (ufm2List.length) {
       const mid = Math.floor(ufm2List.length / 2)
       const medianaUfM2 = ufm2List.length % 2 ? ufm2List[mid] : Math.round((ufm2List[mid - 1] + ufm2List[mid]) / 2)
       const baseUf = Math.round(medianaUfM2 * m2Construido)
+      precioM2Base = medianaUfM2
 
-      const ajustesCfg = await getAjustesConfig()
       const { finalUf, lineas } = aplicarAjustes({ baseUf, tipo, extras, answers, cfg: ajustesCfg })
 
       const desglose = [
@@ -227,6 +268,15 @@ export async function POST(request) {
       }
     }
   }
+
+  // Ajustes que el frontend suma sobre el valor base (remodelación, características,
+  // jardín), calculados desde la config editable. El jardín usa el precio real por m².
+  const m2UtilCalc = parseFloat(answers?.m2_util || siiData?.m2_util || m2Construido) || 60
+  const ajustesExtra = calcAjustesExtra({
+    cfg: ajustesCfg, answers, extras,
+    m2Util: m2UtilCalc,
+    precioM2: precioM2Base || 50,
+  })
 
   // ── 3. Armar prompt: el LLM SOLO narra ─────────────────────────────────────
   const systemPrompt = `Eres Valentina, tasadora inmobiliaria experta con 20 años de experiencia en la Región Metropolitana de Chile.
@@ -429,6 +479,7 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
         parsed.potencial_desarrollo = { aplica: false }
       }
 
+      parsed.ajustes = ajustesExtra
       return Response.json(parsed)
     } catch(parseErr) {
       console.error('JSON parse error:', parseErr.message)
@@ -441,6 +492,7 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
         analisis: extractStr('analisis') || 'Tasación completada.',
         recomendacion_precio_venta: extractStr('recomendacion_precio_venta') || '',
         comparables: comparablesReales,
+        ajustes: ajustesExtra,
         desglose: valorDet?.desglose ?? [], factores_positivos: [], factores_negativos: [], plan_regulador: null
       }
       if (fallback.valor_uf) return Response.json(fallback)
