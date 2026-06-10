@@ -7,6 +7,8 @@
 //  4. Claude SOLO narra: análisis, factores, plan regulador y recomendación,
 //     coherentes con el valor determinístico (no recalcula valor)
 
+export const maxDuration = 60
+
 const COD_COMUNA = {
   'CERRILLOS':14166,'CERRO NAVIA':14156,'CONCHALI':14127,'EL BOSQUE':16165,'ESTACION CENTRAL':14157,
   'HUECHURABA':14158,'INDEPENDENCIA':13167,'LA CISTERNA':16110,'LA FLORIDA':15128,'LA GRANJA':16131,
