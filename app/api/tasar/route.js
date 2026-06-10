@@ -194,7 +194,7 @@ export async function POST(request) {
       || (rol ? parseInt(String(rol).split('-')[0], 10) : null)
       || COD_COMUNA[normalizaComuna(comuna)]
       || null
-    if (codCom && m2Construido && process.env.BASEAPI_KEY) {
+    if (codCom && m2Construido && DATAINM_TOKEN) {
       const rolParts = String(rol || '').split('-')
       const ccom = rolParts[0] || String(codCom)
       const cmz = rolParts[1] || ''
@@ -207,7 +207,7 @@ export async function POST(request) {
         radio: '2000', superficie_min: String(m2Min), superficie_max: String(m2Max), cod_destino: cd,
       }).toString()
       const restUrl = 'https://datainmobiliaria.cl/api/v1/propiedades/detalle?' + qs
-      const restRes = await fetch(restUrl, { headers: { Authorization: 'Bearer ' + process.env.BASEAPI_KEY } })
+      const restRes = await fetch(restUrl, { headers: { Authorization: 'Bearer ' + DATAINM_TOKEN } })
       if (restRes.ok) {
         const data = await restRes.json()
         const ventas = Array.isArray(data.detalle_ventas_recientes) ? data.detalle_ventas_recientes : []
