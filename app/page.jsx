@@ -587,7 +587,7 @@ function ChatVendedor({ onBack }) {
         rol: c.rol,
         direccion: c.direccion,
         destino: c.destino || 'Habitacional',
-        m2_construido: c.m2_construidos,
+        m2_construido: c.m2_construido,
         m2_terreno: c.m2_terreno,
         es_copropiedad: c.es_copropiedad,
         terreno_origen: c.terreno_origen,
