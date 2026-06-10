@@ -592,6 +592,7 @@ function ChatVendedor({ onBack }) {
         es_copropiedad: c.es_copropiedad,
         terreno_origen: c.terreno_origen,
         ano_construccion: c.ano_construccion,
+        anio_construccion: c.ano_construccion,
       }))
 
       // Multiples resultados -> selector
