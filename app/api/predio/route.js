@@ -13,7 +13,7 @@ export const maxDuration = 30
 
 const API_BASE = 'https://datainmobiliaria.cl/api/v1'
 const TOKEN = process.env.DATAINMOBILIARIA_TOKEN
-const GKEY = process.env.NEXT_PUBLIC_GOOGLE_PLACES_KEY
+const GKEY = process.env.GOOGLE_GEOCODE_KEY || process.env.NEXT_PUBLIC_GOOGLE_PLACES_KEY
 
 function norm(s) {
   return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim()
