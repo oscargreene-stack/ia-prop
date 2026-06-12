@@ -1381,8 +1381,7 @@ function FormComprador({ onBack }) {
       const prev = document.getElementById('gmaps-draw-script')
       if (prev) { prev.addEventListener('load', initMap); return }
       const ex = document.querySelector('script[src*="maps.googleapis.com"]')
-      const key = ex ? (ex.src.match(/[?&]key=([^&]+)/) || [])[1] : ''
-      const s = document.createElement('script')
+      const key = (ex && (ex.src.match(/[?&]key=([^&]+)/) || [])[1]) || process.env.NEXT_PUBLIC_GOOGLE_PLACES_KEY || ''      const s = document.createElement('script')
       s.id = 'gmaps-draw-script'
       s.src = `https://maps.googleapis.com/maps/api/js?key=${key}&libraries=places,drawing&language=es&region=CL`
       s.async = true
