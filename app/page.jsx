@@ -1510,8 +1510,7 @@ function ChatComprador({ onBack }) {
           </>
         )}
 
-        {inputMode === 'multi' && (
-          <>
+        {(inputMode === 'multi' || inputMode === 'multi_comuna') && (          <>
             <div className="options-hint">Selecciona todo lo que aplique</div>
             <div className="options-grid" style={{marginBottom:10}}>
               {options.map(opt => (
