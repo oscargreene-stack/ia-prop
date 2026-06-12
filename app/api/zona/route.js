@@ -1,10 +1,10 @@
 // app/api/zona/route.js
-// Precio real de un SECTOR para el comprador (agente Isidora).
-// Reutiliza la misma maquinaria que la tasación del vendedor:
-//   1) Geocodifica un punto de referencia (o usa lat/lng directos).
-//   2) POST /busqueda_poligono (fuente catastro) -> ROL de una propiedad cercana.
-//   3) GET /propiedades/detalle -> ventas reales del CBR -> mediana UF/m2 del sector.
-// Devuelve estadisticas de precio del sector + reality check segun presupuesto.
+// Precio real de un SECTOR para el comprador (agente Isidora), SEPARANDO casa vs depto.
+// 1) Geocodifica un punto de referencia (o usa lat/lng directos).
+// 2) POST /busqueda_poligono fuente "ventas" -> ventas reales del CBR dentro del poligono,
+//    cada una con copropiedad + superficie_total_terreno -> se clasifica casa vs departamento.
+// 3) Mediana UF/m2 SOLO del tipo pedido -> precio del sector + reality check + estimacion.
+// IMPORTANTE: nunca se mezclan casas y departamentos en la misma mediana.
 import { NextResponse } from 'next/server'
 
 export const runtime = 'nodejs'
@@ -14,8 +14,6 @@ export const maxDuration = 60
 const API_BASE = 'https://datainmobiliaria.cl/api/v1'
 const DATAINM_TOKEN = process.env.DATAINMOBILIARIA_TOKEN
 const GKEY = process.env.NEXT_PUBLIC_GOOGLE_PLACES_KEY
-
-const COD_DESTINO = { casa: 'H', departamento: 'H', depto: 'H', oficina: 'O', comercial: 'C', terreno: 'G' }
 
 // Geocodifica "direccion, comuna, RM, Chile" -> {lat,lng}
 async function geocode(texto) {
@@ -52,12 +50,31 @@ function percentil(arr, p) {
   return s[idx]
 }
 
+// Clasifica una venta del CBR en casa / departamento / oficina / comercial / otro
+// Regla: cod_destino O->oficina, C->comercial. Habitacional (H): sin terreno propio
+// (superficie_total_terreno == 0) => departamento (edificio); con terreno => casa.
+function clasificaTipo(v) {
+  const dest = String(v.cod_destino || '').toUpperCase()
+  if (dest === 'O') return 'oficina'
+  if (dest === 'C') return 'comercial'
+  if (dest !== 'H') return 'otro'
+  const terreno = parseFloat(v.superficie_total_terreno || 0) || 0
+  return terreno > 0 ? 'casa' : 'departamento'
+}
+
+const TIPO_OBJETIVO = {
+  casa: 'casa',
+  departamento: 'departamento',
+  depto: 'departamento',
+  oficina: 'oficina',
+  comercial: 'comercial',
+}
+
 export async function POST(request) {
   const dbg = new URL(request.url).searchParams.get('debug') ? {} : null
   try {
     const body = await request.json()
     const { direccion, comuna, lat, lng, tipo, presupuesto_uf, m2_objetivo } = body || {}
-
     if (!DATAINM_TOKEN) return Response.json({ error: 'DATAINMOBILIARIA_TOKEN no configurada' }, { status: 500 })
 
     // 1) Punto: lat/lng directos o geocodificar
@@ -70,85 +87,70 @@ export async function POST(request) {
       if (!punto) return Response.json({ _modo: 'sin_geocode', mensaje: 'No pude ubicar el sector.', ...(dbg ? { _debug: dbg } : {}) })
     }
 
-    // 2) ROL de una propiedad cercana via busqueda_poligono (catastro), agrandando si hace falta
-    let rolObj = null
-    for (const radio of [400, 900, 1800]) {
+    const objetivo = TIPO_OBJETIVO[String(tipo || '').toLowerCase()] || 'casa'
+    const m2obj = parseFloat(m2_objetivo) || 0
+
+    // 2) Ventas del poligono (fuente ventas), agrandando hasta juntar comparables del tipo pedido
+    let ventas = []
+    let radioUsado = null
+    for (const radio of [700, 1300, 2200]) {
       const poly = poligono(punto.lat, punto.lng, radio)
       const r = await fetch(`${API_BASE}/busqueda_poligono`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + DATAINM_TOKEN },
-        body: JSON.stringify({ fuente: 'catastro', polygon: poly }),
+        body: JSON.stringify({ fuente: 'ventas', polygon: poly }),
       })
       if (!r.ok) continue
       const j = await r.json()
-      const res = Array.isArray(j.resultados) ? j.resultados : []
-      const cand = res.find((p) => p.cod_mz && p.cod_pr) || res[0]
-      if (cand) {
-        rolObj = cand
-        if (dbg) { dbg.poligono_radio = radio; dbg.catastro_claves = Object.keys(cand) }
-        break
-      }
+      ventas = Array.isArray(j.resultados) ? j.resultados : []
+      radioUsado = radio
+      const delTipo = ventas.filter((v) => clasificaTipo(v) === objetivo).length
+      if (delTipo >= 8) break
     }
-    if (!rolObj) return Response.json({ _modo: 'sin_catastro', mensaje: 'No encontré propiedades en el catastro de ese sector.', ...(dbg ? { _debug: dbg } : {}) })
 
-    // 3) /propiedades/detalle -> ventas reales del CBR
-    const cd = COD_DESTINO[String(tipo || '').toLowerCase()] || 'H'
-    const m2obj = parseFloat(m2_objetivo) || 0
-    const m2Min = m2obj ? Math.round(m2obj * 0.5) : 30
-    const m2Max = m2obj ? Math.round(m2obj * 1.8) : 400
-    const qs = new URLSearchParams({
-      cod_com: String(rolObj.cod_com),
-      cod_mz: String(rolObj.cod_mz),
-      cod_pr: String(rolObj.cod_pr),
-      radio: '2000',
-      superficie_min: String(m2Min),
-      superficie_max: String(m2Max),
-      cod_destino: cd,
-    }).toString()
-    const dRes = await fetch(`${API_BASE}/propiedades/detalle?${qs}`, { headers: { Authorization: 'Bearer ' + DATAINM_TOKEN } })
-    if (!dRes.ok) return Response.json({ _modo: 'sin_detalle', mensaje: 'No pude obtener comparables del sector.', ...(dbg ? { _debug: dbg } : {}) })
-    const data = await dRes.json()
-    const ventas = Array.isArray(data.detalle_ventas_recientes) ? data.detalle_ventas_recientes : []
-    const filtro = Array.isArray(data.comparables_filtro) ? data.comparables_filtro : []
-    const fuente = filtro.length > 0 ? filtro : ventas
+    // 3) Filtra por tipo + unidad UF + banda de m2 + outliers de uf/m2
+    const filtradas = ventas.filter((v) => {
+      if (clasificaTipo(v) !== objetivo) return false
+      if (String(v.unit || '').toUpperCase() !== 'UF') return false
+      const m2 = parseFloat(v.superficie_construccion)
+      const uf = parseFloat(v.price)
+      if (!(m2 > 0) || !(uf > 0)) return false
+      const ufm2 = uf / m2
+      if (ufm2 < 3 || ufm2 > 500) return false
+      if (m2obj > 0 && (m2 < m2obj * 0.4 || m2 > m2obj * 2.2)) return false
+      return true
+    })
 
-    const ufm2 = fuente
-      .map((v) => {
-        const m2 = parseFloat(v.superficie_construccion)
-        const uf = parseFloat(v.price)
-        return m2 > 0 && uf > 0 ? uf / m2 : null
-      })
-      .filter((x) => x != null)
+    const ufm2List = filtradas.map((v) => parseFloat(v.price) / parseFloat(v.superficie_construccion))
 
-    // DEBUG: inspeccionar campos disponibles para separar casa/depto
     if (dbg) {
-      dbg.detalle_claves = fuente[0] ? Object.keys(fuente[0]) : []
-      dbg.detalle_muestra = fuente.slice(0, 3)
-      dbg.detalle_keys_top = Object.keys(data || {})
-      try {
-        const polyV = poligono(punto.lat, punto.lng, 700)
-        const rv = await fetch(`${API_BASE}/busqueda_poligono`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + DATAINM_TOKEN },
-          body: JSON.stringify({ fuente: 'ventas', polygon: polyV }),
-        })
-        const jv = rv.ok ? await rv.json() : { http: rv.status }
-        const arr = Array.isArray(jv.resultados) ? jv.resultados : Array.isArray(jv) ? jv : []
-        dbg.ventas_poligono_claves = arr[0] ? Object.keys(arr[0]) : []
-        dbg.ventas_poligono_muestra = arr.slice(0, 3)
-        dbg.ventas_poligono_top = Array.isArray(jv) ? '(array)' : Object.keys(jv || {})
-      } catch (e) {
-        dbg.ventas_poligono_error = e.message
-      }
+      const counts = {}
+      ventas.forEach((v) => {
+        const t = clasificaTipo(v)
+        counts[t] = (counts[t] || 0) + 1
+      })
+      dbg.radio = radioUsado
+      dbg.objetivo = objetivo
+      dbg.counts_por_tipo = counts
+      dbg.n_total_ventas = ventas.length
+      dbg.n_filtradas = filtradas.length
     }
 
-    if (ufm2.length === 0) return Response.json({ _modo: 'sin_comparables', mensaje: 'No hay ventas recientes suficientes en ese sector.', ...(dbg ? { _debug: dbg } : {}) })
+    if (ufm2List.length < 3) {
+      return Response.json({
+        _modo: 'pocos_comparables',
+        tipo: objetivo,
+        mensaje: `Hay muy pocas ventas de ${objetivo} en ese sector para una estimación confiable.`,
+        n: ufm2List.length,
+        ...(dbg ? { _debug: dbg } : {}),
+      })
+    }
 
-    const med = Math.round(mediana(ufm2))
-    const p25 = Math.round(percentil(ufm2, 25))
-    const p75 = Math.round(percentil(ufm2, 75))
-    const n = ufm2.length
-    const confianza = n >= 5 ? 'Alta' : n >= 3 ? 'Media' : 'Baja'
+    const med = Math.round(mediana(ufm2List))
+    const p25 = Math.round(percentil(ufm2List, 25))
+    const p75 = Math.round(percentil(ufm2List, 75))
+    const n = ufm2List.length
+    const confianza = n >= 8 ? 'Alta' : n >= 4 ? 'Media' : 'Baja'
 
     // Reality check segun presupuesto
     const pres = parseFloat(presupuesto_uf) || 0
@@ -172,11 +174,12 @@ export async function POST(request) {
 
     return Response.json({
       _modo: 'real',
+      tipo: objetivo,
       sector: { lat: punto.lat, lng: punto.lng, comuna: comuna || null },
       precio_sector: { uf_m2_mediana: med, uf_m2_p25: p25, uf_m2_p75: p75, n_comparables: n, confianza },
       reality,
       estimacion,
-      ...(dbg ? { _debug: { ...dbg, rol: `${rolObj.cod_com}-${rolObj.cod_mz}-${rolObj.cod_pr}`, n } } : {}),
+      ...(dbg ? { _debug: dbg } : {}),
     })
   } catch (e) {
     return Response.json({ error: e.message, _modo: 'error' }, { status: 200 })
