@@ -1,9 +1,9 @@
 // app/api/zona/route.js
 // Precio real de un SECTOR para el comprador (agente Isidora), SEPARANDO casa vs depto.
-// 1) Geocodifica un punto de referencia (o usa lat/lng directos).
-// 2) POST /busqueda_poligono fuente "ventas" -> ventas reales del CBR dentro del poligono,
-//    cada una con copropiedad + superficie_total_terreno -> se clasifica casa vs departamento.
-// 3) Mediana UF/m2 SOLO del tipo pedido -> precio del sector + reality check + estimacion.
+// Acepta el sector de 3 formas: (a) comuna/direccion -> geocodifica, (b) lat/lng,
+// (c) polygon dibujado en el mapa ([{lat,lng}, ...], min 3 puntos).
+// Flujo: ventas reales del CBR dentro del area (fuente "ventas") -> clasifica casa/depto
+//        por copropiedad + superficie de terreno -> mediana UF/m2 SOLO del tipo pedido.
 // IMPORTANTE: nunca se mezclan casas y departamentos en la misma mediana.
 import { NextResponse } from 'next/server'
 
@@ -15,7 +15,6 @@ const API_BASE = 'https://datainmobiliaria.cl/api/v1'
 const DATAINM_TOKEN = process.env.DATAINMOBILIARIA_TOKEN
 const GKEY = process.env.NEXT_PUBLIC_GOOGLE_PLACES_KEY
 
-// Geocodifica "direccion, comuna, RM, Chile" -> {lat,lng}
 async function geocode(texto) {
   const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(texto + ', Región Metropolitana, Chile')}&key=${GKEY}`
   const r = await fetch(url)
@@ -37,6 +36,13 @@ function poligono(lat, lng, radioM) {
   ]
 }
 
+function centroide(poly) {
+  const n = poly.length
+  let lat = 0, lng = 0
+  for (const p of poly) { lat += p.lat; lng += p.lng }
+  return { lat: lat / n, lng: lng / n }
+}
+
 function mediana(arr) {
   if (!arr.length) return null
   const s = [...arr].sort((a, b) => a - b)
@@ -51,8 +57,6 @@ function percentil(arr, p) {
 }
 
 // Clasifica una venta del CBR en casa / departamento / oficina / comercial / otro
-// Regla: cod_destino O->oficina, C->comercial. Habitacional (H): sin terreno propio
-// (superficie_total_terreno == 0) => departamento (edificio); con terreno => casa.
 function clasificaTipo(v) {
   const dest = String(v.cod_destino || '').toUpperCase()
   if (dest === 'O') return 'oficina'
@@ -74,30 +78,39 @@ export async function POST(request) {
   const dbg = new URL(request.url).searchParams.get('debug') ? {} : null
   try {
     const body = await request.json()
-    const { direccion, comuna, lat, lng, tipo, presupuesto_uf, m2_objetivo } = body || {}
+    const { direccion, comuna, lat, lng, polygon, tipo, presupuesto_uf, m2_objetivo } = body || {}
     if (!DATAINM_TOKEN) return Response.json({ error: 'DATAINMOBILIARIA_TOKEN no configurada' }, { status: 500 })
 
-    // 1) Punto: lat/lng directos o geocodificar
-    let punto = lat && lng ? { lat: +lat, lng: +lng } : null
-    if (!punto) {
+    // Sector: polygon dibujado / lat-lng / geocode de comuna-direccion
+    const userPoly =
+      Array.isArray(polygon) && polygon.length >= 3
+        ? polygon.map((p) => ({ lat: +p.lat, lng: +p.lng })).filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lng))
+        : null
+
+    let punto = null
+    if (userPoly && userPoly.length >= 3) {
+      punto = centroide(userPoly)
+      if (dbg) dbg.fuente_sector = 'polygon'
+    } else if (lat && lng) {
+      punto = { lat: +lat, lng: +lng }
+      if (dbg) dbg.fuente_sector = 'latlng'
+    } else {
       const texto = [direccion, comuna].filter(Boolean).join(', ')
-      if (!texto) return Response.json({ error: 'Falta direccion/comuna o lat/lng' }, { status: 400 })
+      if (!texto) return Response.json({ error: 'Falta comuna/direccion, lat/lng o polygon' }, { status: 400 })
       punto = await geocode(texto)
-      if (dbg) dbg.geocode = punto
+      if (dbg) { dbg.fuente_sector = 'geocode'; dbg.geocode = punto }
       if (!punto) return Response.json({ _modo: 'sin_geocode', mensaje: 'No pude ubicar el sector.', ...(dbg ? { _debug: dbg } : {}) })
     }
 
     const objetivo = TIPO_OBJETIVO[String(tipo || '').toLowerCase()] || 'casa'
     const m2obj = parseFloat(m2_objetivo) || 0
 
-    // 2) Ventas del poligono (fuente ventas). Las ventas de estacionamientos/bodegas
-    //    son muy frecuentes y copan una pagina, asi que paginamos hasta juntar
-    //    suficientes comparables del TIPO pedido (o agrandamos el radio).
+    // Lista de poligonos a consultar: el dibujado (tal cual) o cuadrados expansivos
+    const polys = userPoly ? [userPoly] : [poligono(punto.lat, punto.lng, 800), poligono(punto.lat, punto.lng, 1600)]
+
     let ventas = []
-    let radioUsado = null
     let paginasUsadas = 0
-    for (const radio of [800, 1600]) {
-      const poly = poligono(punto.lat, punto.lng, radio)
+    for (const poly of polys) {
       let acc = []
       for (let page = 1; page <= 3; page++) {
         const r = await fetch(`${API_BASE}/busqueda_poligono`, {
@@ -114,12 +127,10 @@ export async function POST(request) {
         if (delTipo >= 15 || !j.has_more) break
       }
       ventas = acc
-      radioUsado = radio
       const delTipo = ventas.filter((v) => clasificaTipo(v) === objetivo).length
       if (delTipo >= 12) break
     }
 
-    // 3) Filtra por tipo + unidad UF + banda de m2 + outliers de uf/m2
     const filtradas = ventas.filter((v) => {
       if (clasificaTipo(v) !== objetivo) return false
       if (String(v.unit || '').toUpperCase() !== 'UF') return false
@@ -136,11 +147,7 @@ export async function POST(request) {
 
     if (dbg) {
       const counts = {}
-      ventas.forEach((v) => {
-        const t = clasificaTipo(v)
-        counts[t] = (counts[t] || 0) + 1
-      })
-      dbg.radio = radioUsado
+      ventas.forEach((v) => { const t = clasificaTipo(v); counts[t] = (counts[t] || 0) + 1 })
       dbg.paginas = paginasUsadas
       dbg.objetivo = objetivo
       dbg.counts_por_tipo = counts
@@ -164,7 +171,6 @@ export async function POST(request) {
     const n = ufm2List.length
     const confianza = n >= 8 ? 'Alta' : n >= 4 ? 'Media' : 'Baja'
 
-    // Reality check segun presupuesto
     const pres = parseFloat(presupuesto_uf) || 0
     let reality = null
     if (pres > 0) {
@@ -174,7 +180,6 @@ export async function POST(request) {
         m2_alcanzable_max: Math.round(pres / p25),
       }
     }
-    // Estimacion de precio para el m2 objetivo
     let estimacion = null
     if (m2obj > 0) {
       estimacion = {
@@ -187,7 +192,7 @@ export async function POST(request) {
     return Response.json({
       _modo: 'real',
       tipo: objetivo,
-      sector: { lat: punto.lat, lng: punto.lng, comuna: comuna || null },
+      sector: { lat: punto.lat, lng: punto.lng, comuna: comuna || null, por_mapa: !!userPoly },
       precio_sector: { uf_m2_mediana: med, uf_m2_p25: p25, uf_m2_p75: p75, n_comparables: n, confianza },
       reality,
       estimacion,
