@@ -90,22 +90,33 @@ export async function POST(request) {
     const objetivo = TIPO_OBJETIVO[String(tipo || '').toLowerCase()] || 'casa'
     const m2obj = parseFloat(m2_objetivo) || 0
 
-    // 2) Ventas del poligono (fuente ventas), agrandando hasta juntar comparables del tipo pedido
+    // 2) Ventas del poligono (fuente ventas). Las ventas de estacionamientos/bodegas
+    //    son muy frecuentes y copan una pagina, asi que paginamos hasta juntar
+    //    suficientes comparables del TIPO pedido (o agrandamos el radio).
     let ventas = []
     let radioUsado = null
-    for (const radio of [700, 1300, 2200]) {
+    let paginasUsadas = 0
+    for (const radio of [800, 1600]) {
       const poly = poligono(punto.lat, punto.lng, radio)
-      const r = await fetch(`${API_BASE}/busqueda_poligono`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + DATAINM_TOKEN },
-        body: JSON.stringify({ fuente: 'ventas', polygon: poly }),
-      })
-      if (!r.ok) continue
-      const j = await r.json()
-      ventas = Array.isArray(j.resultados) ? j.resultados : []
+      let acc = []
+      for (let page = 1; page <= 3; page++) {
+        const r = await fetch(`${API_BASE}/busqueda_poligono`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + DATAINM_TOKEN },
+          body: JSON.stringify({ fuente: 'ventas', polygon: poly, page }),
+        })
+        paginasUsadas++
+        if (!r.ok) break
+        const j = await r.json()
+        const arr = Array.isArray(j.resultados) ? j.resultados : []
+        acc = acc.concat(arr)
+        const delTipo = acc.filter((v) => clasificaTipo(v) === objetivo).length
+        if (delTipo >= 15 || !j.has_more) break
+      }
+      ventas = acc
       radioUsado = radio
       const delTipo = ventas.filter((v) => clasificaTipo(v) === objetivo).length
-      if (delTipo >= 8) break
+      if (delTipo >= 12) break
     }
 
     // 3) Filtra por tipo + unidad UF + banda de m2 + outliers de uf/m2
@@ -130,6 +141,7 @@ export async function POST(request) {
         counts[t] = (counts[t] || 0) + 1
       })
       dbg.radio = radioUsado
+      dbg.paginas = paginasUsadas
       dbg.objetivo = objetivo
       dbg.counts_por_tipo = counts
       dbg.n_total_ventas = ventas.length
