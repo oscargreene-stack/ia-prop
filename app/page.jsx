@@ -1358,7 +1358,29 @@ function ChatComprador({ onBack }) {
       setStage('chat_libre')
       setInputMode(null)
       const resumen = buildResumen(currentData)
-      await askIsidora(
+      // Precio real del sector (Data Inmobiliaria), separando casa/depto
+      const PRES_MID = { hasta_3000: 2500, '3000_5000': 4000, '5000_8000': 6500, '8000_12000': 10000, '12000_20000': 16000, mas_20000: 25000 }
+      const M2_OBJ = { departamento: { '1': 45, '2': 65, '3': 85, '4+': 110 }, casa: { '2': 90, '3': 130, '4+': 180 } }
+      const comunaRef = currentData.zona && currentData.zona.length ? String(currentData.zona[0]).replace(/_/g, ' ') : null
+      const presUF = PRES_MID[currentData.presupuesto] || null
+      const m2Obj = (M2_OBJ[currentData.tipo] || {})[currentData.dormitorios] || null
+      if (comunaRef) {
+        setTyping(true)
+        try {
+          const zr = await fetch('/api/zona', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ comuna: comunaRef, tipo: currentData.tipo, presupuesto_uf: presUF, m2_objetivo: m2Obj }) })
+          const zj = await zr.json()
+          setTyping(false)
+          if (zj && zj._modo === 'real') {
+            const ps = zj.precio_sector
+            const tipoTxt = zj.tipo === 'departamento' ? 'departamentos' : zj.tipo === 'casa' ? 'casas' : zj.tipo
+            let card = `📍 **Precio real del sector — ${comunaRef} (${tipoTxt})**\n`
+            card += `Según ventas reales del Conservador: **${ps.uf_m2_mediana} UF/m²** (rango ${ps.uf_m2_p25}–${ps.uf_m2_p75} UF/m²), ${ps.n_comparables} ventas, confianza ${ps.confianza}.`
+            if (zj.reality) card += `\n\n💰 Con tu presupuesto alcanzarías ~**${zj.reality.m2_alcanzable_min}–${zj.reality.m2_alcanzable_max} m²** en este sector.`
+            if (zj.estimacion && m2Obj) card += `\n\n🏷️ Una propiedad de ~${m2Obj} m² ahí debería costar **${zj.estimacion.uf_min.toLocaleString('es-CL')}–${zj.estimacion.uf_max.toLocaleString('es-CL')} UF**.`
+            await addAgent(card, 300)
+          }
+        } catch (e) { setTyping(false) }
+      }      await askIsidora(
         `He completado mi perfil de búsqueda. Aquí está lo que busco: ${resumen}. Por favor dame tu análisis experto: qué comunas me recomiendas, qué puedo esperar con mi presupuesto, y cuáles son las mejores oportunidades del mercado actual para mi perfil.`,
         currentData
       )
