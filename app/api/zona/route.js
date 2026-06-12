@@ -85,7 +85,7 @@ export async function POST(request) {
       const cand = res.find((p) => p.cod_mz && p.cod_pr) || res[0]
       if (cand) {
         rolObj = cand
-        if (dbg) dbg.poligono_radio = radio
+        if (dbg) { dbg.poligono_radio = radio; dbg.catastro_claves = Object.keys(cand) }
         break
       }
     }
@@ -119,6 +119,28 @@ export async function POST(request) {
         return m2 > 0 && uf > 0 ? uf / m2 : null
       })
       .filter((x) => x != null)
+
+    // DEBUG: inspeccionar campos disponibles para separar casa/depto
+    if (dbg) {
+      dbg.detalle_claves = fuente[0] ? Object.keys(fuente[0]) : []
+      dbg.detalle_muestra = fuente.slice(0, 3)
+      dbg.detalle_keys_top = Object.keys(data || {})
+      try {
+        const polyV = poligono(punto.lat, punto.lng, 700)
+        const rv = await fetch(`${API_BASE}/busqueda_poligono`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + DATAINM_TOKEN },
+          body: JSON.stringify({ fuente: 'ventas', polygon: polyV }),
+        })
+        const jv = rv.ok ? await rv.json() : { http: rv.status }
+        const arr = Array.isArray(jv.resultados) ? jv.resultados : Array.isArray(jv) ? jv : []
+        dbg.ventas_poligono_claves = arr[0] ? Object.keys(arr[0]) : []
+        dbg.ventas_poligono_muestra = arr.slice(0, 3)
+        dbg.ventas_poligono_top = Array.isArray(jv) ? '(array)' : Object.keys(jv || {})
+      } catch (e) {
+        dbg.ventas_poligono_error = e.message
+      }
+    }
 
     if (ufm2.length === 0) return Response.json({ _modo: 'sin_comparables', mensaje: 'No hay ventas recientes suficientes en ese sector.', ...(dbg ? { _debug: dbg } : {}) })
 
