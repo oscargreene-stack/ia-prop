@@ -1285,9 +1285,272 @@ const FLUJOS_COMPRADOR = {
   ],
 }
 
+// ─── Formulario Comprador (form rápido + mapa) ──────────────────────────────
+const FC_TIPOS = [
+  { id: 'casa', label: 'Casa', icon: '🏠' },
+  { id: 'departamento', label: 'Departamento', icon: '🏢' },
+  { id: 'oficina', label: 'Oficina', icon: '🏛️' },
+  { id: 'comercial', label: 'Comercial', icon: '🏪' },
+  { id: 'terreno', label: 'Terreno', icon: '🌳' },
+]
+const FC_PRES = [
+  { id: 'hasta_3000', label: 'Hasta 3.000 UF', mid: 2500 },
+  { id: '3000_5000', label: '3.000 – 5.000 UF', mid: 4000 },
+  { id: '5000_8000', label: '5.000 – 8.000 UF', mid: 6500 },
+  { id: '8000_12000', label: '8.000 – 12.000 UF', mid: 10000 },
+  { id: '12000_20000', label: '12.000 – 20.000 UF', mid: 16000 },
+  { id: 'mas_20000', label: 'Más de 20.000 UF', mid: 25000 },
+]
+const FC_DORMS = ['1', '2', '3', '4+']
+const FC_BANOS = ['1', '2', '3+']
+const FC_CARACT = [
+  { id: 'estacionamiento', label: 'Estacionamiento' },
+  { id: 'bodega', label: 'Bodega' },
+  { id: 'terraza', label: 'Terraza/balcón' },
+  { id: 'piscina', label: 'Piscina' },
+  { id: 'gimnasio', label: 'Gimnasio' },
+  { id: 'conserje', label: 'Conserje 24/7' },
+]
+const FC_COMUNAS = ['Cerrillos','Cerro Navia','Conchalí','El Bosque','Estación Central','Huechuraba','Independencia','La Cisterna','La Florida','La Granja','La Pintana','La Reina','Las Condes','Lo Barnechea','Lo Espejo','Lo Prado','Macul','Maipú','Ñuñoa','Peñalolén','Providencia','Pudahuel','Puente Alto','Quilicura','Quinta Normal','Recoleta','Renca','San Bernardo','San Joaquín','San Miguel','San Ramón','Santiago','Vitacura']
+
+function FCBold({ text }) {
+  return (
+    <>
+      {String(text || '').split('\n').map((line, i) => (
+        <div key={i} style={{ minHeight: line ? 'auto' : '8px' }}>
+          {line.split(/\*\*(.*?)\*\*/g).map((p, j) => (j % 2 === 1 ? <strong key={j}>{p}</strong> : p))}
+        </div>
+      ))}
+    </>
+  )
+}
+
+function FormComprador({ onBack }) {
+  const [tipo, setTipo] = useState('departamento')
+  const [pres, setPres] = useState('5000_8000')
+  const [dorms, setDorms] = useState('2')
+  const [banos, setBanos] = useState('1')
+  const [m2, setM2] = useState('')
+  const [caract, setCaract] = useState([])
+  const [sectorMode, setSectorMode] = useState('comuna')
+  const [comunas, setComunas] = useState([])
+  const [polygon, setPolygon] = useState(null)
+  const [loading, setLoading] = useState(false)
+  const [resultado, setResultado] = useState(null)
+  const [mensajes, setMensajes] = useState([])
+  const [chatHistory, setChatHistory] = useState([])
+  const [pregunta, setPregunta] = useState('')
+  const [typing, setTyping] = useState(false)
+  const [enviado, setEnviado] = useState(false)
+  const mapRef = useRef(null)
+  const mapObj = useRef(null)
+  const polyRef = useRef(null)
+
+  const toggle = (arr, set, id) => set(arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id])
+
+  // Mapa de Google con dibujo de polígono
+  useEffect(() => {
+    if (sectorMode !== 'mapa') return
+    let cancel = false
+    const initMap = () => {
+      if (cancel || !mapRef.current || mapObj.current) return
+      const map = new window.google.maps.Map(mapRef.current, {
+        center: { lat: -33.45, lng: -70.62 }, zoom: 12,
+        streetViewControl: false, mapTypeControl: false, fullscreenControl: false,
+      })
+      mapObj.current = map
+      if (!window.google.maps.drawing) return
+      const dm = new window.google.maps.drawing.DrawingManager({
+        drawingMode: window.google.maps.drawing.OverlayType.POLYGON,
+        drawingControl: true,
+        drawingControlOptions: { drawingModes: [window.google.maps.drawing.OverlayType.POLYGON] },
+        polygonOptions: { fillColor: '#caa15a', fillOpacity: 0.18, strokeColor: '#caa15a', strokeWeight: 2, editable: true },
+      })
+      dm.setMap(map)
+      window.google.maps.event.addListener(dm, 'polygoncomplete', (poly) => {
+        if (polyRef.current) polyRef.current.setMap(null)
+        polyRef.current = poly
+        dm.setDrawingMode(null)
+        const leer = () => setPolygon(poly.getPath().getArray().map((pt) => ({ lat: pt.lat(), lng: pt.lng() })))
+        leer()
+        ;['set_at', 'insert_at', 'remove_at'].forEach((ev) => window.google.maps.event.addListener(poly.getPath(), ev, leer))
+      })
+    }
+    const ensure = () => {
+      if (window.google && window.google.maps && window.google.maps.drawing) { initMap(); return }
+      const prev = document.getElementById('gmaps-draw-script')
+      if (prev) { prev.addEventListener('load', initMap); return }
+      const ex = document.querySelector('script[src*="maps.googleapis.com"]')
+      const key = ex ? (ex.src.match(/[?&]key=([^&]+)/) || [])[1] : ''
+      const s = document.createElement('script')
+      s.id = 'gmaps-draw-script'
+      s.src = `https://maps.googleapis.com/maps/api/js?key=${key}&libraries=places,drawing&language=es&region=CL`
+      s.async = true
+      s.onload = initMap
+      document.head.appendChild(s)
+    }
+    const t = setTimeout(ensure, 120)
+    return () => { cancel = true; clearTimeout(t) }
+  }, [sectorMode])
+
+  const limpiarPoligono = () => {
+    if (polyRef.current) { polyRef.current.setMap(null); polyRef.current = null }
+    setPolygon(null)
+  }
+
+  const presMid = (FC_PRES.find((p) => p.id === pres) || {}).mid || null
+
+  const askIsidora = async (userMsg, history) => {
+    const newHistory = [...history, { role: 'user', content: userMsg }]
+    setChatHistory(newHistory)
+    setTyping(true)
+    try {
+      const r = await fetch('/api/buscar', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages: newHistory, perfil: { tipo, presupuesto: pres, dormitorios: dorms, banos, m2_objetivo: m2, zona: comunas, caracteristicas: caract }, propiedades_db: [] }),
+      })
+      const j = await r.json()
+      setTyping(false)
+      const resp = j.respuesta || 'Hubo un problema, intenta de nuevo.'
+      setMensajes((m) => [...m, { role: 'agent', content: resp }])
+      setChatHistory((h) => [...h, { role: 'assistant', content: resp }])
+    } catch (e) {
+      setTyping(false)
+      setMensajes((m) => [...m, { role: 'agent', content: 'Hubo un problema conectándome. ¿Probamos de nuevo?' }])
+    }
+  }
+
+  const buscar = async () => {
+    setLoading(true); setResultado(null); setMensajes([]); setEnviado(true)
+    const body = { tipo, presupuesto_uf: presMid, m2_objetivo: m2 ? parseFloat(m2) : null }
+    if (sectorMode === 'mapa' && polygon && polygon.length >= 3) body.polygon = polygon
+    else if (comunas.length) body.comuna = comunas[0]
+    let zj = null
+    try { zj = await (await fetch('/api/zona', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json() } catch (e) {}
+    setResultado(zj)
+    setLoading(false)
+    const sectorTxt = sectorMode === 'mapa' && polygon ? 'el sector que marqué en el mapa' : comunas.join(', ')
+    let ctx = ''
+    if (zj && zj._modo === 'real') {
+      const ps = zj.precio_sector
+      ctx = ` DATOS REALES DEL SECTOR (ventas CBR del Conservador, SOLO ${zj.tipo}): mediana ${ps.uf_m2_mediana} UF/m2 (rango ${ps.uf_m2_p25}-${ps.uf_m2_p75}), ${ps.n_comparables} comparables, confianza ${ps.confianza}. Usa estos números reales para el reality check y la estimación.`
+    }
+    const caractTxt = caract.length ? caract.join(', ') : 'sin preferencia'
+    const userMsg = `Busco ${tipo}, presupuesto ${pres.replace(/_/g, ' ')} UF, ${dorms} dormitorios, ${banos} baños${m2 ? ', ~' + m2 + ' m²' : ''}, en ${sectorTxt}. Imprescindibles: ${caractTxt}.${ctx} Dame tu análisis experto: si mi presupuesto es realista para esto en esa zona, qué puedo esperar, y las mejores oportunidades. Si no alcanza, sugiere comunas colindantes.`
+    await askIsidora(userMsg, [])
+  }
+
+  const enviarPregunta = async () => {
+    const v = pregunta.trim()
+    if (!v) return
+    setPregunta('')
+    setMensajes((m) => [...m, { role: 'user', content: v }])
+    await askIsidora(v, chatHistory)
+  }
+
+  const sectorListo = sectorMode === 'comuna' ? comunas.length > 0 : !!(polygon && polygon.length >= 3)
+  const chip = (active) => ({ padding: '8px 14px', borderRadius: 20, border: '1px solid ' + (active ? 'var(--gold)' : 'rgba(255,255,255,0.18)'), background: active ? 'var(--gold-dim)' : 'transparent', color: active ? 'var(--gold-light)' : '#cfcfcf', cursor: 'pointer', fontSize: 14, transition: 'all .15s' })
+  const sec = { marginBottom: 18 }
+  const lbl = { fontSize: 12, letterSpacing: 1, textTransform: 'uppercase', color: '#9a9a9a', marginBottom: 8 }
+  const row = { display: 'flex', flexWrap: 'wrap', gap: 8 }
+
+  return (
+    <div style={{ maxWidth: 760, margin: '0 auto', padding: '24px 18px 60px' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
+        <button className="back-btn" onClick={onBack}>←</button>
+        <div>
+          <div style={{ fontWeight: 700, fontSize: 18 }}>Isidora · Asesora de Compra</div>
+          <div style={{ fontSize: 13, color: '#8a8a8a' }}>Contame qué buscás y te digo el precio real del sector</div>
+        </div>
+      </div>
+
+      <div style={sec}>
+        <div style={lbl}>Tipo de propiedad</div>
+        <div style={row}>{FC_TIPOS.map((t) => <div key={t.id} style={chip(tipo === t.id)} onClick={() => setTipo(t.id)}>{t.icon} {t.label}</div>)}</div>
+      </div>
+
+      <div style={sec}>
+        <div style={lbl}>Presupuesto</div>
+        <div style={row}>{FC_PRES.map((p) => <div key={p.id} style={chip(pres === p.id)} onClick={() => setPres(p.id)}>{p.label}</div>)}</div>
+      </div>
+
+      <div style={{ ...sec, display: 'flex', gap: 28, flexWrap: 'wrap' }}>
+        <div>
+          <div style={lbl}>Dormitorios</div>
+          <div style={row}>{FC_DORMS.map((d) => <div key={d} style={chip(dorms === d)} onClick={() => setDorms(d)}>{d}</div>)}</div>
+        </div>
+        <div>
+          <div style={lbl}>Baños</div>
+          <div style={row}>{FC_BANOS.map((b) => <div key={b} style={chip(banos === b)} onClick={() => setBanos(b)}>{b}</div>)}</div>
+        </div>
+        <div>
+          <div style={lbl}>M² aprox (opcional)</div>
+          <input value={m2} onChange={(e) => setM2(e.target.value.replace(/[^0-9]/g, ''))} placeholder="ej: 70" inputMode="numeric" style={{ width: 110, padding: '9px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.18)', background: 'transparent', color: '#fff', fontSize: 14 }} />
+        </div>
+      </div>
+
+      <div style={sec}>
+        <div style={lbl}>Imprescindibles</div>
+        <div style={row}>{FC_CARACT.map((c) => <div key={c.id} style={chip(caract.includes(c.id))} onClick={() => toggle(caract, setCaract, c.id)}>{c.label}</div>)}</div>
+      </div>
+
+      <div style={sec}>
+        <div style={lbl}>¿Dónde buscás?</div>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
+          <div style={chip(sectorMode === 'comuna')} onClick={() => setSectorMode('comuna')}>📍 Por comunas</div>
+          <div style={chip(sectorMode === 'mapa')} onClick={() => setSectorMode('mapa')}>🗺️ Dibujar en el mapa</div>
+        </div>
+        {sectorMode === 'comuna' ? (
+          <div style={row}>{FC_COMUNAS.map((c) => <div key={c} style={chip(comunas.includes(c))} onClick={() => toggle(comunas, setComunas, c)}>{c}</div>)}</div>
+        ) : (
+          <div>
+            <div style={{ fontSize: 13, color: '#9a9a9a', marginBottom: 8 }}>Dibujá un polígono sobre el sector que te gusta (tocá el ícono de polígono arriba a la izquierda del mapa).</div>
+            <div ref={mapRef} style={{ width: '100%', height: 360, borderRadius: 12, border: '1px solid rgba(255,255,255,0.12)', overflow: 'hidden' }} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8 }}>
+              <span style={{ fontSize: 13, color: polygon ? 'var(--gold-light)' : '#8a8a8a' }}>{polygon && polygon.length >= 3 ? '✓ Sector marcado' : 'Sin sector marcado'}</span>
+              {polygon && <button onClick={limpiarPoligono} style={{ ...chip(false), fontSize: 13, padding: '5px 12px' }}>Borrar y redibujar</button>}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <button onClick={buscar} disabled={loading || !sectorListo} style={{ width: '100%', padding: '14px', borderRadius: 12, border: 'none', background: sectorListo ? 'var(--gold)' : 'rgba(255,255,255,0.08)', color: sectorListo ? '#1a1a1a' : '#777', fontWeight: 700, fontSize: 16, cursor: sectorListo ? 'pointer' : 'default', marginTop: 6 }}>
+        {loading ? 'Calculando precio real del sector…' : 'Buscar precio del sector'}
+      </button>
+
+      {enviado && resultado && resultado._modo === 'real' && (
+        <div style={{ marginTop: 24, padding: 18, borderRadius: 14, background: 'rgba(202,161,90,0.08)', border: '1px solid rgba(202,161,90,0.25)' }}>
+          <div style={{ fontWeight: 700, color: 'var(--gold-light)', marginBottom: 8 }}>📍 Precio real del sector — {resultado.tipo === 'departamento' ? 'departamentos' : resultado.tipo === 'casa' ? 'casas' : resultado.tipo}</div>
+          <div style={{ fontSize: 14, lineHeight: 1.6 }}>
+            Según ventas reales del Conservador: <strong>{resultado.precio_sector.uf_m2_mediana} UF/m²</strong> (rango {resultado.precio_sector.uf_m2_p25}–{resultado.precio_sector.uf_m2_p75}), {resultado.precio_sector.n_comparables} ventas, confianza {resultado.precio_sector.confianza}.
+            {resultado.reality && <div style={{ marginTop: 8 }}>💰 Con tu presupuesto alcanzarías ~<strong>{resultado.reality.m2_alcanzable_min}–{resultado.reality.m2_alcanzable_max} m²</strong> en este sector.</div>}
+            {resultado.estimacion && m2 && <div style={{ marginTop: 8 }}>🏷️ Una propiedad de ~{m2} m² ahí debería costar <strong>{resultado.estimacion.uf_min.toLocaleString('es-CL')}–{resultado.estimacion.uf_max.toLocaleString('es-CL')} UF</strong>.</div>}
+          </div>
+        </div>
+      )}
+      {enviado && resultado && resultado._modo !== 'real' && !loading && (
+        <div style={{ marginTop: 20, fontSize: 14, color: '#cfcfcf' }}>{resultado.mensaje || 'No pude estimar el precio de ese sector con los datos disponibles. Igual te dejo el consejo de Isidora.'}</div>
+      )}
+
+      {mensajes.map((msg, i) => (
+        <div key={i} style={{ marginTop: 16, padding: msg.role === 'agent' ? 16 : '10px 14px', borderRadius: 14, background: msg.role === 'agent' ? 'rgba(255,255,255,0.05)' : 'var(--gold-dim)', alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start', fontSize: 14, lineHeight: 1.6 }}>
+          {msg.role === 'agent' ? <FCBold text={msg.content} /> : msg.content}
+        </div>
+      ))}
+      {typing && <div style={{ marginTop: 16, color: '#8a8a8a', fontSize: 14 }}>Isidora está escribiendo…</div>}
+
+      {enviado && !loading && (
+        <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
+          <input value={pregunta} onChange={(e) => setPregunta(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') enviarPregunta() }} placeholder="Preguntale lo que quieras a Isidora…" style={{ flex: 1, padding: '11px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.18)', background: 'transparent', color: '#fff', fontSize: 14 }} />
+          <button onClick={enviarPregunta} style={{ padding: '0 18px', borderRadius: 12, border: 'none', background: 'var(--gold)', color: '#1a1a1a', fontWeight: 700, cursor: 'pointer' }}>→</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Chat Comprador ───────────────────────────────────────────────────────────
-function ChatComprador({ onBack }) {
-  const [messages, setMessages] = useState([])
+function ChatComprador({ onBack }) {  const [messages, setMessages] = useState([])
   const [typing, setTyping] = useState(false)
   const [stage, setStage] = useState('greeting')
   const [data, setData] = useState({})
@@ -1549,7 +1812,7 @@ function ChatComprador({ onBack }) {
 export default function Home() {
   const [view, setView] = useState('landing')
   if (view === 'vendedor') return <ChatVendedor onBack={() => setView('landing')}/>
-  if (view === 'comprador') return <ChatComprador onBack={() => setView('landing')}/>
+  if (view === 'comprador') return <FormComprador onBack={() => setView('landing')}/>
   return (
     <>
       <div className="landing">
