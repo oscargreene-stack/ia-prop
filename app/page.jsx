@@ -1298,8 +1298,9 @@ const FC_PRES = [
   { id: '3000_5000', label: '3.000 – 5.000 UF', mid: 4000 },
   { id: '5000_8000', label: '5.000 – 8.000 UF', mid: 6500 },
   { id: '8000_12000', label: '8.000 – 12.000 UF', mid: 10000 },
-  { id: '12000_20000', label: '12.000 – 20.000 UF', mid: 16000 },
-  { id: 'mas_20000', label: 'Más de 20.000 UF', mid: 25000 },
+  { id: '12000_18000', label: '12.000 – 18.000 UF', mid: 15000 },
+  { id: '18000_25000', label: '18.000 – 25.000 UF', mid: 21500 },
+  { id: 'mas_25000', label: '25.000 UF o más', mid: 30000 },
 ]
 const FC_DORMS = ['1', '2', '3', '4+']
 const FC_BANOS = ['1', '2', '3+']
@@ -1312,6 +1313,27 @@ const FC_CARACT = [
   { id: 'conserje', label: 'Conserje 24/7' },
 ]
 const FC_COMUNAS = ['Cerrillos','Cerro Navia','Conchalí','El Bosque','Estación Central','Huechuraba','Independencia','La Cisterna','La Florida','La Granja','La Pintana','La Reina','Las Condes','Lo Barnechea','Lo Espejo','Lo Prado','Macul','Maipú','Ñuñoa','Peñalolén','Providencia','Pudahuel','Puente Alto','Quilicura','Quinta Normal','Recoleta','Renca','San Bernardo','San Joaquín','San Miguel','San Ramón','Santiago','Vitacura']
+
+// Carga Google Maps (con drawing) UNA sola vez para toda la app.
+let __fcMapsPromise = null
+function fcLoadGmaps() {
+  if (typeof window === 'undefined') return Promise.resolve()
+  if (window.google && window.google.maps && window.google.maps.drawing) return Promise.resolve()
+  if (__fcMapsPromise) return __fcMapsPromise
+  __fcMapsPromise = new Promise((resolve, reject) => {
+    const existing = document.getElementById('fc-gmaps')
+    if (existing) { existing.addEventListener('load', () => resolve()); return }
+    const key = process.env.NEXT_PUBLIC_GOOGLE_PLACES_KEY || ''
+    const s = document.createElement('script')
+    s.id = 'fc-gmaps'
+    s.src = `https://maps.googleapis.com/maps/api/js?key=${key}&libraries=places,drawing&language=es&region=CL`
+    s.async = true
+    s.onload = () => resolve()
+    s.onerror = reject
+    document.head.appendChild(s)
+  })
+  return __fcMapsPromise
+}
 
 function FCBold({ text }) {
   return (
@@ -1328,6 +1350,7 @@ function FCBold({ text }) {
 function FormComprador({ onBack }) {
   const [tipo, setTipo] = useState('departamento')
   const [pres, setPres] = useState('5000_8000')
+  const [presMax, setPresMax] = useState('')
   const [dorms, setDorms] = useState('2')
   const [banos, setBanos] = useState('1')
   const [m2, setM2] = useState('')
@@ -1344,6 +1367,7 @@ function FormComprador({ onBack }) {
   const [enviado, setEnviado] = useState(false)
   const mapRef = useRef(null)
   const mapObj = useRef(null)
+  const dmRef = useRef(null)
   const polyRef = useRef(null)
 
   const toggle = (arr, set, id) => set(arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id])
@@ -1352,53 +1376,50 @@ function FormComprador({ onBack }) {
   useEffect(() => {
     if (sectorMode !== 'mapa') return
     let cancel = false
-    const initMap = () => {
-      if (cancel || !mapRef.current || mapObj.current) return
-      const map = new window.google.maps.Map(mapRef.current, {
-        center: { lat: -33.45, lng: -70.62 }, zoom: 12,
-        streetViewControl: false, mapTypeControl: false, fullscreenControl: false,
-      })
-      mapObj.current = map
-      if (!window.google.maps.drawing) return
-      const dm = new window.google.maps.drawing.DrawingManager({
-        drawingMode: window.google.maps.drawing.OverlayType.POLYGON,
-        drawingControl: true,
-        drawingControlOptions: { drawingModes: [window.google.maps.drawing.OverlayType.POLYGON] },
-        polygonOptions: { fillColor: '#caa15a', fillOpacity: 0.18, strokeColor: '#caa15a', strokeWeight: 2, editable: true },
-      })
-      dm.setMap(map)
-      window.google.maps.event.addListener(dm, 'polygoncomplete', (poly) => {
-        if (polyRef.current) polyRef.current.setMap(null)
-        polyRef.current = poly
-        dm.setDrawingMode(null)
-        const leer = () => setPolygon(poly.getPath().getArray().map((pt) => ({ lat: pt.lat(), lng: pt.lng() })))
-        leer()
-        ;['set_at', 'insert_at', 'remove_at'].forEach((ev) => window.google.maps.event.addListener(poly.getPath(), ev, leer))
-      })
-    }
-    const ensure = () => {
-      if (window.google && window.google.maps && window.google.maps.drawing) { initMap(); return }
-      const prev = document.getElementById('gmaps-draw-script')
-      if (prev) { prev.addEventListener('load', initMap); return }
-      const ex = document.querySelector('script[src*="maps.googleapis.com"]')
-      const key = process.env.NEXT_PUBLIC_GOOGLE_PLACES_KEY || ''
-      const s = document.createElement('script')
-      s.id = 'gmaps-draw-script'
-      s.src = `https://maps.googleapis.com/maps/api/js?key=${key}&libraries=places,drawing&language=es&region=CL`
-      s.async = true
-      s.onload = initMap
-      document.head.appendChild(s)
-    }
-    const t = setTimeout(ensure, 120)
-    return () => { cancel = true; clearTimeout(t) }
+    fcLoadGmaps().then(() => {
+      const g = window.google && window.google.maps
+      if (cancel || !g) return
+      const tryInit = (n) => {
+        if (cancel) return
+        if (!mapRef.current) { if (n > 0) setTimeout(() => tryInit(n - 1), 150); return }
+        if (mapObj.current) return
+        const map = new g.Map(mapRef.current, {
+          center: { lat: -33.45, lng: -70.62 }, zoom: 12,
+          mapTypeControl: false, streetViewControl: false, fullscreenControl: false,
+        })
+        mapObj.current = map
+        if (!g.drawing) return
+        const dm = new g.drawing.DrawingManager({
+          drawingMode: g.drawing.OverlayType.POLYGON,
+          drawingControl: true,
+          drawingControlOptions: { position: g.ControlPosition.TOP_CENTER, drawingModes: [g.drawing.OverlayType.POLYGON] },
+          polygonOptions: { fillColor: '#caa15a', fillOpacity: 0.2, strokeColor: '#caa15a', strokeWeight: 2, editable: true, clickable: false },
+        })
+        dm.setMap(map)
+        dmRef.current = dm
+        g.event.addListener(dm, 'overlaycomplete', (e) => {
+          if (e.type !== g.drawing.OverlayType.POLYGON) return
+          if (polyRef.current) polyRef.current.setMap(null)
+          polyRef.current = e.overlay
+          dm.setDrawingMode(null)
+          const read = () => setPolygon(e.overlay.getPath().getArray().map((pt) => ({ lat: pt.lat(), lng: pt.lng() })))
+          read()
+          ;['set_at', 'insert_at', 'remove_at'].forEach((ev) => g.event.addListener(e.overlay.getPath(), ev, read))
+        })
+      }
+      tryInit(25)
+    })
+    return () => { cancel = true }
   }, [sectorMode])
 
   const limpiarPoligono = () => {
     if (polyRef.current) { polyRef.current.setMap(null); polyRef.current = null }
     setPolygon(null)
+    if (dmRef.current && window.google) dmRef.current.setDrawingMode(window.google.maps.drawing.OverlayType.POLYGON)
   }
 
   const presMid = (FC_PRES.find((p) => p.id === pres) || {}).mid || null
+  const presUF = presMax && parseFloat(presMax) > 0 ? parseFloat(presMax) : presMid
 
   const askIsidora = async (userMsg, history) => {
     const newHistory = [...history, { role: 'user', content: userMsg }]
@@ -1407,7 +1428,7 @@ function FormComprador({ onBack }) {
     try {
       const r = await fetch('/api/buscar', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: newHistory, perfil: { tipo, presupuesto: pres, dormitorios: dorms, banos, m2_objetivo: m2, zona: comunas, caracteristicas: caract }, propiedades_db: [] }),
+        body: JSON.stringify({ messages: newHistory, perfil: { tipo, presupuesto: pres, presupuesto_max_uf: presMax || null, dormitorios: dorms, banos, m2_objetivo: m2, zona: comunas, caracteristicas: caract }, propiedades_db: [] }),
       })
       const j = await r.json()
       setTyping(false)
@@ -1422,7 +1443,7 @@ function FormComprador({ onBack }) {
 
   const buscar = async () => {
     setLoading(true); setResultado(null); setMensajes([]); setEnviado(true)
-    const body = { tipo, presupuesto_uf: presMid, m2_objetivo: m2 ? parseFloat(m2) : null }
+    const body = { tipo, presupuesto_uf: presUF, m2_objetivo: m2 ? parseFloat(m2) : null }
     if (sectorMode === 'mapa' && polygon && polygon.length >= 3) body.polygon = polygon
     else if (comunas.length) body.comuna = comunas[0]
     let zj = null
@@ -1436,7 +1457,8 @@ function FormComprador({ onBack }) {
       ctx = ` DATOS REALES DEL SECTOR (ventas CBR del Conservador, SOLO ${zj.tipo}): mediana ${ps.uf_m2_mediana} UF/m2 (rango ${ps.uf_m2_p25}-${ps.uf_m2_p75}), ${ps.n_comparables} comparables, confianza ${ps.confianza}. Usa estos números reales para el reality check y la estimación.`
     }
     const caractTxt = caract.length ? caract.join(', ') : 'sin preferencia'
-    const userMsg = `Busco ${tipo}, presupuesto ${pres.replace(/_/g, ' ')} UF, ${dorms} dormitorios, ${banos} baños${m2 ? ', ~' + m2 + ' m²' : ''}, en ${sectorTxt}. Imprescindibles: ${caractTxt}.${ctx} Dame tu análisis experto: si mi presupuesto es realista para esto en esa zona, qué puedo esperar, y las mejores oportunidades. Si no alcanza, sugiere comunas colindantes.`
+    const presTxt = presMax && parseFloat(presMax) > 0 ? `hasta ${parseFloat(presMax).toLocaleString('es-CL')} UF` : pres.replace(/_/g, ' ') + ' UF'
+    const userMsg = `Busco ${tipo}, presupuesto ${presTxt}, ${dorms} dormitorios, ${banos} baños${m2 ? ', ~' + m2 + ' m²' : ''}, en ${sectorTxt}. Imprescindibles: ${caractTxt}.${ctx} Dame tu análisis experto: si mi presupuesto es realista para esto en esa zona, qué puedo esperar, y las mejores oportunidades. Si no alcanza, sugiere comunas colindantes.`
     await askIsidora(userMsg, [])
   }
 
@@ -1453,6 +1475,7 @@ function FormComprador({ onBack }) {
   const sec = { marginBottom: 18 }
   const lbl = { fontSize: 12, letterSpacing: 1, textTransform: 'uppercase', color: '#9a9a9a', marginBottom: 8 }
   const row = { display: 'flex', flexWrap: 'wrap', gap: 8 }
+  const inp = { padding: '9px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.18)', background: 'transparent', color: '#fff', fontSize: 14 }
 
   return (
     <div style={{ maxWidth: 760, margin: '0 auto', padding: '24px 18px 60px' }}>
@@ -1472,6 +1495,11 @@ function FormComprador({ onBack }) {
       <div style={sec}>
         <div style={lbl}>Presupuesto</div>
         <div style={row}>{FC_PRES.map((p) => <div key={p.id} style={chip(pres === p.id)} onClick={() => setPres(p.id)}>{p.label}</div>)}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10 }}>
+          <span style={{ fontSize: 13, color: '#9a9a9a' }}>o tu máximo exacto:</span>
+          <input value={presMax} onChange={(e) => setPresMax(e.target.value.replace(/[^0-9]/g, ''))} placeholder="ej: 9.500" inputMode="numeric" style={{ ...inp, width: 130 }} />
+          <span style={{ fontSize: 13, color: '#9a9a9a' }}>UF</span>
+        </div>
       </div>
 
       <div style={{ ...sec, display: 'flex', gap: 28, flexWrap: 'wrap' }}>
@@ -1485,7 +1513,7 @@ function FormComprador({ onBack }) {
         </div>
         <div>
           <div style={lbl}>M² aprox (opcional)</div>
-          <input value={m2} onChange={(e) => setM2(e.target.value.replace(/[^0-9]/g, ''))} placeholder="ej: 70" inputMode="numeric" style={{ width: 110, padding: '9px 12px', borderRadius: 10, border: '1px solid rgba(255,255,255,0.18)', background: 'transparent', color: '#fff', fontSize: 14 }} />
+          <input value={m2} onChange={(e) => setM2(e.target.value.replace(/[^0-9]/g, ''))} placeholder="ej: 70" inputMode="numeric" style={{ ...inp, width: 110 }} />
         </div>
       </div>
 
@@ -1504,8 +1532,8 @@ function FormComprador({ onBack }) {
           <div style={row}>{FC_COMUNAS.map((c) => <div key={c} style={chip(comunas.includes(c))} onClick={() => toggle(comunas, setComunas, c)}>{c}</div>)}</div>
         ) : (
           <div>
-            <div style={{ fontSize: 13, color: '#9a9a9a', marginBottom: 8 }}>Dibujá un polígono sobre el sector que te gusta (tocá el ícono de polígono arriba a la izquierda del mapa).</div>
-            <div ref={mapRef} style={{ width: '100%', height: 360, borderRadius: 12, border: '1px solid rgba(255,255,255,0.12)', overflow: 'hidden' }} />
+            <div style={{ fontSize: 13, color: '#9a9a9a', marginBottom: 8 }}>Tocá el ícono de polígono (arriba del mapa) y andá marcando los vértices del sector; cerrá el polígono tocando el primer punto.</div>
+            <div ref={mapRef} style={{ width: '100%', height: 380, borderRadius: 12, border: '1px solid rgba(255,255,255,0.12)', overflow: 'hidden' }} />
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8 }}>
               <span style={{ fontSize: 13, color: polygon ? 'var(--gold-light)' : '#8a8a8a' }}>{polygon && polygon.length >= 3 ? '✓ Sector marcado' : 'Sin sector marcado'}</span>
               {polygon && <button onClick={limpiarPoligono} style={{ ...chip(false), fontSize: 13, padding: '5px 12px' }}>Borrar y redibujar</button>}
@@ -1533,7 +1561,7 @@ function FormComprador({ onBack }) {
       )}
 
       {mensajes.map((msg, i) => (
-        <div key={i} style={{ marginTop: 16, padding: msg.role === 'agent' ? 16 : '10px 14px', borderRadius: 14, background: msg.role === 'agent' ? 'rgba(255,255,255,0.05)' : 'var(--gold-dim)', alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start', fontSize: 14, lineHeight: 1.6 }}>
+        <div key={i} style={{ marginTop: 16, padding: msg.role === 'agent' ? 16 : '10px 14px', borderRadius: 14, background: msg.role === 'agent' ? 'rgba(255,255,255,0.05)' : 'var(--gold-dim)', fontSize: 14, lineHeight: 1.6 }}>
           {msg.role === 'agent' ? <FCBold text={msg.content} /> : msg.content}
         </div>
       ))}
@@ -1541,14 +1569,13 @@ function FormComprador({ onBack }) {
 
       {enviado && !loading && (
         <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
-          <input value={pregunta} onChange={(e) => setPregunta(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') enviarPregunta() }} placeholder="Preguntale lo que quieras a Isidora…" style={{ flex: 1, padding: '11px 14px', borderRadius: 12, border: '1px solid rgba(255,255,255,0.18)', background: 'transparent', color: '#fff', fontSize: 14 }} />
+          <input value={pregunta} onChange={(e) => setPregunta(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') enviarPregunta() }} placeholder="Preguntale lo que quieras a Isidora…" style={{ ...inp, flex: 1 }} />
           <button onClick={enviarPregunta} style={{ padding: '0 18px', borderRadius: 12, border: 'none', background: 'var(--gold)', color: '#1a1a1a', fontWeight: 700, cursor: 'pointer' }}>→</button>
         </div>
       )}
     </div>
   )
 }
-
 // ─── Chat Comprador ───────────────────────────────────────────────────────────
 function ChatComprador({ onBack }) {  const [messages, setMessages] = useState([])
   const [typing, setTyping] = useState(false)
