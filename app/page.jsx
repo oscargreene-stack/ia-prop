@@ -1454,7 +1454,19 @@ function FormComprador({ onBack }) {
     let ctx = ''
     if (zj && zj._modo === 'real') {
       const ps = zj.precio_sector
-      ctx = ` DATOS REALES DEL SECTOR (ventas CBR del Conservador, SOLO ${zj.tipo}): mediana ${ps.uf_m2_mediana} UF/m2 (rango ${ps.uf_m2_p25}-${ps.uf_m2_p75}), ${ps.n_comparables} comparables, confianza ${ps.confianza}. Usa estos números reales para el reality check y la estimación.`
+      ctx = ` DATOS REALES DEL SECTOR (ventas CBR del Conservador, SOLO ${zj.tipo}): UF/m2 construido de mercado mediana ${ps.uf_m2_mediana} (rango ${ps.uf_m2_p25}-${ps.uf_m2_p75}), ${ps.n_comparables} comparables, confianza ${ps.confianza}.`
+      // Casas: tasación aditiva (suelo + construcción = total).
+      const vz = zj.valorizacion
+      if (vz && vz.suelo) {
+        const s = vz.suelo
+        ctx += ` TASACIÓN ADITIVA DE LA CASA: VALOR DE SUELO = ${s.uf_m2_mediana} UF/m2 de terreno (rango ${s.uf_m2_p25}-${s.uf_m2_p75}, fuente ${s.fuente}) multiplicado por los m2 del terreno. CONSTRUCCIÓN según estado (UF/m2 construido): a estrenar ${vz.construccion_costo_uf_m2.nueva.min}-${vz.construccion_costo_uf_m2.nueva.max}, buena ${vz.construccion_costo_uf_m2.buena.min}-${vz.construccion_costo_uf_m2.buena.max}, regular ${vz.construccion_costo_uf_m2.regular.min}-${vz.construccion_costo_uf_m2.regular.max}, a refaccionar ${vz.construccion_costo_uf_m2.mala.min}-${vz.construccion_costo_uf_m2.mala.max}. TOTAL = suelo + construcción.`
+        if (vz.total_ejemplo) {
+          const te = vz.total_ejemplo, pe = te.por_estado
+          ctx += ` TOTAL EJEMPLO para una casa tipo del sector (${te.terreno_m2} m2 terreno + ${te.construido_m2} m2 construidos): nueva ${pe.nueva.uf_min}-${pe.nueva.uf_max} UF, buena ${pe.buena.uf_min}-${pe.buena.uf_max} UF, regular ${pe.regular.uf_min}-${pe.regular.uf_max} UF, a refaccionar ${pe.mala.uf_min}-${pe.mala.uf_max} UF.`
+        }
+        ctx += ` Presenta SIEMPRE el valor de la casa como suelo + construcción = total, con rango según estado.`
+      }
+      ctx += ` Usa estos números reales para el reality check y la estimación.`
     }
     const caractTxt = caract.length ? caract.join(', ') : 'sin preferencia'
     const presTxt = presMax && parseFloat(presMax) > 0 ? `hasta ${parseFloat(presMax).toLocaleString('es-CL')} UF` : pres.replace(/_/g, ' ') + ' UF'
@@ -1486,12 +1498,10 @@ function FormComprador({ onBack }) {
           <div style={{ fontSize: 13, color: '#8a8a8a' }}>Contame qué buscás y te digo el precio real del sector</div>
         </div>
       </div>
-
       <div style={sec}>
         <div style={lbl}>Tipo de propiedad</div>
         <div style={row}>{FC_TIPOS.map((t) => <div key={t.id} style={chip(tipo === t.id)} onClick={() => setTipo(t.id)}>{t.icon} {t.label}</div>)}</div>
       </div>
-
       <div style={sec}>
         <div style={lbl}>Presupuesto</div>
         <div style={row}>{FC_PRES.map((p) => <div key={p.id} style={chip(pres === p.id)} onClick={() => setPres(p.id)}>{p.label}</div>)}</div>
@@ -1501,7 +1511,6 @@ function FormComprador({ onBack }) {
           <span style={{ fontSize: 13, color: '#9a9a9a' }}>UF</span>
         </div>
       </div>
-
       <div style={{ ...sec, display: 'flex', gap: 28, flexWrap: 'wrap' }}>
         <div>
           <div style={lbl}>Dormitorios</div>
@@ -1516,12 +1525,10 @@ function FormComprador({ onBack }) {
           <input value={m2} onChange={(e) => setM2(e.target.value.replace(/[^0-9]/g, ''))} placeholder="ej: 70" inputMode="numeric" style={{ ...inp, width: 110 }} />
         </div>
       </div>
-
       <div style={sec}>
         <div style={lbl}>Imprescindibles</div>
         <div style={row}>{FC_CARACT.map((c) => <div key={c.id} style={chip(caract.includes(c.id))} onClick={() => toggle(caract, setCaract, c.id)}>{c.label}</div>)}</div>
       </div>
-
       <div style={sec}>
         <div style={lbl}>¿Dónde buscás?</div>
         <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
@@ -1541,16 +1548,26 @@ function FormComprador({ onBack }) {
           </div>
         )}
       </div>
-
       <button onClick={buscar} disabled={loading || !sectorListo} style={{ width: '100%', padding: '14px', borderRadius: 12, border: 'none', background: sectorListo ? 'var(--gold)' : 'rgba(255,255,255,0.08)', color: sectorListo ? '#1a1a1a' : '#777', fontWeight: 700, fontSize: 16, cursor: sectorListo ? 'pointer' : 'default', marginTop: 6 }}>
         {loading ? 'Calculando precio real del sector…' : 'Buscar precio del sector'}
       </button>
-
       {enviado && resultado && resultado._modo === 'real' && (
         <div style={{ marginTop: 24, padding: 18, borderRadius: 14, background: 'rgba(202,161,90,0.08)', border: '1px solid rgba(202,161,90,0.25)' }}>
           <div style={{ fontWeight: 700, color: 'var(--gold-light)', marginBottom: 8 }}>📍 Precio real del sector — {resultado.tipo === 'departamento' ? 'departamentos' : resultado.tipo === 'casa' ? 'casas' : resultado.tipo}</div>
           <div style={{ fontSize: 14, lineHeight: 1.6 }}>
-            Según ventas reales del Conservador: <strong>{resultado.precio_sector.uf_m2_mediana} UF/m²</strong> (rango {resultado.precio_sector.uf_m2_p25}–{resultado.precio_sector.uf_m2_p75}), {resultado.precio_sector.n_comparables} ventas, confianza {resultado.precio_sector.confianza}.
+            Según ventas reales del Conservador: <strong>{resultado.precio_sector.uf_m2_mediana} UF/m² construido</strong> (rango {resultado.precio_sector.uf_m2_p25}–{resultado.precio_sector.uf_m2_p75}), {resultado.precio_sector.n_comparables} ventas, confianza {resultado.precio_sector.confianza}.
+            {resultado.valorizacion && resultado.valorizacion.suelo && (
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px solid rgba(202,161,90,0.25)' }}>
+                <div style={{ fontWeight: 700, color: 'var(--gold-light)', marginBottom: 6 }}>🏗️ Tasación: suelo + construcción</div>
+                <div>🌳 Terreno: <strong>{resultado.valorizacion.suelo.uf_m2_mediana} UF/m²</strong> (rango {resultado.valorizacion.suelo.uf_m2_p25}–{resultado.valorizacion.suelo.uf_m2_p75} UF/m²)</div>
+                <div style={{ marginTop: 4 }}>🧱 Construcción{resultado.valorizacion.construccion_tier ? ` (${resultado.valorizacion.construccion_tier})` : ''} según estado: a estrenar {resultado.valorizacion.construccion_costo_uf_m2.nueva.min}–{resultado.valorizacion.construccion_costo_uf_m2.nueva.max} · buena {resultado.valorizacion.construccion_costo_uf_m2.buena.min}–{resultado.valorizacion.construccion_costo_uf_m2.buena.max} · regular {resultado.valorizacion.construccion_costo_uf_m2.regular.min}–{resultado.valorizacion.construccion_costo_uf_m2.regular.max} · a refaccionar {resultado.valorizacion.construccion_costo_uf_m2.mala.min}–{resultado.valorizacion.construccion_costo_uf_m2.mala.max} UF/m²</div>
+                {resultado.valorizacion.total_ejemplo && (
+                  <div style={{ marginTop: 8 }}>
+                    🏷️ Casa tipo del sector ({resultado.valorizacion.total_ejemplo.terreno_m2} m² terreno + {resultado.valorizacion.total_ejemplo.construido_m2} m² construidos) ≈ <strong>{resultado.valorizacion.total_ejemplo.por_estado.regular.uf_min.toLocaleString('es-CL')}–{resultado.valorizacion.total_ejemplo.por_estado.nueva.uf_max.toLocaleString('es-CL')} UF</strong> según estado.
+                  </div>
+                )}
+              </div>
+            )}
             {resultado.reality && <div style={{ marginTop: 8 }}>💰 Con tu presupuesto alcanzarías ~<strong>{resultado.reality.m2_alcanzable_min}–{resultado.reality.m2_alcanzable_max} m²</strong> en este sector.</div>}
             {resultado.estimacion && m2 && <div style={{ marginTop: 8 }}>🏷️ Una propiedad de ~{m2} m² ahí debería costar <strong>{resultado.estimacion.uf_min.toLocaleString('es-CL')}–{resultado.estimacion.uf_max.toLocaleString('es-CL')} UF</strong>.</div>}
           </div>
@@ -1559,14 +1576,12 @@ function FormComprador({ onBack }) {
       {enviado && resultado && resultado._modo !== 'real' && !loading && (
         <div style={{ marginTop: 20, fontSize: 14, color: '#cfcfcf' }}>{resultado.mensaje || 'No pude estimar el precio de ese sector con los datos disponibles. Igual te dejo el consejo de Isidora.'}</div>
       )}
-
       {mensajes.map((msg, i) => (
         <div key={i} style={{ marginTop: 16, padding: msg.role === 'agent' ? 16 : '10px 14px', borderRadius: 14, background: msg.role === 'agent' ? 'rgba(255,255,255,0.05)' : 'var(--gold-dim)', fontSize: 14, lineHeight: 1.6 }}>
           {msg.role === 'agent' ? <FCBold text={msg.content} /> : msg.content}
         </div>
       ))}
       {typing && <div style={{ marginTop: 16, color: '#8a8a8a', fontSize: 14 }}>Isidora está escribiendo…</div>}
-
       {enviado && !loading && (
         <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
           <input value={pregunta} onChange={(e) => setPregunta(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') enviarPregunta() }} placeholder="Preguntale lo que quieras a Isidora…" style={{ ...inp, flex: 1 }} />
@@ -1577,7 +1592,8 @@ function FormComprador({ onBack }) {
   )
 }
 // ─── Chat Comprador ───────────────────────────────────────────────────────────
-function ChatComprador({ onBack }) {  const [messages, setMessages] = useState([])
+function ChatComprador({ onBack }) {
+  const [messages, setMessages] = useState([])
   const [typing, setTyping] = useState(false)
   const [stage, setStage] = useState('greeting')
   const [data, setData] = useState({})
@@ -1588,7 +1604,6 @@ function ChatComprador({ onBack }) {  const [messages, setMessages] = useState([
   const [multiSel, setMultiSel] = useState([])
   const [chatHistory, setChatHistory] = useState([])
   const [propiedadesDB, setPropiedadesDB] = useState([])
-
   // Cargar base de datos de propiedades al montar
   useEffect(() => {
     fetch('/data/propiedades_muestra.json')
@@ -1598,15 +1613,12 @@ function ChatComprador({ onBack }) {  const [messages, setMessages] = useState([
   }, [])
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
-
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior:'smooth' }) }, [messages, typing])
-
   const addAgent = (content, delay=600) => new Promise(res => {
     setTyping(true)
     setTimeout(() => { setTyping(false); setMessages(m => [...m, { role:'agent', content }]); res() }, delay)
   })
   const addUser = (text) => setMessages(m => [...m, { role:'user', content: text }])
-
   const askIsidora = async (userMsg, currentData) => {
     const newHistory = [...chatHistory, { role:'user', content: userMsg }]
     setChatHistory(newHistory)
@@ -1628,7 +1640,6 @@ function ChatComprador({ onBack }) {  const [messages, setMessages] = useState([
       await addAgent('Hubo un problema conectándome. ¿Intentamos de nuevo?', 300)
     }
   }
-
   // Inicio
   useEffect(() => {
     const init = async () => {
@@ -1639,7 +1650,6 @@ function ChatComprador({ onBack }) {  const [messages, setMessages] = useState([
     }
     init()
   }, [])
-
   const nextStep = async (currentData, idx) => {
     const tipo = currentData.tipo
     const flujo = FLUJOS_COMPRADOR[tipo] || []
@@ -1664,13 +1674,23 @@ function ChatComprador({ onBack }) {  const [messages, setMessages] = useState([
             const ps = zj.precio_sector
             const tipoTxt = zj.tipo === 'departamento' ? 'departamentos' : zj.tipo === 'casa' ? 'casas' : zj.tipo
             let card = `📍 **Precio real del sector — ${comunaRef} (${tipoTxt})**\n`
-            card += `Según ventas reales del Conservador: **${ps.uf_m2_mediana} UF/m²** (rango ${ps.uf_m2_p25}–${ps.uf_m2_p75} UF/m²), ${ps.n_comparables} ventas, confianza ${ps.confianza}.`
+            card += `Según ventas reales del Conservador: **${ps.uf_m2_mediana} UF/m² construido** (rango ${ps.uf_m2_p25}–${ps.uf_m2_p75} UF/m²), ${ps.n_comparables} ventas, confianza ${ps.confianza}.`
+            const vz = zj.valorizacion
+            if (vz && vz.suelo) {
+              card += `\n\n🏗️ **Tasación suelo + construcción:**`
+              card += `\n🌳 Terreno: **${vz.suelo.uf_m2_mediana} UF/m²** (rango ${vz.suelo.uf_m2_p25}–${vz.suelo.uf_m2_p75} UF/m²).`
+              card += `\n🧱 Construcción${vz.construccion_tier ? ` (${vz.construccion_tier})` : ''} según estado: a estrenar ${vz.construccion_costo_uf_m2.nueva.min}–${vz.construccion_costo_uf_m2.nueva.max} · buena ${vz.construccion_costo_uf_m2.buena.min}–${vz.construccion_costo_uf_m2.buena.max} · regular ${vz.construccion_costo_uf_m2.regular.min}–${vz.construccion_costo_uf_m2.regular.max} UF/m².`
+              if (vz.total_ejemplo) {
+                const te = vz.total_ejemplo
+                card += `\n🏷️ Casa tipo (${te.terreno_m2} m² terreno + ${te.construido_m2} m² construidos) ≈ **${te.por_estado.regular.uf_min.toLocaleString('es-CL')}–${te.por_estado.nueva.uf_max.toLocaleString('es-CL')} UF** según estado.`
+              }
+            }
             if (zj.reality) card += `\n\n💰 Con tu presupuesto alcanzarías ~**${zj.reality.m2_alcanzable_min}–${zj.reality.m2_alcanzable_max} m²** en este sector.`
-            if (zj.estimacion && m2Obj) card += `\n\n🏷️ Una propiedad de ~${m2Obj} m² ahí debería costar **${zj.estimacion.uf_min.toLocaleString('es-CL')}–${zj.estimacion.uf_max.toLocaleString('es-CL')} UF**.`
             await addAgent(card, 300)
           }
         } catch (e) { setTyping(false) }
-      }      await askIsidora(
+      }
+      await askIsidora(
         `He completado mi perfil de búsqueda. Aquí está lo que busco: ${resumen}. Por favor dame tu análisis experto: qué comunas me recomiendas, qué puedo esperar con mi presupuesto, y cuáles son las mejores oportunidades del mercado actual para mi perfil.`,
         currentData
       )
@@ -1690,7 +1710,6 @@ function ChatComprador({ onBack }) {  const [messages, setMessages] = useState([
       setInputMode('text'); setStage(`flujo_${paso.id}`)
     }
   }
-
   const buildResumen = (d) => {
     const partes = [
       `Tipo: ${d.tipo}`,
@@ -1706,17 +1725,14 @@ function ChatComprador({ onBack }) {  const [messages, setMessages] = useState([
     ].filter(Boolean)
     return partes.join(' | ')
   }
-
   const handleOption = async (opt) => {
     addUser(opt.label)
     setInputMode(null)
-
     if (stage === 'tipo') {
       const newData = { ...data, tipo: opt.id }
       setData(newData)
       await addAgent(`Perfecto, buscas ${opt.label.toLowerCase()}. Voy a hacerte algunas preguntas para entender bien lo que necesitas.`, 600)
       await nextStep(newData, 0)
-
     } else if (stage.startsWith('flujo_')) {
       const campo = stage.replace('flujo_', '')
       const newData = { ...data, [campo]: opt.id }
@@ -1724,7 +1740,6 @@ function ChatComprador({ onBack }) {  const [messages, setMessages] = useState([
       await nextStep(newData, flujoIdx)
     }
   }
-
   const handleMultiConfirm = async () => {
     const campo = stage.replace('flujo_', '')
     const labels = multiSel.map(s => options.find(o => o.id === s)?.label).filter(Boolean)
@@ -1734,13 +1749,11 @@ function ChatComprador({ onBack }) {  const [messages, setMessages] = useState([
     setData(newData)
     await nextStep(newData, flujoIdx)
   }
-
   const handleSend = async () => {
     const val = inputVal.trim()
     if (!val) return
     setInputVal('')
     setInputMode(null)
-
     if (stage === 'chat_libre' || stage === 'text_libre') {
       addUser(val)
       await askIsidora(val, data)
@@ -1753,7 +1766,6 @@ function ChatComprador({ onBack }) {  const [messages, setMessages] = useState([
       await nextStep(newData, flujoIdx)
     }
   }
-
   const renderContent = (content) => {
     if (typeof content !== 'string') return null
     // Render **bold** markdown
@@ -1764,7 +1776,6 @@ function ChatComprador({ onBack }) {  const [messages, setMessages] = useState([
       </span>
     ))
   }
-
   return (
     <div className="chat-app">
       <div className="chat-header">
@@ -1776,7 +1787,6 @@ function ChatComprador({ onBack }) {  const [messages, setMessages] = useState([
         </div>
         <div className="chat-header-logo">IA <em>Prop</em></div>
       </div>
-
       <div className="messages-area">
         {messages.map((msg, i) => msg.role==='agent'
           ? <AgentBubble key={i}>{renderContent(msg.content)}</AgentBubble>
@@ -1785,7 +1795,6 @@ function ChatComprador({ onBack }) {  const [messages, setMessages] = useState([
         {typing && <AgentBubble typing/>}
         <div ref={bottomRef}/>
       </div>
-
       <div className="options-area">
         {inputMode === 'options' && (
           <>
@@ -1799,8 +1808,8 @@ function ChatComprador({ onBack }) {  const [messages, setMessages] = useState([
             </div>
           </>
         )}
-
-        {(inputMode === 'multi' || inputMode === 'multi_comuna') && (          <>
+        {(inputMode === 'multi' || inputMode === 'multi_comuna') && (
+          <>
             <div className="options-hint">Selecciona todo lo que aplique</div>
             <div className="options-grid" style={{marginBottom:10}}>
               {options.map(opt => (
@@ -1818,7 +1827,6 @@ function ChatComprador({ onBack }) {  const [messages, setMessages] = useState([
             </button>
           </>
         )}
-
         {(inputMode === 'text' || inputMode === 'text_libre') && (
           <div className="text-input-row">
             <textarea ref={inputRef} className="chat-input"
@@ -1833,8 +1841,6 @@ function ChatComprador({ onBack }) {  const [messages, setMessages] = useState([
     </div>
   )
 }
-
-
 // ─── Landing ──────────────────────────────────────────────────────────────────
 export default function Home() {
   const [view, setView] = useState('landing')
