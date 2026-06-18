@@ -318,8 +318,15 @@ export async function POST(request) {
 
       // Normativa REAL del PRC vía módulo compartido (mismo que usa Valentina).
       // Devuelve null si la comuna no tiene archivo de zonas cargado (hoy: Las Condes).
+      // baseUrl = origin de la request: el módulo lee los GeoJSON por HTTP (public/ no
+      // está disponible vía fs en serverless).
       let prc_zona = null
-      if (comuna) prc_zona = await normativaEnPunto(punto.lng, punto.lat, comuna)
+      if (comuna) {
+        let baseUrl = ''
+        try { baseUrl = new URL(request.url).origin } catch (e) {}
+        if (!baseUrl && process.env.VERCEL_URL) baseUrl = `https://${process.env.VERCEL_URL}`
+        prc_zona = await normativaEnPunto(punto.lng, punto.lat, comuna, baseUrl)
+      }
 
       valorizacion = {
         metodo: 'aditivo: valor_suelo × m²_terreno + costo_construcción × m²_construido',
