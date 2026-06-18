@@ -14,6 +14,7 @@
 //       (tabla COSTO_CONSTRUCCION_UF_M2, ~15 a 45 UF/m²), editable.
 //     Para departamentos/oficinas/comercial se mantiene el UF/m² construido de mercado.
 import { NextResponse } from 'next/server'
+import { cargarPRCLasCondes, zonaEnPunto } from '../../lib/prc-lascondes.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -30,10 +31,10 @@ const GKEY = process.env.NEXT_PUBLIC_GOOGLE_PLACES_KEY
 // de lujo; en comunas de tramo alto (Providencia, Ñuñoa, La Reina) es intermedio.
 const COSTO_CONSTRUCCION_TIERS = {
   premium: {
-    nueva:   { label: 'A estrenar / nueva',          min: 45, max: 60 },
-    buena:   { label: 'Buen estado',                 min: 36, max: 46 },
-    regular: { label: 'Estado regular',              min: 26, max: 34 },
-    mala:    { label: 'A refaccionar / deteriorada', min: 18, max: 24 },
+    nueva:   { label: 'A estrenar / nueva',          min: 40, max: 55 },
+    buena:   { label: 'Buen estado',                 min: 34, max: 40 },
+    regular: { label: 'Estado regular',              min: 24, max: 32 },
+    mala:    { label: 'A refaccionar / deteriorada', min: 16, max: 22 },
   },
   alta: {
     nueva:   { label: 'A estrenar / nueva',          min: 40, max: 50 },
@@ -227,31 +228,34 @@ export async function POST(request) {
       const terrenoTipo = Math.round(mediana(filtradas.map((v) => parseFloat(v.superficie_total_terreno)).filter((x) => x > 0)) || 0)
       const construidoTipo = Math.round(mediana(filtradas.map((v) => parseFloat(v.superficie_construccion)).filter((x) => x > 0)) || 0)
 
-      // (1) Valor de suelo desde ventas de SITIOS (terreno sin construcción) en el sector
+      // (1) Valor de suelo desde ventas de SITIOS (terreno sin construcción) en el sector.
+      //     Cada punto guarda el UF/m² de terreno Y el tamaño del sitio, para poder
+      //     segmentar por tamaño (que refleja la normativa del sector).
       const sitios = ventas.filter((v) => clasificaTipo(v) === 'terreno' && String(v.unit || '').toUpperCase() === 'UF')
-      const sueloVentas = sitios
+      const sueloVentasPts = sitios
         .map((v) => {
           const t = parseFloat(v.superficie_total_terreno), uf = parseFloat(v.price)
           if (!(t > 0) || !(uf > 0)) return null
           const r = uf / t
           if (r < 0.3 || r > 250) return null
-          return r
+          return { r, lot: t }
         })
         .filter((x) => x != null)
 
       // (2) Fallback residual: suelo = (precio − costoConstr × m²c) / m²t, sobre ventas de casas
-      const sueloResidual = filtradas
+      const sueloResidualPts = filtradas
         .map((v) => {
           const t = parseFloat(v.superficie_total_terreno), c = parseFloat(v.superficie_construccion), uf = parseFloat(v.price)
           if (!(t > 0) || !(c > 0) || !(uf > 0)) return null
           const land = (uf - COSTO_CONSTR_RESIDUAL * c) / t
           if (land < 0.3 || land > 250) return null
-          return land
+          return { r: land, lot: t }
         })
         .filter((x) => x != null)
 
-      const usarVentas = sueloVentas.length >= 3
-      const sueloList = usarVentas ? sueloVentas : sueloResidual
+      const usarVentas = sueloVentasPts.length >= 3
+      const sueloPts = usarVentas ? sueloVentasPts : sueloResidualPts
+      const sueloList = sueloPts.map((p) => p.r)
       const fuenteSuelo = usarVentas ? 'ventas_terreno' : 'residual_casas'
 
       let suelo = null
@@ -265,31 +269,67 @@ export async function POST(request) {
         }
       }
 
+      // Suelo por TRAMO DE TAMAÑO DE SITIO (proxy de la normativa del sector):
+      // sitios grandes (normativa de baja densidad, ej. 1.000 m² como Santa María de
+      // Manquehue) → MENOR UF/m²; sitios chicos (300–500 m², ej. sector Club de Polo)
+      // → MAYOR UF/m². Le da a Isidora microzonas claras dentro de una misma comuna.
+      const TRAMOS_SITIO = [
+        { id: '<500',     label: 'Sitios <500 m²',      min: 0,    max: 500 },
+        { id: '500-800',  label: 'Sitios 500–800 m²',   min: 500,  max: 800 },
+        { id: '800-1200', label: 'Sitios 800–1.200 m²', min: 800,  max: 1200 },
+        { id: '>1200',    label: 'Sitios >1.200 m²',    min: 1200, max: Infinity },
+      ]
+      const suelo_por_tramo = TRAMOS_SITIO.map((tr) => {
+        const vals = sueloPts.filter((p) => p.lot >= tr.min && p.lot < tr.max).map((p) => p.r)
+        if (vals.length < 3) return null
+        return { rango: tr.label, uf_m2_mediana: r1(mediana(vals)), uf_m2_p25: r1(percentil(vals, 25)), uf_m2_p75: r1(percentil(vals, 75)), n: vals.length }
+      }).filter(Boolean)
+      // Devuelve el UF/m² del tramo que corresponde a un tamaño de sitio dado.
+      const sueloDeTramo = (lotM2) => {
+        if (!(lotM2 > 0)) return null
+        const tr = TRAMOS_SITIO.find((t) => lotM2 >= t.min && lotM2 < t.max)
+        if (!tr) return null
+        return suelo_por_tramo.find((s) => s.rango === tr.label) || null
+      }
+
       // Tier de costo de construcción según comuna (o inferido por valor de suelo)
       const { tier, motivo } = elegirTierConstruccion(comuna, suelo ? suelo.uf_m2_mediana : null)
       const costoConstr = COSTO_CONSTRUCCION_TIERS[tier]
 
-      // (3) Total aditivo de ejemplo para una "casa tipo" del sector (o m² pedidos)
+      // (3) Total aditivo de ejemplo para una "casa tipo" del sector (o m² pedidos).
+      //     Si conocemos el tamaño del sitio, usa el UF/m² del TRAMO correspondiente
+      //     (microzona por normativa), no el promedio general de la comuna.
       let total_ejemplo = null
       if (suelo) {
         const cM2 = m2obj > 0 ? m2obj : construidoTipo
         const tM2 = m2terrInput > 0 ? m2terrInput : terrenoTipo
+        const sueloUsar = (m2terrInput > 0 ? sueloDeTramo(m2terrInput) : null) || suelo
         if (cM2 > 0 && tM2 > 0) {
           const por_estado = {}
           for (const [k, cfg] of Object.entries(costoConstr)) {
-            const min = Math.round(suelo.uf_m2_p25 * tM2 + cfg.min * cM2)
-            const max = Math.round(suelo.uf_m2_p75 * tM2 + cfg.max * cM2)
-            const med2 = Math.round(suelo.uf_m2_mediana * tM2 + ((cfg.min + cfg.max) / 2) * cM2)
+            const min = Math.round(sueloUsar.uf_m2_p25 * tM2 + cfg.min * cM2)
+            const max = Math.round(sueloUsar.uf_m2_p75 * tM2 + cfg.max * cM2)
+            const med2 = Math.round(sueloUsar.uf_m2_mediana * tM2 + ((cfg.min + cfg.max) / 2) * cM2)
             por_estado[k] = { label: cfg.label, uf_min: min, uf_med: med2, uf_max: max }
           }
-          total_ejemplo = { terreno_m2: tM2, construido_m2: cM2, por_estado }
+          total_ejemplo = { terreno_m2: tM2, construido_m2: cM2, suelo_uf_m2_usado: sueloUsar.uf_m2_mediana, por_estado }
         }
+      }
+
+      // Normativa REAL del PRC (piloto Las Condes). Inerte si el GeoJSON no está
+      // en public/data/prc_las_condes.geojson; no afecta a otras comunas.
+      let prc_zona = null
+      if (String(comuna || '').toUpperCase().includes('LAS CONDES')) {
+        const gjPRC = await cargarPRCLasCondes()
+        if (gjPRC) prc_zona = zonaEnPunto(gjPRC, punto.lng, punto.lat)
       }
 
       valorizacion = {
         metodo: 'aditivo: valor_suelo × m²_terreno + costo_construcción × m²_construido',
         casa_tipo: { terreno_m2: terrenoTipo, construido_m2: construidoTipo },
-        suelo,                                   // UF/m² de terreno del sector (rango)
+        suelo,                                   // UF/m² de terreno del sector (rango, promedio)
+        suelo_por_tramo,                         // UF/m² de suelo por tamaño de sitio (normativa)
+        prc_zona,                                // zona real del PRC + predial mínimo aprox (piloto Las Condes)
         construccion_tier: tier,                 // premium / alta / estandar
         construccion_tier_motivo: motivo,        // por qué se eligió ese tier
         construccion_costo_uf_m2: costoConstr,   // por estado, ya según comuna
