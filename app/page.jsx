@@ -1464,7 +1464,13 @@ function FormComprador({ onBack }) {
           const te = vz.total_ejemplo, pe = te.por_estado
           ctx += ` TOTAL EJEMPLO para una casa tipo del sector (${te.terreno_m2} m2 terreno + ${te.construido_m2} m2 construidos): nueva ${pe.nueva.uf_min}-${pe.nueva.uf_max} UF, buena ${pe.buena.uf_min}-${pe.buena.uf_max} UF, regular ${pe.regular.uf_min}-${pe.regular.uf_max} UF, a refaccionar ${pe.mala.uf_min}-${pe.mala.uf_max} UF.`
         }
-        ctx += ` Presenta SIEMPRE el valor de la casa como suelo + construcción = total, con rango según estado.`
+        if (vz.suelo_por_tramo && vz.suelo_por_tramo.length) {
+          ctx += ` VALOR DE SUELO POR TAMAÑO DE SITIO (refleja la normativa del sector): ` + vz.suelo_por_tramo.map((t) => `${t.rango} ${t.uf_m2_mediana} UF/m2 (${t.n} ventas)`).join('; ') + `. Regla: a mayor tamaño de sitio MENOR UF/m2 de terreno; sitios chicos MAYOR UF/m2.`
+        }
+        if (vz.prc_zona && vz.prc_zona.zona) {
+          ctx += ` NORMATIVA PRC (oficial): el punto está en la zona ${vz.prc_zona.zona} (${vz.prc_zona.nombre}), densidad ${vz.prc_zona.clase}, superficie predial mínima aprox ${vz.prc_zona.predial_min_aprox} m² (referencial, confirmar con la Ordenanza/DOM). Explica con esto por qué los sitios de este sector tienen ese tamaño y ese UF/m2.`
+        }
+        ctx += ` Presenta SIEMPRE el valor de la casa como suelo + construcción = total, con rango según estado, y aclara la microzona/normativa según el tamaño del sitio.`
       }
       ctx += ` Usa estos números reales para el reality check y la estimación.`
     }
@@ -1683,6 +1689,12 @@ function ChatComprador({ onBack }) {
               if (vz.total_ejemplo) {
                 const te = vz.total_ejemplo
                 card += `\n🏷️ Casa tipo (${te.terreno_m2} m² terreno + ${te.construido_m2} m² construidos) ≈ **${te.por_estado.regular.uf_min.toLocaleString('es-CL')}–${te.por_estado.nueva.uf_max.toLocaleString('es-CL')} UF** según estado.`
+              }
+              if (vz.suelo_por_tramo && vz.suelo_por_tramo.length) {
+                card += `\n📐 Suelo por tamaño de sitio (normativa): ` + vz.suelo_por_tramo.map((t) => `${t.rango} ${t.uf_m2_mediana} UF/m²`).join(' · ') + `. Sitios grandes valen menos por m²; chicos, más.`
+              }
+              if (vz.prc_zona && vz.prc_zona.zona) {
+                card += `\n🗺️ Zona PRC: **${vz.prc_zona.zona}** (densidad ${vz.prc_zona.clase}), predial mínimo aprox ${vz.prc_zona.predial_min_aprox} m² (referencial).`
               }
             }
             if (zj.reality) card += `\n\n💰 Con tu presupuesto alcanzarías ~**${zj.reality.m2_alcanzable_min}–${zj.reality.m2_alcanzable_max} m²** en este sector.`
