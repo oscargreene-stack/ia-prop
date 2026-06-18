@@ -1318,14 +1318,89 @@ const FC_COMUNAS = ['Cerrillos','Cerro Navia','Conchalí','El Bosque','Estación
 // sectores con misma subdivisión predial mínima, densidad y constructibilidad, por lo
 // que el UF/m² de terreno es parecido dentro del barrio. `query` se geocodifica para
 // ubicar el sector. Valores de normativa REFERENCIALES (confirmar con Ordenanza/DOM).
+const B = (id, label, query, densidad, predial, constructibilidad) => ({ id, label, query, densidad, predial, constructibilidad })
 const BARRIOS = {
   'Las Condes': [
-    { id:'el_golf',      label:'El Golf / Nueva Las Condes', query:'El Golf, Las Condes', densidad:'Alta (altura)', predial:'predios de edificación (mayormente deptos/oficinas)', constructibilidad:'Alta' },
-    { id:'san_damian',   label:'San Damián',                 query:'San Damián, Las Condes', densidad:'Baja', predial:'~600–1.000 m²', constructibilidad:'Baja' },
-    { id:'cumbres',      label:'Cumbres de Manquehue',       query:'Cumbres de Manquehue, Las Condes', densidad:'Baja–media', predial:'~500–800 m²', constructibilidad:'Baja–media' },
-    { id:'estoril',      label:'Estoril',                    query:'Estoril, Las Condes', densidad:'Media–baja', predial:'~400–600 m²', constructibilidad:'Media' },
-    { id:'los_dominicos',label:'Los Dominicos',              query:'Los Dominicos, Las Condes', densidad:'Media', predial:'~300–500 m²', constructibilidad:'Media' },
-    { id:'el_arrayan',   label:'El Arrayán',                 query:'El Arrayán, Las Condes', densidad:'Baja', predial:'~1.000 m² o más', constructibilidad:'Baja' },
+    B('el_golf','El Golf / Nueva Las Condes','El Golf, Las Condes','Alta (altura)','predios de edificación (deptos/oficinas)','Alta'),
+    B('san_damian','San Damián','San Damián, Las Condes','Baja','~600–1.000 m²','Baja'),
+    B('cumbres','Cumbres de Manquehue','Cumbres de Manquehue, Las Condes','Baja–media','~500–800 m²','Baja–media'),
+    B('estoril','Estoril','Estoril, Las Condes','Media–baja','~400–600 m²','Media'),
+    B('los_dominicos','Los Dominicos','Los Dominicos, Las Condes','Media','~300–500 m²','Media'),
+    B('el_arrayan','El Arrayán','El Arrayán, Las Condes','Baja','~1.000 m² o más','Baja'),
+  ],
+  'Vitacura': [
+    B('sta_maria','Santa María de Manquehue','Santa María de Manquehue, Vitacura','Baja','~1.000 m²','Baja'),
+    B('lo_curro','Lo Curro','Lo Curro, Vitacura','Baja','sitios grandes con vista (~800–1.500 m²)','Baja'),
+    B('jardin_este','Jardín del Este','Jardín del Este, Vitacura','Baja–media','~500–800 m²','Baja–media'),
+    B('nueva_costanera','Nueva Costanera / Bicentenario','Nueva Costanera, Vitacura','Alta','predios de edificación (deptos/comercio)','Alta'),
+    B('tabancura','Tabancura','Tabancura, Vitacura','Media','~400–600 m²','Media'),
+  ],
+  'Lo Barnechea': [
+    B('la_dehesa','La Dehesa','La Dehesa, Lo Barnechea','Media–baja','~400–800 m² (mixto)','Media'),
+    B('lo_barnechea_arrayan','El Arrayán (Lo Barnechea)','El Arrayán, Lo Barnechea','Baja','sitios grandes / semi-rural','Baja'),
+    B('los_trapenses','Los Trapenses','Los Trapenses, Lo Barnechea','Baja–media','condominios (~400–700 m²)','Baja–media'),
+    B('cerro18','Cerro 18 / Valle Norte','Cerro 18, Lo Barnechea','Baja','parcelas / sitios grandes','Baja'),
+    B('el_huinganal','El Huinganal / La Dehesa alta','El Huinganal, Lo Barnechea','Baja','~1.000 m² o más','Baja'),
+  ],
+  'Providencia': [
+    B('pedro_valdivia_n','Pedro de Valdivia Norte','Pedro de Valdivia Norte, Providencia','Media','casas + deptos (~300–500 m²)','Media'),
+    B('barrio_italia','Barrio Italia','Barrio Italia, Providencia','Media','casas antiguas / comercio','Media'),
+    B('los_leones','Los Leones / El Aguilucho','Los Leones, Providencia','Alta','predios de edificación (deptos)','Alta'),
+    B('pocuro','Pocuro / Manuel Montt','Manuel Montt, Providencia','Media–alta','~250–450 m²','Media–alta'),
+    B('bellavista','Bellavista','Bellavista, Providencia','Media','patrimonial','Media'),
+  ],
+  'Ñuñoa': [
+    B('plaza_nunoa','Plaza Ñuñoa','Plaza Ñuñoa, Ñuñoa','Media–alta','mixto (~250–450 m²)','Media–alta'),
+    B('suarez_mujica','Suárez Mujica / Irarrázaval','Suárez Mujica, Ñuñoa','Media','~300–500 m²','Media'),
+    B('villa_frei','Villa Frei','Villa Frei, Ñuñoa','Media','conjunto de bloques','Media'),
+    B('plaza_egana','Plaza Egaña','Plaza Egaña, Ñuñoa','Alta','deptos nuevos en altura','Alta'),
+    B('estadio_nacional','Estadio Nacional / Amapolas','Estadio Nacional, Ñuñoa','Media','~300–500 m²','Media'),
+  ],
+  'La Reina': [
+    B('la_reina_alta','La Reina Alta / Aguas Claras','Aguas Claras, La Reina','Baja','sitios grandes (~600–1.000 m²)','Baja'),
+    B('la_reina_centro','La Reina Centro','La Reina Centro','Media','~400–600 m²','Media'),
+    B('villa_la_reina','Villa La Reina','Villa La Reina, La Reina','Media–baja','~200–400 m²','Media–baja'),
+  ],
+  'Peñalolén': [
+    B('penalolen_alto','Peñalolén Alto / Quebrada de Macul','Peñalolén Alto','Baja–media','~400–700 m²','Baja–media'),
+    B('lo_hermida','Lo Hermida','Lo Hermida, Peñalolén','Media','~200–400 m²','Media'),
+    B('san_luis_macul','San Luis de Macul','San Luis, Peñalolén','Media','condominios','Media'),
+  ],
+  'La Florida': [
+    B('walker_martinez','La Florida Centro / Walker Martínez','Walker Martínez, La Florida','Media','~250–450 m²','Media'),
+    B('vicuna_mackenna','Vicuña Mackenna','Vicuña Mackenna, La Florida','Alta','deptos en altura','Alta'),
+    B('rojas_magallanes','Trinidad / Rojas Magallanes','Rojas Magallanes, La Florida','Media','condominios','Media'),
+  ],
+  'Macul': [
+    B('macul_centro','Macul Centro','Macul Centro','Media','~250–450 m²','Media'),
+    B('quilin','Quilín','Quilín, Macul','Media','~300–500 m²','Media'),
+  ],
+  'San Miguel': [
+    B('el_llano','El Llano','El Llano, San Miguel','Media','patrimonial (~250–400 m²)','Media'),
+    B('gran_avenida','Gran Avenida','Gran Avenida, San Miguel','Alta','deptos en altura','Alta'),
+  ],
+  'Maipú': [
+    B('maipu_centro','Maipú Centro','Maipú Centro','Media','~200–400 m²','Media'),
+    B('ciudad_satelite','Ciudad Satélite','Ciudad Satélite, Maipú','Media–baja','~200–350 m²','Media–baja'),
+    B('rinconada','Maipú Sur / Rinconada','Rinconada, Maipú','Media–baja','condominios','Media–baja'),
+  ],
+  'Santiago': [
+    B('lastarria','Lastarria / Bellas Artes','Lastarria, Santiago','Alta','patrimonial (altura)','Alta'),
+    B('brasil_yungay','Brasil / Yungay','Barrio Yungay, Santiago','Media','patrimonial','Media'),
+    B('republica','República','Barrio República, Santiago','Alta','deptos en altura','Alta'),
+    B('matta','Parque Almagro / Matta','Avenida Matta, Santiago','Alta','deptos en altura','Alta'),
+  ],
+  'Huechuraba': [
+    B('pedro_fontova','Pedro Fontova','Pedro Fontova, Huechuraba','Media','~250–450 m²','Media'),
+    B('bosques_santiago','Bosques de Santiago','Bosques de Santiago, Huechuraba','Baja','condominios (~400–700 m²)','Baja'),
+  ],
+  'Puente Alto': [
+    B('pa_centro','Puente Alto Centro','Puente Alto Centro','Media','~150–350 m²','Media'),
+    B('eyzaguirre','Eyzaguirre / Las Vizcachas','Eyzaguirre, Puente Alto','Media–baja','condominios','Media–baja'),
+  ],
+  'Quilicura': [
+    B('quilicura_centro','Quilicura Centro','Quilicura Centro','Media','~150–300 m²','Media'),
+    B('valle_grande','Valle Grande','Valle Grande, Quilicura','Media–baja','condominios','Media–baja'),
   ],
 }
 
@@ -1353,11 +1428,17 @@ function fcLoadGmaps() {
 function FCBold({ text }) {
   return (
     <>
-      {String(text || '').split('\n').map((line, i) => (
-        <div key={i} style={{ minHeight: line ? 'auto' : '8px' }}>
-          {line.split(/\*\*(.*?)\*\*/g).map((p, j) => (j % 2 === 1 ? <strong key={j}>{p}</strong> : p))}
-        </div>
-      ))}
+      {String(text || '').split('\n').map((rawLine, i) => {
+        // Encabezados Markdown (#, ##, ###): quitar los # y mostrar la línea en negrita.
+        const head = rawLine.match(/^\s*#{1,6}\s+(.*)$/)
+        const line = head ? head[1] : rawLine
+        const isHead = !!head
+        return (
+          <div key={i} style={{ minHeight: line ? 'auto' : '8px', fontWeight: isHead ? 700 : undefined, marginTop: isHead ? 8 : undefined }}>
+            {line.split(/\*\*(.*?)\*\*/g).map((p, j) => (j % 2 === 1 ? <strong key={j}>{p}</strong> : p))}
+          </div>
+        )
+      })}
     </>
   )
 }
