@@ -1314,6 +1314,21 @@ const FC_CARACT = [
 ]
 const FC_COMUNAS = ['Cerrillos','Cerro Navia','Conchalí','El Bosque','Estación Central','Huechuraba','Independencia','La Cisterna','La Florida','La Granja','La Pintana','La Reina','Las Condes','Lo Barnechea','Lo Espejo','Lo Prado','Macul','Maipú','Ñuñoa','Peñalolén','Providencia','Pudahuel','Puente Alto','Quilicura','Quinta Normal','Recoleta','Renca','San Bernardo','San Joaquín','San Miguel','San Ramón','Santiago','Vitacura']
 
+// Barrios de NORMATIVA HOMOGÉNEA por comuna (piloto Las Condes). Cada barrio agrupa
+// sectores con misma subdivisión predial mínima, densidad y constructibilidad, por lo
+// que el UF/m² de terreno es parecido dentro del barrio. `query` se geocodifica para
+// ubicar el sector. Valores de normativa REFERENCIALES (confirmar con Ordenanza/DOM).
+const BARRIOS = {
+  'Las Condes': [
+    { id:'el_golf',      label:'El Golf / Nueva Las Condes', query:'El Golf, Las Condes', densidad:'Alta (altura)', predial:'predios de edificación (mayormente deptos/oficinas)', constructibilidad:'Alta' },
+    { id:'san_damian',   label:'San Damián',                 query:'San Damián, Las Condes', densidad:'Baja', predial:'~600–1.000 m²', constructibilidad:'Baja' },
+    { id:'cumbres',      label:'Cumbres de Manquehue',       query:'Cumbres de Manquehue, Las Condes', densidad:'Baja–media', predial:'~500–800 m²', constructibilidad:'Baja–media' },
+    { id:'estoril',      label:'Estoril',                    query:'Estoril, Las Condes', densidad:'Media–baja', predial:'~400–600 m²', constructibilidad:'Media' },
+    { id:'los_dominicos',label:'Los Dominicos',              query:'Los Dominicos, Las Condes', densidad:'Media', predial:'~300–500 m²', constructibilidad:'Media' },
+    { id:'el_arrayan',   label:'El Arrayán',                 query:'El Arrayán, Las Condes', densidad:'Baja', predial:'~1.000 m² o más', constructibilidad:'Baja' },
+  ],
+}
+
 // Carga Google Maps (con drawing) UNA sola vez para toda la app.
 let __fcMapsPromise = null
 function fcLoadGmaps() {
@@ -1357,6 +1372,7 @@ function FormComprador({ onBack }) {
   const [caract, setCaract] = useState([])
   const [sectorMode, setSectorMode] = useState('comuna')
   const [comunas, setComunas] = useState([])
+  const [barrioSel, setBarrioSel] = useState(null)
   const [polygon, setPolygon] = useState(null)
   const [loading, setLoading] = useState(false)
   const [resultado, setResultado] = useState(null)
@@ -1445,12 +1461,16 @@ function FormComprador({ onBack }) {
     setLoading(true); setResultado(null); setMensajes([]); setEnviado(true)
     const body = { tipo, presupuesto_uf: presUF, m2_objetivo: m2 ? parseFloat(m2) : null }
     if (sectorMode === 'mapa' && polygon && polygon.length >= 3) body.polygon = polygon
+    else if (barrioSel && comunas.length === 1) { body.comuna = comunas[0]; body.direccion = barrioSel.query }
     else if (comunas.length) body.comuna = comunas[0]
     let zj = null
     try { zj = await (await fetch('/api/zona', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json() } catch (e) {}
     setResultado(zj)
     setLoading(false)
-    const sectorTxt = sectorMode === 'mapa' && polygon ? 'el sector que marqué en el mapa' : comunas.join(', ')
+    const sectorTxt = sectorMode === 'mapa' && polygon ? 'el sector que marqué en el mapa' : (barrioSel && comunas.length === 1 ? `${barrioSel.label} (${comunas[0]})` : comunas.join(', '))
+    const barrioCtx = (barrioSel && comunas.length === 1)
+      ? ` BARRIO ELEGIDO: ${barrioSel.label}, en ${comunas[0]}. Normativa referencial del barrio: densidad ${barrioSel.densidad}, subdivisión predial mínima ${barrioSel.predial}, constructibilidad ${barrioSel.constructibilidad}. Como la normativa es homogénea en este barrio, el UF/m² de terreno es parecido en todo él — explícalo así.`
+      : ''
     let ctx = ''
     if (zj && zj._modo === 'real') {
       const ps = zj.precio_sector
@@ -1476,7 +1496,7 @@ function FormComprador({ onBack }) {
     }
     const caractTxt = caract.length ? caract.join(', ') : 'sin preferencia'
     const presTxt = presMax && parseFloat(presMax) > 0 ? `hasta ${parseFloat(presMax).toLocaleString('es-CL')} UF` : pres.replace(/_/g, ' ') + ' UF'
-    const userMsg = `Busco ${tipo}, presupuesto ${presTxt}, ${dorms} dormitorios, ${banos} baños${m2 ? ', ~' + m2 + ' m²' : ''}, en ${sectorTxt}. Imprescindibles: ${caractTxt}.${ctx} Dame tu análisis experto: si mi presupuesto es realista para esto en esa zona, qué puedo esperar, y las mejores oportunidades. Si no alcanza, sugiere comunas colindantes.`
+    const userMsg = `Busco ${tipo}, presupuesto ${presTxt}, ${dorms} dormitorios, ${banos} baños${m2 ? ', ~' + m2 + ' m²' : ''}, en ${sectorTxt}. Imprescindibles: ${caractTxt}.${barrioCtx}${ctx} Dame tu análisis experto: si mi presupuesto es realista para esto en esa zona, qué puedo esperar, y las mejores oportunidades. Si no alcanza, sugiere comunas colindantes.`
     await askIsidora(userMsg, [])
   }
 
@@ -1542,7 +1562,16 @@ function FormComprador({ onBack }) {
           <div style={chip(sectorMode === 'mapa')} onClick={() => setSectorMode('mapa')}>🗺️ Dibujar en el mapa</div>
         </div>
         {sectorMode === 'comuna' ? (
-          <div style={row}>{FC_COMUNAS.map((c) => <div key={c} style={chip(comunas.includes(c))} onClick={() => toggle(comunas, setComunas, c)}>{c}</div>)}</div>
+          <div>
+            <div style={row}>{FC_COMUNAS.map((c) => <div key={c} style={chip(comunas.includes(c))} onClick={() => { toggle(comunas, setComunas, c); setBarrioSel(null) }}>{c}</div>)}</div>
+            {comunas.length === 1 && BARRIOS[comunas[0]] && (
+              <div style={{ marginTop: 14 }}>
+                <div style={{ fontSize: 13, color: '#9a9a9a', marginBottom: 8 }}>Afina por <strong>barrio de normativa homogénea</strong> en {comunas[0]} (misma subdivisión mínima, densidad y constructibilidad ⇒ UF/m² de terreno parejo). Opcional, o usa 🗺️ "Dibujar en el mapa" arriba.</div>
+                <div style={row}>{BARRIOS[comunas[0]].map((b) => <div key={b.id} style={chip(barrioSel && barrioSel.id === b.id)} onClick={() => setBarrioSel(barrioSel && barrioSel.id === b.id ? null : b)}>{b.label}</div>)}</div>
+                {barrioSel && <div style={{ fontSize: 12, color: '#8a8a8a', marginTop: 8 }}>📐 {barrioSel.label}: densidad {barrioSel.densidad} · predial mín {barrioSel.predial} · constructibilidad {barrioSel.constructibilidad} (referencial)</div>}
+              </div>
+            )}
+          </div>
         ) : (
           <div>
             <div style={{ fontSize: 13, color: '#9a9a9a', marginBottom: 8 }}>Tocá el ícono de polígono (arriba del mapa) y andá marcando los vértices del sector; cerrá el polígono tocando el primer punto.</div>
