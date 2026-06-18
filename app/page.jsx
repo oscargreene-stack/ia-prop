@@ -1429,6 +1429,10 @@ function FCBold({ text }) {
   return (
     <>
       {String(text || '').split('\n').map((rawLine, i) => {
+        // Separadores Markdown (---, ***, ___): mostrar una línea sutil, no el texto.
+        if (/^\s*[-*_]{2,}\s*$/.test(rawLine)) {
+          return <div key={i} style={{ borderTop: '1px solid rgba(255,255,255,0.12)', margin: '10px 0' }} />
+        }
         // Encabezados Markdown (#, ##, ###): quitar los # y mostrar la línea en negrita.
         const head = rawLine.match(/^\s*#{1,6}\s+(.*)$/)
         const line = head ? head[1] : rawLine
