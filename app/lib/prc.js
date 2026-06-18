@@ -4,20 +4,18 @@
 // Dado un punto (lng, lat WGS84) y la comuna, devuelve la ZONA del plan regulador y su
 // normativa (predial mínimo, densidad, constructibilidad, etc.).
 //
-// Fuente de datos (archivos locales, versionados, refresco ~2x/año):
-//   - Polígonos de zonas:  public/data/prc/zonas/<slug>.geojson
-//        (legacy soportado:  public/data/prc_las_condes.geojson)
-//        Cada feature trae la zona en properties.ZONA y el nombre en properties.NOMBRE.
-//   - Números de la Ordenanza:  public/data/prc/normativa.json
-//        { "LAS CONDES": { "zonas": { "UV/EAb4": { predial_min, densidad, constructibilidad, altura, uso } } } }
+// IMPORTANTE — POR QUÉ LEE POR HTTP Y NO CON fs:
+//   En Vercel/Next.js las funciones serverless NO incluyen la carpeta public/ en su bundle,
+//   así que fs.readFile('public/...') falla en runtime. Los archivos SÍ se sirven por la CDN
+//   (public/data/x → /data/x). Por eso este módulo los descarga por HTTP usando el origin de
+//   la request (baseUrl). En local sin baseUrl, cae a fs como respaldo.
 //
-// Si una zona no está en normativa.json, se deriva un predial aproximado desde el código de
-// zona (heurística EAb/EAm/EAa) y se marca fuente='heuristica_codigo'.
+// Archivos (versionados, refresco ~2x/año):
+//   - Zonas:     public/data/prc/zonas/<slug>.geojson   (legacy: public/data/prc_las_condes.geojson)
+//                cada feature: properties.ZONA y properties.NOMBRE
+//   - Números:   public/data/prc/normativa.json
 //
 // Devuelve null si la comuna no tiene archivo de zonas o el punto no cae en ninguna zona.
-
-import fs from 'node:fs/promises'
-import path from 'node:path'
 
 export function nfd(s) {
   return String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/ñ/g, 'n').trim()
@@ -26,31 +24,36 @@ function slugComuna(comuna) {
   return nfd(comuna).replace(/\s+/g, '_')
 }
 
-function rutasZonas(slug) {
-  const base = process.cwd()
-  const rutas = [path.join(base, 'public', 'data', 'prc', 'zonas', `${slug}.geojson`)]
-  if (slug === 'las_condes') rutas.push(path.join(base, 'public', 'data', 'prc_las_condes.geojson')) // legacy
-  return rutas
+// Rutas HTTP (relativas a la raíz pública) a intentar, en orden.
+function urlsZonas(slug) {
+  const u = [`/data/prc/zonas/${slug}.geojson`]
+  if (slug === 'las_condes') u.push('/data/prc_las_condes.geojson') // legacy
+  return u
 }
 
-const _zonasCache = {}
-async function cargarZonas(slug) {
-  if (slug in _zonasCache) return _zonasCache[slug]
-  let gj = null
-  for (const ruta of rutasZonas(slug)) {
-    try { gj = JSON.parse(await fs.readFile(ruta, 'utf8')); break } catch (e) {}
+const _cache = {}
+async function cargarJSON(baseUrl, rutas) {
+  const key = baseUrl + '|' + rutas.join(',')
+  if (key in _cache) return _cache[key]
+  let data = null
+  for (const ruta of rutas) {
+    // 1) HTTP (serverless / producción)
+    if (baseUrl) {
+      try {
+        const r = await fetch(baseUrl + ruta)
+        if (r.ok) { data = await r.json(); break }
+      } catch (e) {}
+    }
+    // 2) fs (respaldo local)
+    try {
+      const fs = await import('node:fs/promises')
+      const path = await import('node:path')
+      const txt = await fs.readFile(path.join(process.cwd(), 'public', ruta.replace(/^\//, '')), 'utf8')
+      data = JSON.parse(txt); break
+    } catch (e) {}
   }
-  _zonasCache[slug] = gj
-  return gj
-}
-
-let _normativaCache
-async function cargarNormativa() {
-  if (_normativaCache !== undefined) return _normativaCache
-  try {
-    _normativaCache = JSON.parse(await fs.readFile(path.join(process.cwd(), 'public', 'data', 'prc', 'normativa.json'), 'utf8'))
-  } catch (e) { _normativaCache = {} }
-  return _normativaCache
+  _cache[key] = data
+  return data
 }
 
 // ── Punto-en-polígono (ray casting), Polygon y MultiPolygon con huecos ─────────
@@ -80,7 +83,6 @@ function puntoEnGeometria(lng, lat, geom) {
 }
 
 // ── Heurística por código de zona (fallback si no hay número en la Ordenanza) ──
-// EAa = Edificación Aislada Alta densidad (sitios chicos), EAm = Media, EAb = Baja (sitios grandes).
 const PREDIAL_HEUR = {
   baja:  { 1: 500, 2: 650, 3: 800, 4: 1000, def: 700 },
   media: { 1: 300, 2: 375, 3: 450, 4: 600,  def: 400 },
@@ -97,12 +99,13 @@ function desdeCodigo(zona) {
 }
 
 // ── API pública ───────────────────────────────────────────────────────────────
-// normativaEnPunto(lng, lat, comuna) → { zona, nombre, densidad, predial_min,
-//   constructibilidad, altura, uso, fuente, ... } | null
-export async function normativaEnPunto(lng, lat, comuna) {
+// normativaEnPunto(lng, lat, comuna, baseUrl) → { zona, nombre, densidad, predial_min,
+//   constructibilidad, altura, uso, fuente, clase, predial_min_aprox } | null
+// baseUrl: origin de la request (ej. https://ia-prop.vercel.app). Sin él intenta fs (local).
+export async function normativaEnPunto(lng, lat, comuna, baseUrl = '') {
   if (!Number.isFinite(lng) || !Number.isFinite(lat) || !comuna) return null
-  const gj = await cargarZonas(slugComuna(comuna))
-  if (!gj || !Array.isArray(gj.features)) return null // comuna sin datos de PRC cargados
+  const gj = await cargarJSON(baseUrl, urlsZonas(slugComuna(comuna)))
+  if (!gj || !Array.isArray(gj.features)) return null // comuna sin datos de PRC
 
   let zona = null, nombre = null
   for (const f of gj.features) {
@@ -115,7 +118,7 @@ export async function normativaEnPunto(lng, lat, comuna) {
   }
   if (!zona) return null
 
-  const norm = await cargarNormativa()
+  const norm = (await cargarJSON(baseUrl, ['/data/prc/normativa.json'])) || {}
   const comunaKey = String(comuna || '').toUpperCase()
   const oficial = (norm[comunaKey] && norm[comunaKey].zonas && norm[comunaKey].zonas[zona]) || null
   const heur = desdeCodigo(zona)
@@ -133,8 +136,7 @@ export async function normativaEnPunto(lng, lat, comuna) {
     altura: oficial ? (oficial.altura ?? null) : null,
     uso: oficial ? (oficial.uso ?? null) : null,
     fuente,
-    // compatibilidad con el frontend actual (page.jsx lee clase / predial_min_aprox):
-    clase: densidad,
-    predial_min_aprox: predial_min,
+    clase: densidad,                 // compat page.jsx
+    predial_min_aprox: predial_min,  // compat page.jsx
   }
 }
