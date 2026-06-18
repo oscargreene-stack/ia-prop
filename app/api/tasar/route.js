@@ -7,6 +7,8 @@
 //  4. Claude SOLO narra: análisis, factores, plan regulador y recomendación,
 //     coherentes con el valor determinístico (no recalcula valor)
 
+import { normativaEnPunto } from '../../lib/prc.js'
+
 export const maxDuration = 60
 
 const COD_COMUNA = {
@@ -23,6 +25,21 @@ function normalizaComuna(s) {
   return String(s || '').trim().toUpperCase()
     .replace(/Á/g,'A').replace(/É/g,'E').replace(/Í/g,'I').replace(/Ó/g,'O').replace(/Ú/g,'U')
     .replace(/Ñ/g,'N')
+}
+
+// Geocodifica una dirección a {lat,lng} (mismo enfoque que /api/zona). Sirve para ubicar
+// la propiedad en su zona del Plan Regulador.
+const GKEY = process.env.NEXT_PUBLIC_GOOGLE_PLACES_KEY
+async function geocodeDireccion(texto) {
+  try {
+    if (!GKEY || !texto || !texto.replace(/[, ]/g, '')) return null
+    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(texto + ', Región Metropolitana, Chile')}&key=${GKEY}`
+    const r = await fetch(url)
+    const j = await r.json()
+    if (j.status !== 'OK' || !j.results || !j.results.length) return null
+    const loc = j.results[0].geometry.location
+    return { lat: loc.lat, lng: loc.lng }
+  } catch (e) { return null }
 }
 
 // ── AJUSTES DETERMINÍSTICOS (editables desde /admin vía Edge Config) ───────────
@@ -280,6 +297,22 @@ export async function POST(request) {
     precioM2: precioM2Base || 50,
   })
 
+  // ── 2b. NORMATIVA REAL DEL PRC (módulo compartido, el mismo que usa Isidora) ──
+  // Geocodifica la propiedad y obtiene su zona oficial del plan regulador. Sirve para
+  // que Valentina deje de INVENTAR el plan_regulador: la zona real manda sobre el LLM.
+  // Hoy resuelve donde haya GeoJSON cargado (Las Condes); para otras comunas → null.
+  let prcZona = null
+  try {
+    let baseUrl = ''
+    try { baseUrl = new URL(request.url).origin } catch (e) {}
+    if (!baseUrl && process.env.VERCEL_URL) baseUrl = `https://${process.env.VERCEL_URL}`
+    const punto = await geocodeDireccion(`${form.direccion || ''}, ${comuna}`)
+    if (punto) prcZona = await normativaEnPunto(punto.lng, punto.lat, comuna, baseUrl)
+  } catch (e) { console.error('PRC tasar:', e.message) }
+  const normativaTexto = prcZona
+    ? `\n\nNORMATIVA OFICIAL DEL PLAN REGULADOR (AUTORITATIVA — úsala tal cual en plan_regulador y en tu análisis, NO la inventes):\n${JSON.stringify({ zona: prcZona.zona, nombre_zona: prcZona.nombre, uso_suelo: prcZona.uso, densidad: prcZona.densidad, superficie_predial_minima_m2: prcZona.predial_min, constructibilidad: prcZona.constructibilidad, fuente: prcZona.fuente }, null, 2)}`
+    : ''
+
   // ── 3. Armar prompt: el LLM SOLO narra ─────────────────────────────────────
   const systemPrompt = `Eres Valentina, tasadora inmobiliaria experta con 20 años de experiencia en la Región Metropolitana de Chile.
 
@@ -293,6 +326,10 @@ VALOR DETERMINÍSTICO (AUTORITATIVO):
 - COPIA exactamente valor_uf, precio_m2, confianza y desglose tal como se te entregan. NO los recalcules ni los modifiques.
 - Tu trabajo es NARRAR: análisis, factores positivos/negativos, plan regulador y recomendación de precio, todo COHERENTE con ese valor final. La prosa NO puede contradecir el número (no menciones un valor distinto al entregado).
 - Si NO se te entrega un valor determinístico (no hubo comparables), recién ahí estima tú con tus rangos de referencia por comuna y confianza Media.
+
+PLAN REGULADOR:
+- Si se te entrega una "NORMATIVA OFICIAL DEL PLAN REGULADOR", úsala EXACTAMENTE (zona, nombre, uso de suelo, predial mínimo). NO inventes una zona distinta.
+- Si NO se te entrega, recién ahí estima la zonificación con tu conocimiento, y acláralo como referencial.
 
 PERFIL:
 - Conoces el mercado inmobiliario chileno 2023-2025: precios reales por comuna, tendencias, factores.
@@ -395,7 +432,7 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
         model: 'claude-sonnet-4-5',
         max_tokens: 3000,
         system: systemPrompt,
-        messages: [{ role: 'user', content: `Tasa esta propiedad:\n\n${detalles}${comparablesTexto}${valorTexto}` }],
+        messages: [{ role: 'user', content: `Tasa esta propiedad:\n\n${detalles}${comparablesTexto}${valorTexto}${normativaTexto}` }],
       }),
     })
 
@@ -409,9 +446,9 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
 
     function sanitizeJSON(raw) {
       let s = raw
-        .replace(/[\u201C\u201D\u201E\u201F\u2033\u2036]/g, '"')
-        .replace(/[\u2018\u2019\u201A\u201B\u2032\u2035]/g, "'")
-        .replace(/\u2013|\u2014/g, '-')
+        .replace(/[“”„‟″‶]/g, '"')
+        .replace(/[‘’‚‛′‵]/g, "'")
+        .replace(/–|—/g, '-')
         .replace(/\r?\n/g, ' ').replace(/\r/g, ' ')
         .replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, ' ')
         .replace(/,\s*([\]\}])/g, '$1')
@@ -450,6 +487,21 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
         parsed.desglose = valorDet.desglose
       } else if (comparablesReales.length > 0) {
         parsed.comparables = comparablesReales
+      }
+
+      // La normativa OFICIAL del PRC manda sobre lo que invente el LLM (zona, uso, predial).
+      // Se mantiene densidad_max del LLM (la usa el cálculo de potencial); el resto es oficial.
+      if (prcZona) {
+        const prevObs = (parsed.plan_regulador && parsed.plan_regulador.observaciones) || ''
+        parsed.plan_regulador = {
+          ...(parsed.plan_regulador || {}),
+          zona: prcZona.zona,
+          nombre_zona: prcZona.nombre,
+          uso_suelo: prcZona.uso || (parsed.plan_regulador && parsed.plan_regulador.uso_suelo) || null,
+          ...(prcZona.constructibilidad != null ? { coef_constructibilidad: prcZona.constructibilidad } : {}),
+          superficie_predial_minima_m2: prcZona.predial_min,
+          observaciones: `Superficie predial mínima ~${prcZona.predial_min} m² · fuente: Plan Regulador${prcZona.fuente === 'ordenanza' ? ' (Ordenanza)' : ''}. ${prevObs}`.trim(),
+        }
       }
 
       // Calcular potencial_desarrollo en servidor
