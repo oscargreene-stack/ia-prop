@@ -1,0 +1,16 @@
+{
+  "_descripcion": "Normativa de planes reguladores por comuna y zona, tomada de la Ordenanza de cada PRC. La llave de comuna va en MAYÚSCULAS (ej. 'LAS CONDES'); dentro, 'zonas' mapea el código de zona (igual al campo ZONA del GeoJSON) a sus números. Si una zona no está aquí, app/lib/prc.js deriva un predial aproximado desde el código (heurística EAb/EAm/EAa) y marca fuente='heuristica_codigo'. Reemplazar los valores _ref:true por los de la Ordenanza oficial.",
+  "_actualizado": "2026-06",
+  "LAS CONDES": {
+    "_fuente": "Ordenanza PRC Las Condes (texto refundido). VALORES ABAJO REFERENCIALES — completar/confirmar con la Ordenanza. El GeoJSON tiene 66 zonas; aquí van algunas residenciales de ejemplo, el resto cae a la heurística por código.",
+    "zonas": {
+      "UV/EAb1":   { "predial_min": 500,  "densidad": "baja",  "constructibilidad": null, "altura": null, "uso": "Vivienda", "_ref": true },
+      "UV/EAb2":   { "predial_min": 650,  "densidad": "baja",  "constructibilidad": null, "altura": null, "uso": "Vivienda", "_ref": true },
+      "UV/EAb4":   { "predial_min": 1000, "densidad": "baja",  "constructibilidad": null, "altura": null, "uso": "Vivienda", "_ref": true },
+      "UV1/EAm1":  { "predial_min": 300,  "densidad": "media", "constructibilidad": null, "altura": null, "uso": "Vivienda y equipamiento de baja intensidad", "_ref": true },
+      "UV1/EAm2":  { "predial_min": 375,  "densidad": "media", "constructibilidad": null, "altura": null, "uso": "Vivienda y equipamiento de baja intensidad", "_ref": true },
+      "UVO/EAa1":  { "predial_min": 160,  "densidad": "alta",  "constructibilidad": null, "altura": null, "uso": "Vivienda y oficina", "_ref": true },
+      "UVO/EAa2":  { "predial_min": 200,  "densidad": "alta",  "constructibilidad": null, "altura": null, "uso": "Vivienda y oficina", "_ref": true }
+    }
+  }
+}
