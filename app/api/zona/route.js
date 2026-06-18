@@ -14,7 +14,7 @@
 //       (tabla COSTO_CONSTRUCCION_UF_M2, ~15 a 45 UF/m²), editable.
 //     Para departamentos/oficinas/comercial se mantiene el UF/m² construido de mercado.
 import { NextResponse } from 'next/server'
-import { cargarPRCLasCondes, zonaEnPunto } from '../../lib/prc-lascondes.js'
+import { normativaEnPunto } from '../../lib/prc.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -316,13 +316,10 @@ export async function POST(request) {
         }
       }
 
-      // Normativa REAL del PRC (piloto Las Condes). Inerte si el GeoJSON no está
-      // en public/data/prc_las_condes.geojson; no afecta a otras comunas.
+      // Normativa REAL del PRC vía módulo compartido (mismo que usa Valentina).
+      // Devuelve null si la comuna no tiene archivo de zonas cargado (hoy: Las Condes).
       let prc_zona = null
-      if (String(comuna || '').toUpperCase().includes('LAS CONDES')) {
-        const gjPRC = await cargarPRCLasCondes()
-        if (gjPRC) prc_zona = zonaEnPunto(gjPRC, punto.lng, punto.lat)
-      }
+      if (comuna) prc_zona = await normativaEnPunto(punto.lng, punto.lat, comuna)
 
       valorizacion = {
         metodo: 'aditivo: valor_suelo × m²_terreno + costo_construcción × m²_construido',
