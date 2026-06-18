@@ -1,16 +1,17 @@
 'use client'
 
 /**
- * ProductNav — Header global de navegación entre las apps de GreatDeal.
+ * ProductNav — Header global de navegación entre las apps de C2C.
  *
  * Se muestra en la parte superior de IA Prop (Tasar) y permite saltar a:
- *   - Home del shell (GreatDeal)
+ *   - Home del shell (C2C · property market)
  *   - Buscar propiedades
  *   - Tasar (este producto, marcado como "active")
- *   - Reels (greatdeal-app)
+ *   - Reels (catálogo + reels en properties-app)
  *
  * En dev (localhost) los links son relativos para no romper.
- * En prod, configurar NEXT_PUBLIC_SHELL_URL=https://greatdeal.cl en Vercel.
+ * En prod, configurar NEXT_PUBLIC_SHELL_URL=https://c2c.cl (o el dominio que se use)
+ * en Vercel.
  *
  * Para ocultarlo en pantallas full-screen (ej. chat inmersivo) usar:
  *   <ProductNav hidden />
@@ -27,16 +28,17 @@ export default function ProductNav({ hidden = false, active = 'tasar' }) {
   ]
 
   return (
-    <nav className="gd-nav" aria-label="Navegación GreatDeal">
-      <a href={SHELL || '/'} className="gd-nav-logo">
-        Great<em>Deal</em>
+    <nav className="c2c-nav" aria-label="Navegación C2C">
+      <a href={SHELL || '/'} className="c2c-nav-brand">
+        <span className="c2c-nav-logo">C<em>2</em>C</span>
+        <span className="c2c-nav-tagline">property market</span>
       </a>
-      <ul className="gd-nav-links">
+      <ul className="c2c-nav-links">
         {links.map(l => (
           <li key={l.id}>
             <a
               href={l.href}
-              className={`gd-nav-link${active === l.id ? ' is-active' : ''}`}
+              className={`c2c-nav-link${active === l.id ? ' is-active' : ''}`}
             >
               {l.label}
             </a>
@@ -45,34 +47,49 @@ export default function ProductNav({ hidden = false, active = 'tasar' }) {
       </ul>
 
       <style jsx>{`
-        .gd-nav {
+        .c2c-nav {
           position: sticky;
           top: 0;
           z-index: 100;
           display: flex;
           align-items: center;
           gap: 32px;
-          padding: 14px 28px;
+          padding: 12px 28px;
           background: rgba(10, 10, 8, 0.78);
           backdrop-filter: saturate(180%) blur(14px);
           -webkit-backdrop-filter: saturate(180%) blur(14px);
           border-bottom: 1px solid rgba(200, 169, 110, 0.12);
         }
-        .gd-nav-logo {
-          font-family: 'Playfair Display', 'Cormorant Garamond', serif;
-          font-size: 20px;
-          font-weight: 500;
-          color: #f2ede4;
+        .c2c-nav-brand {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
           text-decoration: none;
-          letter-spacing: -0.3px;
           line-height: 1;
         }
-        .gd-nav-logo em {
+        .c2c-nav-logo {
+          font-family: 'Playfair Display', 'Cormorant Garamond', serif;
+          font-size: 22px;
+          font-weight: 500;
+          color: #f2ede4;
+          letter-spacing: -0.5px;
+          line-height: 1;
+        }
+        .c2c-nav-logo em {
           font-style: italic;
           color: #c8a96e;
           font-weight: 400;
         }
-        .gd-nav-links {
+        .c2c-nav-tagline {
+          font-family: 'Outfit', system-ui, sans-serif;
+          font-size: 10px;
+          font-weight: 300;
+          color: #5a5650;
+          letter-spacing: 2px;
+          text-transform: lowercase;
+          line-height: 1;
+        }
+        .c2c-nav-links {
           display: flex;
           gap: 4px;
           list-style: none;
@@ -80,7 +97,7 @@ export default function ProductNav({ hidden = false, active = 'tasar' }) {
           padding: 0;
           margin-left: auto;
         }
-        .gd-nav-link {
+        .c2c-nav-link {
           display: inline-block;
           padding: 8px 14px;
           font-family: 'Outfit', system-ui, sans-serif;
@@ -92,18 +109,19 @@ export default function ProductNav({ hidden = false, active = 'tasar' }) {
           border-radius: 8px;
           transition: color .15s ease, background .15s ease;
         }
-        .gd-nav-link:hover {
+        .c2c-nav-link:hover {
           color: #e8cc9a;
           background: rgba(200, 169, 110, 0.06);
         }
-        .gd-nav-link.is-active {
+        .c2c-nav-link.is-active {
           color: #c8a96e;
           background: rgba(200, 169, 110, 0.08);
         }
         @media (max-width: 520px) {
-          .gd-nav { padding: 12px 16px; gap: 12px; }
-          .gd-nav-logo { font-size: 17px; }
-          .gd-nav-link { padding: 6px 10px; font-size: 12px; }
+          .c2c-nav { padding: 10px 16px; gap: 12px; }
+          .c2c-nav-logo { font-size: 18px; }
+          .c2c-nav-tagline { font-size: 9px; letter-spacing: 1.5px; }
+          .c2c-nav-link { padding: 6px 10px; font-size: 12px; }
         }
       `}</style>
     </nav>
