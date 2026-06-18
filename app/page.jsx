@@ -1884,7 +1884,18 @@ function ChatComprador({ onBack }) {
 }
 // ─── Landing ──────────────────────────────────────────────────────────────────
 export default function Home() {
-  const [view, setView] = useState('landing')
+  // Permite abrir directo en vendedor/comprador desde el shell C2C:
+  //   /tasar?view=vendedor   → abre chat con Valentina (vender)
+  //   /tasar?view=comprador  → abre formulario con Isidora (comprar)
+  const initialView = (() => {
+    if (typeof window === 'undefined') return 'landing'
+    try {
+      const v = new URLSearchParams(window.location.search).get('view')
+      if (v === 'vendedor' || v === 'comprador') return v
+    } catch(e) {}
+    return 'landing'
+  })()
+  const [view, setView] = useState(initialView)
   if (view === 'vendedor') return <ChatVendedor onBack={() => setView('landing')}/>
   if (view === 'comprador') return <FormComprador onBack={() => setView('landing')}/>
   return (
