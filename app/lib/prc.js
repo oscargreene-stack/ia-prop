@@ -99,31 +99,36 @@ function desdeCodigo(zona) {
   return { densidad, predial_min: (nivel && t[nivel] != null) ? t[nivel] : t.def }
 }
 
-// ── Vitacura: zona de edificación consultada a la capa oficial ArcGIS por punto ─
-// (No hay GeoJSON local; el FeatureServer público devuelve la zona "U-V/E-Am5" del punto.)
-const _vitCache = {}
-async function zonaArcGISVitacura(lng, lat) {
-  const key = lng.toFixed(5) + ',' + lat.toFixed(5)
-  if (key in _vitCache) return _vitCache[key]
-  const base = 'https://services9.arcgis.com/kKJR3Qt68ohAWuet/arcgis/rest/services/PRC_Vitacura/FeatureServer/0/query'
+// ── Comunas cuya zona se consulta a una capa ArcGIS pública por punto (sin GeoJSON local) ─
+//   Vitacura → capa propia (zona combina uso/edificación "U-V/E-Am5").
+//   Ñuñoa    → capa MINVU (zona "Z-3A" etc.).
+const ARCGIS_ZONA = {
+  vitacura: { url: 'https://services9.arcgis.com/kKJR3Qt68ohAWuet/arcgis/rest/services/PRC_Vitacura/FeatureServer/0/query', field: 'zona' },
+  nunoa: { url: 'https://geoide.minvu.cl/server/rest/services/IPT/PRC_RM_Norte/MapServer/17/query', field: 'ZONA' },
+}
+const _arcgisCache = {}
+async function zonaArcGIS(lng, lat, cfg) {
+  const key = cfg.url + '|' + lng.toFixed(5) + ',' + lat.toFixed(5)
+  if (key in _arcgisCache) return _arcgisCache[key]
   const params = new URLSearchParams({
     geometry: lng + ',' + lat,
     geometryType: 'esriGeometryPoint',
     inSR: '4326',
     spatialRel: 'esriSpatialRelIntersects',
-    outFields: 'zona',
+    outFields: cfg.field,
     returnGeometry: 'false',
     f: 'json',
   })
   let zona = null
   try {
-    const r = await fetch(base + '?' + params.toString())
+    const r = await fetch(cfg.url + '?' + params.toString())
     if (r.ok) {
       const j = await r.json()
-      if (j.features && j.features[0] && j.features[0].attributes) zona = j.features[0].attributes.zona || null
+      const a = j.features && j.features[0] && j.features[0].attributes
+      if (a) zona = a[cfg.field] || null
     }
   } catch (e) {}
-  _vitCache[key] = zona
+  _arcgisCache[key] = zona
   return zona
 }
 
@@ -135,9 +140,9 @@ export async function normativaEnPunto(lng, lat, comuna, baseUrl = '') {
   if (!Number.isFinite(lng) || !Number.isFinite(lat) || !comuna) return null
   const slug = slugComuna(comuna)
   let zona = null, nombre = null
-  if (slug === 'vitacura') {
-    // Vitacura: zona desde la capa oficial ArcGIS en tiempo real (sin archivo local).
-    zona = await zonaArcGISVitacura(lng, lat)
+  if (ARCGIS_ZONA[slug]) {
+    // Vitacura/Ñuñoa: zona desde la capa oficial ArcGIS en tiempo real (sin archivo local).
+    zona = await zonaArcGIS(lng, lat, ARCGIS_ZONA[slug])
     nombre = zona
   } else {
     const gj = await cargarJSON(baseUrl, urlsZonas(slug))
