@@ -28,6 +28,7 @@ function slugComuna(comuna) {
 function urlsZonas(slug) {
   const u = [`/data/prc/zonas/${slug}.geojson`]
   if (slug === 'las_condes') u.push('/data/prc_las_condes.geojson') // legacy
+  if (slug === 'lo_barnechea') u.push('/data/prc/zonas/lobarnechea.geojson') // nombre alt
   return u
 }
 
@@ -122,11 +123,15 @@ export async function normativaEnPunto(lng, lat, comuna, baseUrl = '') {
   const comunaKey = String(comuna || '').toUpperCase()
   const comunaData = norm[comunaKey] || {}
   // 1) override por código de zona completo, 2) por tipo de edificación (parte "EA…"
-  //    del código, ej. "UV/EAb1" → "EAb1"), 3) heurística.
+  //    del código, ej. "UV/EAb1" o "U-V/E-Ab1" → "EAb1"), 3) heurística.
   let oficial = (comunaData.zonas && comunaData.zonas[zona]) || null
   if (!oficial && comunaData.por_edificacion) {
-    const eaPart = String(zona).split('/').map((s) => s.trim()).find((s) => /^EA/i.test(s))
-    if (eaPart && comunaData.por_edificacion[eaPart]) oficial = comunaData.por_edificacion[eaPart]
+    // acepta "EAb1" (Las Condes) y "E-Ab1"/"E-Am5" (Vitacura): se normaliza quitando guiones.
+    const eaPart = String(zona).split('/').map((s) => s.trim()).find((s) => /^E-?A[abm]/i.test(s))
+    if (eaPart) {
+      const key = eaPart.replace(/-/g, '')
+      if (comunaData.por_edificacion[key]) oficial = comunaData.por_edificacion[key]
+    }
   }
   const heur = desdeCodigo(zona)
 
