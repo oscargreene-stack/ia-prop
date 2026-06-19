@@ -99,22 +99,56 @@ function desdeCodigo(zona) {
   return { densidad, predial_min: (nivel && t[nivel] != null) ? t[nivel] : t.def }
 }
 
+// ── Vitacura: zona de edificación consultada a la capa oficial ArcGIS por punto ─
+// (No hay GeoJSON local; el FeatureServer público devuelve la zona "U-V/E-Am5" del punto.)
+const _vitCache = {}
+async function zonaArcGISVitacura(lng, lat) {
+  const key = lng.toFixed(5) + ',' + lat.toFixed(5)
+  if (key in _vitCache) return _vitCache[key]
+  const base = 'https://services9.arcgis.com/kKJR3Qt68ohAWuet/arcgis/rest/services/PRC_Vitacura/FeatureServer/0/query'
+  const params = new URLSearchParams({
+    geometry: lng + ',' + lat,
+    geometryType: 'esriGeometryPoint',
+    inSR: '4326',
+    spatialRel: 'esriSpatialRelIntersects',
+    outFields: 'zona',
+    returnGeometry: 'false',
+    f: 'json',
+  })
+  let zona = null
+  try {
+    const r = await fetch(base + '?' + params.toString())
+    if (r.ok) {
+      const j = await r.json()
+      if (j.features && j.features[0] && j.features[0].attributes) zona = j.features[0].attributes.zona || null
+    }
+  } catch (e) {}
+  _vitCache[key] = zona
+  return zona
+}
+
 // ── API pública ───────────────────────────────────────────────────────────────
 // normativaEnPunto(lng, lat, comuna, baseUrl) → { zona, nombre, densidad, predial_min,
 //   constructibilidad, altura, uso, fuente, clase, predial_min_aprox } | null
 // baseUrl: origin de la request (ej. https://ia-prop.vercel.app). Sin él intenta fs (local).
 export async function normativaEnPunto(lng, lat, comuna, baseUrl = '') {
   if (!Number.isFinite(lng) || !Number.isFinite(lat) || !comuna) return null
-  const gj = await cargarJSON(baseUrl, urlsZonas(slugComuna(comuna)))
-  if (!gj || !Array.isArray(gj.features)) return null // comuna sin datos de PRC
-
+  const slug = slugComuna(comuna)
   let zona = null, nombre = null
-  for (const f of gj.features) {
-    if (puntoEnGeometria(lng, lat, f.geometry)) {
-      const p = f.properties || {}
-      zona = p.ZONA || p.zona || null
-      nombre = p.NOMBRE || p.nombre || null
-      break
+  if (slug === 'vitacura') {
+    // Vitacura: zona desde la capa oficial ArcGIS en tiempo real (sin archivo local).
+    zona = await zonaArcGISVitacura(lng, lat)
+    nombre = zona
+  } else {
+    const gj = await cargarJSON(baseUrl, urlsZonas(slug))
+    if (!gj || !Array.isArray(gj.features)) return null // comuna sin datos de PRC
+    for (const f of gj.features) {
+      if (puntoEnGeometria(lng, lat, f.geometry)) {
+        const p = f.properties || {}
+        zona = p.ZONA || p.zona || null
+        nombre = p.NOMBRE || p.nombre || null
+        break
+      }
     }
   }
   if (!zona) return null
