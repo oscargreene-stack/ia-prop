@@ -101,10 +101,31 @@ function desdeCodigo(zona) {
 
 // ── Comunas cuya zona se consulta a una capa ArcGIS pública por punto (sin GeoJSON local) ─
 //   Vitacura → capa propia (zona combina uso/edificación "U-V/E-Am5").
-//   Ñuñoa    → capa MINVU (zona "Z-3A" etc.).
+//   Resto RM → capas oficiales MINVU IPT (campo ZONA). El predial por zona se completa
+//   en normativa.json comuna por comuna; mientras no esté, se devuelve la zona sin predial.
+//   (Las Condes y Lo Barnechea usan GeoJSON local detallado, no van acá.)
+function minvuLayer(svc, id) {
+  return { url: `https://geoide.minvu.cl/server/rest/services/IPT/${svc}/MapServer/${id}/query`, field: 'ZONA' }
+}
+const _N = 'PRC_RM_Norte', _S = 'PRC_RM_Sur'
 const ARCGIS_ZONA = {
   vitacura: { url: 'https://services9.arcgis.com/kKJR3Qt68ohAWuet/arcgis/rest/services/PRC_Vitacura/FeatureServer/0/query', field: 'zona' },
-  nunoa: { url: 'https://geoide.minvu.cl/server/rest/services/IPT/PRC_RM_Norte/MapServer/17/query', field: 'ZONA' },
+  // RM Norte
+  nunoa: minvuLayer(_N, 17), colina: minvuLayer(_N, 2), cerro_navia: minvuLayer(_N, 4),
+  conchali: minvuLayer(_N, 5), curacavi: minvuLayer(_N, 6), estacion_central: minvuLayer(_N, 7),
+  huechuraba: minvuLayer(_N, 8), independencia: minvuLayer(_N, 9), la_reina: minvuLayer(_N, 10),
+  lo_prado: minvuLayer(_N, 15), pudahuel: minvuLayer(_N, 19), providencia: minvuLayer(_N, 21),
+  quilicura: minvuLayer(_N, 22), quinta_normal: minvuLayer(_N, 23), recoleta: minvuLayer(_N, 24),
+  renca: minvuLayer(_N, 29), santiago: minvuLayer(_N, 31),
+  // RM Sur
+  san_ramon: minvuLayer(_S, 0), cerrillos: minvuLayer(_S, 1), el_bosque: minvuLayer(_S, 2),
+  isla_de_maipo: minvuLayer(_S, 3), la_cisterna: minvuLayer(_S, 4), la_florida: minvuLayer(_S, 5),
+  la_granja: minvuLayer(_S, 6), la_pintana: minvuLayer(_S, 7), lo_espejo: minvuLayer(_S, 8),
+  macul: minvuLayer(_S, 9), maipu: minvuLayer(_S, 10), melipilla: minvuLayer(_S, 11),
+  padre_hurtado: minvuLayer(_S, 12), paine: minvuLayer(_S, 13), pedro_aguirre_cerda: minvuLayer(_S, 15),
+  penalolen: minvuLayer(_S, 16), penaflor: minvuLayer(_S, 17), pirque: minvuLayer(_S, 18),
+  puente_alto: minvuLayer(_S, 20), san_bernardo: minvuLayer(_S, 21), san_miguel: minvuLayer(_S, 23),
+  talagante: minvuLayer(_S, 24), san_joaquin: minvuLayer(_S, 26),
 }
 const _arcgisCache = {}
 async function zonaArcGIS(lng, lat, cfg) {
