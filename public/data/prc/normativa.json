@@ -2,17 +2,23 @@
   "_descripcion": "Normativa de planes reguladores por comuna. Llave de comuna en MAYÚSCULAS. 'por_edificacion' mapea el tipo de edificación (la parte 'EA…' del código de zona del GeoJSON, ej. EAb1, EAm1p) a sus normas de la Ordenanza. 'zonas' permite además overrides por código de zona completo. Si una zona no aparece en ninguno, app/lib/prc.js deriva un predial aproximado por heurística (fuente='heuristica_codigo').",
   "_actualizado": "2026-06",
   "LAS CONDES": {
-    "_fuente": "Ordenanza PRC Las Condes (Texto Refundido MPRCLC-2020), Artículo 38, Tabla A) Base por zona de edificación. Valores oficiales. Zonas alta (EAa*) pendientes (no incluidas aún).",
+    "_fuente": "Ordenanza PRC Las Condes (Texto Refundido MPRCLC-2020), Artículo 38, Tabla A) Base por zona de edificación. Valores oficiales (baja EAb, media EAm y alta EAa). Predial = superficie de subdivisión predial mínima base.",
     "por_edificacion": {
-      "EAb1":  { "predial_min": 1000, "constructibilidad": 0.6,  "densidad_hab_ha": 40 },
-      "EAb2":  { "predial_min": 500,  "constructibilidad": 0.6,  "densidad_hab_ha": 130 },
-      "EAb3":  { "predial_min": 300,  "constructibilidad": 0.8,  "densidad_hab_ha": 120 },
-      "EAb4":  { "predial_min": 2500, "constructibilidad": 0.12, "densidad_hab_ha": 10 },
-      "EAb4p": { "predial_min": 2500, "constructibilidad": 0.12, "densidad_hab_ha": 10 },
-      "EAm1":  { "predial_min": 1000, "constructibilidad": 0.6,  "densidad_hab_ha": 40 },
-      "EAm1p": { "predial_min": 2500, "constructibilidad": 0.6,  "densidad_hab_ha": 20 },
-      "EAm2":  { "predial_min": 2500, "constructibilidad": 0.6,  "densidad_hab_ha": 20 },
-      "EAm4":  { "predial_min": 2500, "constructibilidad": 0.6,  "densidad_hab_ha": 20 }
+      "EAb1":   { "predial_min": 1000, "constructibilidad": 0.6,  "densidad_hab_ha": 40 },
+      "EAb2":   { "predial_min": 500,  "constructibilidad": 0.6,  "densidad_hab_ha": 130 },
+      "EAb3":   { "predial_min": 300,  "constructibilidad": 0.8,  "densidad_hab_ha": 120 },
+      "EAb4":   { "predial_min": 2500, "constructibilidad": 0.12, "densidad_hab_ha": 10 },
+      "EAb4p":  { "predial_min": 2500, "constructibilidad": 0.12, "densidad_hab_ha": 10 },
+      "EAm1":   { "predial_min": 1000, "constructibilidad": 0.6,  "densidad_hab_ha": 40 },
+      "EAm1p":  { "predial_min": 2500, "constructibilidad": 0.6,  "densidad_hab_ha": 20 },
+      "EAm2":   { "predial_min": 2500, "constructibilidad": 0.6,  "densidad_hab_ha": 20 },
+      "EAm4":   { "predial_min": 2500, "constructibilidad": 0.6,  "densidad_hab_ha": 20 },
+      "EAa1":   { "predial_min": 2500, "constructibilidad": 1.0,  "densidad_hab_ha": 20 },
+      "EAa2":   { "predial_min": 2500, "constructibilidad": 1.0,  "densidad_hab_ha": 20 },
+      "EAa3":   { "predial_min": 2500, "constructibilidad": 1.0,  "densidad_hab_ha": 20 },
+      "EAa4":   { "predial_min": 2500, "constructibilidad": 1.0,  "densidad_hab_ha": 20 },
+      "EAa+cm": { "predial_min": 2500, "constructibilidad": 1.0,  "densidad_hab_ha": 20 },
+      "EAa+ca": { "predial_min": 2500, "constructibilidad": 1.0,  "densidad_hab_ha": 20 }
     },
     "zonas": {}
   }
