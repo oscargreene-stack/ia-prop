@@ -21,5 +21,53 @@
       "EAa+ca": { "predial_min": 2500, "constructibilidad": 1.0,  "densidad_hab_ha": 20 }
     },
     "zonas": {}
+  },
+  "LO BARNECHEA": {
+    "_fuente": "Ordenanza Local PRC Lo Barnechea (Actualización 2025), Condiciones de Edificación por Zona. Predial = Superficie de Subdivisión Predial Mínima base (no incentivos). Códigos = capa MINVU PRC_RM_Norte/13.",
+    "zonas": {
+      "ZHE-2-DC1": { "predial_min": 2500, "constructibilidad": 0.2, "densidad_hab_ha": 10 },
+      "ZHE-2-DC2": { "predial_min": 1500, "constructibilidad": 0.2, "densidad_hab_ha": 10 },
+      "ZHE-2-DC3": { "predial_min": 5000, "constructibilidad": 0.1, "densidad_hab_ha": 8 },
+      "ZHE-2.1":   { "predial_min": 630,  "constructibilidad": 0.4, "densidad_hab_ha": 40 },
+      "ZHE-2.2":   { "predial_min": 350,  "constructibilidad": 0.9, "densidad_hab_ha": 456 },
+      "ZHE-3":     { "predial_min": 1400, "constructibilidad": 0.2, "densidad_hab_ha": 30 },
+      "ZHE-4a":    { "predial_min": 900,  "constructibilidad": 0.4, "densidad_hab_ha": 40 },
+      "ZHE-4b":    { "predial_min": 900,  "constructibilidad": 1.5, "densidad_hab_ha": 400 },
+      "ZHE-6":     { "predial_min": 1800, "constructibilidad": 2.0, "densidad_hab_ha": 200 },
+      "ZHP-3.1":   { "predial_min": 700,  "constructibilidad": 0.6, "densidad_hab_ha": 60 },
+      "ZHP-3.2":   { "predial_min": 400,  "constructibilidad": 1.25 },
+      "ZHP-4.1":   { "predial_min": 350,  "constructibilidad": 0.42 },
+      "ZHP-4.2":   { "predial_min": 400 },
+      "ZHP-4.3":   { "predial_min": 200 },
+      "ZHP-6.1":   { "predial_min": 350 },
+      "ZHP-6.2":   { "predial_min": 250 },
+      "ZHP-8":     { "predial_min": 600 },
+      "ZHP-10":    { "predial_min": 600 },
+      "ZM-2":      { "predial_min": 350 },
+      "ZM-4.1":    { "predial_min": 900 },
+      "ZM-4.2":    { "predial_min": 900 },
+      "ZM-6a":     { "predial_min": 400 },
+      "ZM-6b":     { "predial_min": 400 },
+      "ZM-6c":     { "predial_min": 400 },
+      "ZM-8":      { "predial_min": 600 }
+    }
+  },
+  "VITACURA": {
+    "_fuente": "Ordenanza PRC Vitacura (Texto Refundido Marzo 2020), Art. 41 Condiciones de Edificación por Áreas (Cuadros 11-22). Predial = Superficie de Subdivisión Predial Mínima base. Códigos de edificación (E-Ab/E-Am/E-Aa) desde la capa ArcGIS PRC_Vitacura.",
+    "por_edificacion": {
+      "EAb1": { "predial_min": 4000, "constructibilidad": 0.4, "densidad_hab_ha": 17 },
+      "EAb2": { "predial_min": 1000, "constructibilidad": 0.5, "densidad_hab_ha": 32 },
+      "EAb3": { "predial_min": 500,  "constructibilidad": 0.8, "densidad_hab_ha": 56 },
+      "EAb4": { "predial_min": 250,  "constructibilidad": 0.8, "densidad_hab_ha": 104 },
+      "EAm1": { "predial_min": 1000, "constructibilidad": 0.8, "densidad_hab_ha": 216 },
+      "EAm2": { "predial_min": 4000, "constructibilidad": 0.4, "densidad_hab_ha": 28 },
+      "EAm3": { "predial_min": 1500, "constructibilidad": 1.0, "densidad_hab_ha": 328 },
+      "EAm4": { "predial_min": 800,  "constructibilidad": 1.0, "densidad_hab_ha": 360 },
+      "EAm5": { "predial_min": 1200, "constructibilidad": 1.6, "densidad_hab_ha": 508 },
+      "EAm6": { "predial_min": 4000, "constructibilidad": 0.6, "densidad_hab_ha": 84 },
+      "EAa1": { "predial_min": 1500, "constructibilidad": 2.0, "densidad_hab_ha": 612 },
+      "EAa2": { "predial_min": 1000, "constructibilidad": 2.8, "densidad_hab_ha": 840 }
+    },
+    "zonas": {}
   }
 }
