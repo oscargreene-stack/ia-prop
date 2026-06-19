@@ -120,7 +120,14 @@ export async function normativaEnPunto(lng, lat, comuna, baseUrl = '') {
 
   const norm = (await cargarJSON(baseUrl, ['/data/prc/normativa.json'])) || {}
   const comunaKey = String(comuna || '').toUpperCase()
-  const oficial = (norm[comunaKey] && norm[comunaKey].zonas && norm[comunaKey].zonas[zona]) || null
+  const comunaData = norm[comunaKey] || {}
+  // 1) override por código de zona completo, 2) por tipo de edificación (parte "EA…"
+  //    del código, ej. "UV/EAb1" → "EAb1"), 3) heurística.
+  let oficial = (comunaData.zonas && comunaData.zonas[zona]) || null
+  if (!oficial && comunaData.por_edificacion) {
+    const eaPart = String(zona).split('/').map((s) => s.trim()).find((s) => /^EA/i.test(s))
+    if (eaPart && comunaData.por_edificacion[eaPart]) oficial = comunaData.por_edificacion[eaPart]
+  }
   const heur = desdeCodigo(zona)
 
   const predial_min = (oficial && oficial.predial_min != null) ? oficial.predial_min : heur.predial_min
