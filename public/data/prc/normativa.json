@@ -69,5 +69,29 @@
       "EAa2": { "predial_min": 1000, "constructibilidad": 2.8, "densidad_hab_ha": 840 }
     },
     "zonas": {}
+  },
+  "ÑUÑOA": {
+    "_fuente": "Ordenanza PRC Ñuñoa (Texto Refundido 2025), Art. 26 subdivisión predial. Predial = Superficie de subdivisión predial mínima. Códigos = capa MINVU PRC_RM_Norte/17 (consulta en tiempo real).",
+    "zonas": {
+      "Z-1":  { "predial_min": 500, "constructibilidad": 4.0 },
+      "Z-1A": { "predial_min": 500, "constructibilidad": 3.6, "densidad_hab_ha": 1800 },
+      "Z-1B": { "predial_min": 500, "constructibilidad": 3.2, "densidad_hab_ha": 1600 },
+      "Z-1C": { "predial_min": 500, "constructibilidad": 2.5 },
+      "Z-1D": { "predial_min": 500 },
+      "Z-2":  { "predial_min": 500 },
+      "Z-3":  { "predial_min": 300 },
+      "Z-3A": { "predial_min": 300 },
+      "Z-4":  { "predial_min": 300 },
+      "Z-4A": { "predial_min": 300 },
+      "Z-4B": { "predial_min": 300 },
+      "Z-4C": { "predial_min": 300 },
+      "Z-4C+R":  { "predial_min": 300 },
+      "Z-4C+RB": { "predial_min": 300 },
+      "Z-4m": { "predial_min": 500 },
+      "Z-5":  { "predial_min": 300 },
+      "Z-5A": { "predial_min": 300 },
+      "Z-5B": { "predial_min": 6500 },
+      "Z-6":  { "predial_min": 300 }
+    }
   }
 }
