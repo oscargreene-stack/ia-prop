@@ -21,10 +21,9 @@ export default function ProductNav({ hidden = false, active = 'tasar' }) {
 
   const SHELL = process.env.NEXT_PUBLIC_SHELL_URL || ''
 
-  const links = [
-    { id: 'publicar', label: 'Publicar', href: `${SHELL}/publicar` },
-    { id: 'tasar',    label: 'Tasar',    href: `${SHELL}/tasar`    },
-    { id: 'comprar',  label: 'Comprar',  href: `${SHELL}/comprar`  },
+const links = [
+    { id: 'comprar', label: 'Comprar', href: `${SHELL}/comprar` },
+    { id: 'vender',  label: 'Vender',  href: `${SHELL}/vender`  },
   ]
 
   return (
