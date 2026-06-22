@@ -108,5 +108,16 @@
       "ZR-7": { "predial_min": 300 },
       "ZR-8": { "predial_min": 300 }
     }
+  },
+  "PEÑALOLÉN": {
+    "_fuente": "Ordenanza PRC Peñalolén (Decreto 55/1989), Art. 29 - subdivisión predial por zona (fila 'Para Vivienda'). Cobertura parcial: zonas R4-R11 y ZHM-* (modificación posterior) pendientes de la Ordenanza modificada.",
+    "zonas": {
+      "R.1": { "predial_min": 200, "constructibilidad": 1.0, "densidad_hab_ha": 196 },
+      "R.2": { "predial_min": 100, "constructibilidad": 1.4, "densidad_hab_ha": 385 },
+      "R.3": { "predial_min": 160, "constructibilidad": 1.0, "densidad_hab_ha": 200 },
+      "S.M.1": { "predial_min": 120, "constructibilidad": 2.8, "densidad_hab_ha": 385 },
+      "S.M.2": { "predial_min": 120, "constructibilidad": 2.8, "densidad_hab_ha": 385 },
+      "Z.1": { "predial_min": 480, "constructibilidad": 0.4, "densidad_hab_ha": 150 }
+    }
   }
 }
