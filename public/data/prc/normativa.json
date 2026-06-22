@@ -93,5 +93,20 @@
       "Z-5B": { "predial_min": 6500 },
       "Z-6":  { "predial_min": 300 }
     }
+  },
+  "MACUL": {
+    "_fuente": "Ordenanza PRC Macul (DTO 552/2004 + mod. zonas residenciales mixtas). Subdivisión predial mínima general 300 m² (Art. 9), salvo ZR-6 (160 m²). Constructibilidad = 1er tramo del cuadro de normas.",
+    "zonas": {
+      "ZM-1": { "predial_min": 300, "constructibilidad": 2.5 },
+      "ZM-2": { "predial_min": 300, "constructibilidad": 2.0 },
+      "ZM-3": { "predial_min": 300, "constructibilidad": 2.0 },
+      "ZM-4": { "predial_min": 300, "constructibilidad": 2.0 },
+      "ZM-5": { "predial_min": 300, "constructibilidad": 1.5 },
+      "ZM-6": { "predial_min": 300 },
+      "ZM-7": { "predial_min": 300 },
+      "ZR-6": { "predial_min": 160, "constructibilidad": 1.0 },
+      "ZR-7": { "predial_min": 300 },
+      "ZR-8": { "predial_min": 300 }
+    }
   }
 }
