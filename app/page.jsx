@@ -272,13 +272,9 @@ function ChatVendedor({ onBack }) {
       })
     }
     if (window.google?.maps?.places) { initAC(); return }
-    if (!document.getElementById('gplaces-script')) {
-      const s = document.createElement('script')
-      s.id = 'gplaces-script'
-      s.src = `https://maps.googleapis.com/maps/api/js?key=${GKEY}&libraries=places&language=es&region=CL`
-      s.async = true; s.onload = initAC
-      document.head.appendChild(s)
-    }
+    // Usar el loader único (places + drawing). Cargar Google Maps con
+    // distintos sets de librerías rompe la API ("included multiple times").
+    fcLoadGmaps().then(() => { if (window.google?.maps?.places) initAC() })
   }, [stage, searchTab])
 
   const addAgent = (content, delay=600) => new Promise(res => {
@@ -1470,6 +1466,7 @@ function FormComprador({ onBack }) {
   const mapObj = useRef(null)
   const dmRef = useRef(null)
   const polyRef = useRef(null)
+  const drawRef = useRef(null)
 
   const toggle = (arr, set, id) => set(arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id])
 
@@ -1489,24 +1486,59 @@ function FormComprador({ onBack }) {
           mapTypeControl: false, streetViewControl: false, fullscreenControl: false,
         })
         mapObj.current = map
-        if (!g.drawing) return
-        const dm = new g.drawing.DrawingManager({
-          drawingMode: g.drawing.OverlayType.POLYGON,
-          drawingControl: true,
-          drawingControlOptions: { position: g.ControlPosition.TOP_CENTER, drawingModes: [g.drawing.OverlayType.POLYGON] },
-          polygonOptions: { fillColor: '#caa15a', fillOpacity: 0.2, strokeColor: '#caa15a', strokeWeight: 2, editable: true, clickable: false },
-        })
-        dm.setMap(map)
-        dmRef.current = dm
-        g.event.addListener(dm, 'overlaycomplete', (e) => {
-          if (e.type !== g.drawing.OverlayType.POLYGON) return
-          if (polyRef.current) polyRef.current.setMap(null)
-          polyRef.current = e.overlay
-          dm.setDrawingMode(null)
-          const read = () => setPolygon(e.overlay.getPath().getArray().map((pt) => ({ lat: pt.lat(), lng: pt.lng() })))
+
+        // El DrawingManager fue eliminado de la API de Google Maps (v3.65+).
+        // Implementamos el dibujo del polígono a mano: cada clic en el mapa
+        // agrega un vértice; al tocar el primer punto se cierra el sector.
+        const GOLD = '#caa15a'
+        const st = { verts: [], markers: [], line: null, poly: null, closed: false }
+        drawRef.current = st
+
+        const refreshLine = () => {
+          if (st.line) st.line.setMap(null)
+          st.line = new g.Polyline({ path: st.verts, strokeColor: GOLD, strokeWeight: 2, map })
+        }
+        const closePoly = () => {
+          if (st.closed || st.verts.length < 3) return
+          st.closed = true
+          if (st.line) { st.line.setMap(null); st.line = null }
+          st.markers.forEach((m) => m.setMap(null)); st.markers = []
+          const poly = new g.Polygon({
+            paths: st.verts, fillColor: GOLD, fillOpacity: 0.2,
+            strokeColor: GOLD, strokeWeight: 2, editable: true, clickable: false, map,
+          })
+          st.poly = poly
+          polyRef.current = poly
+          const read = () => setPolygon(poly.getPath().getArray().map((pt) => ({ lat: pt.lat(), lng: pt.lng() })))
           read()
-          ;['set_at', 'insert_at', 'remove_at'].forEach((ev) => g.event.addListener(e.overlay.getPath(), ev, read))
-        })
+          ;['set_at', 'insert_at', 'remove_at'].forEach((ev) => g.event.addListener(poly.getPath(), ev, read))
+        }
+        const addVertex = (latLng) => {
+          if (st.closed) return
+          const pt = { lat: latLng.lat(), lng: latLng.lng() }
+          if (st.verts.length >= 3) {
+            const f = st.verts[0]
+            if (Math.abs(f.lat - pt.lat) < 1e-4 && Math.abs(f.lng - pt.lng) < 1e-4) { closePoly(); return }
+          }
+          st.verts.push(pt)
+          const first = st.verts.length === 1
+          const marker = new g.Marker({
+            position: pt, map,
+            icon: { path: g.SymbolPath.CIRCLE, scale: first ? 6 : 4, fillColor: GOLD, fillOpacity: 1, strokeColor: '#ffffff', strokeWeight: 1 },
+          })
+          if (first) marker.addListener('click', closePoly)
+          st.markers.push(marker)
+          refreshLine()
+        }
+        st.reset = () => {
+          if (st.poly) { st.poly.setMap(null); st.poly = null }
+          if (st.line) { st.line.setMap(null); st.line = null }
+          st.markers.forEach((m) => m.setMap(null)); st.markers = []
+          st.verts = []; st.closed = false
+          polyRef.current = null
+          setPolygon(null)
+        }
+        g.event.addListener(map, 'click', (e) => addVertex(e.latLng))
       }
       tryInit(25)
     })
@@ -1514,9 +1546,9 @@ function FormComprador({ onBack }) {
   }, [sectorMode])
 
   const limpiarPoligono = () => {
+    if (drawRef.current && drawRef.current.reset) { drawRef.current.reset(); return }
     if (polyRef.current) { polyRef.current.setMap(null); polyRef.current = null }
     setPolygon(null)
-    if (dmRef.current && window.google) dmRef.current.setDrawingMode(window.google.maps.drawing.OverlayType.POLYGON)
   }
 
   const presMid = (FC_PRES.find((p) => p.id === pres) || {}).mid || null
@@ -1659,7 +1691,7 @@ function FormComprador({ onBack }) {
           </div>
         ) : (
           <div>
-            <div style={{ fontSize: 13, color: '#9a9a9a', marginBottom: 8 }}>Tocá el ícono de polígono (arriba del mapa) y andá marcando los vértices del sector; cerrá el polígono tocando el primer punto.</div>
+            <div style={{ fontSize: 13, color: '#9a9a9a', marginBottom: 8 }}>Tocá el mapa para ir marcando los vértices del sector; cerrá el polígono tocando de nuevo el primer punto.</div>
             <div ref={mapRef} style={{ width: '100%', height: 380, borderRadius: 12, border: '1px solid rgba(255,255,255,0.12)', overflow: 'hidden' }} />
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8 }}>
               <span style={{ fontSize: 13, color: polygon ? 'var(--gold-light)' : '#8a8a8a' }}>{polygon && polygon.length >= 3 ? '✓ Sector marcado' : 'Sin sector marcado'}</span>
