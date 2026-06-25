@@ -1,534 +1,920 @@
 {
- "_descripcion": "Normativa de planes reguladores por comuna. Llave de comuna en MAYÚSCULAS. 'por_edificacion' mapea el tipo de edificación (la parte 'EA…' del código de zona del GeoJSON, ej. EAb1, EAm1p) a sus normas de la Ordenanza. 'zonas' permite además overrides por código de zona completo. Si una zona no aparece en ninguno, app/lib/prc.js deriva un predial aproximado por heurística (fuente='heuristica_codigo').",
- "_actualizado": "2026-06",
- "LAS CONDES": {
-  "_fuente": "Ordenanza PRC Las Condes (Texto Refundido MPRCLC-2020), Artículo 38, Tabla A) Base por zona de edificación. Valores oficiales (baja EAb, media EAm y alta EAa). Predial = superficie de subdivisión predial mínima base.",
-  "por_edificacion": {
-   "EAb1": {
-    "predial_min": 1000,
-    "constructibilidad": 0.6,
-    "densidad_hab_ha": 40
-   },
-   "EAb2": {
-    "predial_min": 500,
-    "constructibilidad": 0.6,
-    "densidad_hab_ha": 130
-   },
-   "EAb3": {
-    "predial_min": 300,
-    "constructibilidad": 0.8,
-    "densidad_hab_ha": 120
-   },
-   "EAb4": {
-    "predial_min": 2500,
-    "constructibilidad": 0.12,
-    "densidad_hab_ha": 10
-   },
-   "EAb4p": {
-    "predial_min": 2500,
-    "constructibilidad": 0.12,
-    "densidad_hab_ha": 10
-   },
-   "EAm1": {
-    "predial_min": 1000,
-    "constructibilidad": 0.6,
-    "densidad_hab_ha": 40
-   },
-   "EAm1p": {
-    "predial_min": 2500,
-    "constructibilidad": 0.6,
-    "densidad_hab_ha": 20
-   },
-   "EAm2": {
-    "predial_min": 2500,
-    "constructibilidad": 0.6,
-    "densidad_hab_ha": 20
-   },
-   "EAm4": {
-    "predial_min": 2500,
-    "constructibilidad": 0.6,
-    "densidad_hab_ha": 20
-   },
-   "EAa1": {
-    "predial_min": 2500,
-    "constructibilidad": 1.0,
-    "densidad_hab_ha": 20
-   },
-   "EAa2": {
-    "predial_min": 2500,
-    "constructibilidad": 1.0,
-    "densidad_hab_ha": 20
-   },
-   "EAa3": {
-    "predial_min": 2500,
-    "constructibilidad": 1.0,
-    "densidad_hab_ha": 20
-   },
-   "EAa4": {
-    "predial_min": 2500,
-    "constructibilidad": 1.0,
-    "densidad_hab_ha": 20
-   },
-   "EAa+cm": {
-    "predial_min": 2500,
-    "constructibilidad": 1.0,
-    "densidad_hab_ha": 20
-   },
-   "EAa+ca": {
-    "predial_min": 2500,
-    "constructibilidad": 1.0,
-    "densidad_hab_ha": 20
-   }
+  "_descripcion": "Normativa de planes reguladores por comuna. Llave de comuna en MAYÚSCULAS. 'por_edificacion' mapea el tipo de edificación (la parte 'EA…' del código de zona del GeoJSON, ej. EAb1, EAm1p) a sus normas de la Ordenanza. 'zonas' permite además overrides por código de zona completo. Si una zona no aparece en ninguno, app/lib/prc.js deriva un predial aproximado por heurística (fuente='heuristica_codigo').",
+  "_actualizado": "2026-06",
+  "LAS CONDES": {
+    "_fuente": "Ordenanza PRC Las Condes (Texto Refundido MPRCLC-2020), Artículo 38, Tabla A) Base por zona de edificación. Valores oficiales (baja EAb, media EAm y alta EAa). Predial = superficie de subdivisión predial mínima base.",
+    "por_edificacion": {
+      "EAb1": {
+        "predial_min": 1000,
+        "constructibilidad": 0.6,
+        "densidad_hab_ha": 40
+      },
+      "EAb2": {
+        "predial_min": 500,
+        "constructibilidad": 0.6,
+        "densidad_hab_ha": 130
+      },
+      "EAb3": {
+        "predial_min": 300,
+        "constructibilidad": 0.8,
+        "densidad_hab_ha": 120
+      },
+      "EAb4": {
+        "predial_min": 2500,
+        "constructibilidad": 0.12,
+        "densidad_hab_ha": 10
+      },
+      "EAb4p": {
+        "predial_min": 2500,
+        "constructibilidad": 0.12,
+        "densidad_hab_ha": 10
+      },
+      "EAm1": {
+        "predial_min": 1000,
+        "constructibilidad": 0.6,
+        "densidad_hab_ha": 40
+      },
+      "EAm1p": {
+        "predial_min": 2500,
+        "constructibilidad": 0.6,
+        "densidad_hab_ha": 20
+      },
+      "EAm2": {
+        "predial_min": 2500,
+        "constructibilidad": 0.6,
+        "densidad_hab_ha": 20
+      },
+      "EAm4": {
+        "predial_min": 2500,
+        "constructibilidad": 0.6,
+        "densidad_hab_ha": 20
+      },
+      "EAa1": {
+        "predial_min": 2500,
+        "constructibilidad": 1.0,
+        "densidad_hab_ha": 20
+      },
+      "EAa2": {
+        "predial_min": 2500,
+        "constructibilidad": 1.0,
+        "densidad_hab_ha": 20
+      },
+      "EAa3": {
+        "predial_min": 2500,
+        "constructibilidad": 1.0,
+        "densidad_hab_ha": 20
+      },
+      "EAa4": {
+        "predial_min": 2500,
+        "constructibilidad": 1.0,
+        "densidad_hab_ha": 20
+      },
+      "EAa+cm": {
+        "predial_min": 2500,
+        "constructibilidad": 1.0,
+        "densidad_hab_ha": 20
+      },
+      "EAa+ca": {
+        "predial_min": 2500,
+        "constructibilidad": 1.0,
+        "densidad_hab_ha": 20
+      }
+    },
+    "zonas": {}
   },
-  "zonas": {}
- },
- "LO BARNECHEA": {
-  "_fuente": "Ordenanza Local PRC Lo Barnechea (Actualización 2025), Condiciones de Edificación por Zona. Predial = Superficie de Subdivisión Predial Mínima base (no incentivos). Códigos = capa MINVU PRC_RM_Norte/13.",
-  "zonas": {
-   "ZHE-2-DC1": {
-    "predial_min": 2500,
-    "constructibilidad": 0.2,
-    "densidad_hab_ha": 10
-   },
-   "ZHE-2-DC2": {
-    "predial_min": 1500,
-    "constructibilidad": 0.2,
-    "densidad_hab_ha": 10
-   },
-   "ZHE-2-DC3": {
-    "predial_min": 5000,
-    "constructibilidad": 0.1,
-    "densidad_hab_ha": 8
-   },
-   "ZHE-2.1": {
-    "predial_min": 630,
-    "constructibilidad": 0.4,
-    "densidad_hab_ha": 40
-   },
-   "ZHE-2.2": {
-    "predial_min": 350,
-    "constructibilidad": 0.9,
-    "densidad_hab_ha": 456
-   },
-   "ZHE-3": {
-    "predial_min": 1400,
-    "constructibilidad": 0.2,
-    "densidad_hab_ha": 30
-   },
-   "ZHE-4a": {
-    "predial_min": 900,
-    "constructibilidad": 0.4,
-    "densidad_hab_ha": 40
-   },
-   "ZHE-4b": {
-    "predial_min": 900,
-    "constructibilidad": 1.5,
-    "densidad_hab_ha": 400
-   },
-   "ZHE-6": {
-    "predial_min": 1800,
-    "constructibilidad": 2.0,
-    "densidad_hab_ha": 200
-   },
-   "ZHP-3.1": {
-    "predial_min": 700,
-    "constructibilidad": 0.6,
-    "densidad_hab_ha": 60
-   },
-   "ZHP-3.2": {
-    "predial_min": 400,
-    "constructibilidad": 1.25
-   },
-   "ZHP-4.1": {
-    "predial_min": 350,
-    "constructibilidad": 0.42
-   },
-   "ZHP-4.2": {
-    "predial_min": 400
-   },
-   "ZHP-4.3": {
-    "predial_min": 200
-   },
-   "ZHP-6.1": {
-    "predial_min": 350
-   },
-   "ZHP-6.2": {
-    "predial_min": 250
-   },
-   "ZHP-8": {
-    "predial_min": 600
-   },
-   "ZHP-10": {
-    "predial_min": 600
-   },
-   "ZM-2": {
-    "predial_min": 350
-   },
-   "ZM-4.1": {
-    "predial_min": 900
-   },
-   "ZM-4.2": {
-    "predial_min": 900
-   },
-   "ZM-6a": {
-    "predial_min": 400
-   },
-   "ZM-6b": {
-    "predial_min": 400
-   },
-   "ZM-6c": {
-    "predial_min": 400
-   },
-   "ZM-8": {
-    "predial_min": 600
-   }
-  }
- },
- "VITACURA": {
-  "_fuente": "Ordenanza PRC Vitacura (Texto Refundido Marzo 2020), Art. 41 Condiciones de Edificación por Áreas (Cuadros 11-22). Predial = Superficie de Subdivisión Predial Mínima base. Códigos de edificación (E-Ab/E-Am/E-Aa) desde la capa ArcGIS PRC_Vitacura.",
-  "por_edificacion": {
-   "EAb1": {
-    "predial_min": 4000,
-    "constructibilidad": 0.4,
-    "densidad_hab_ha": 17
-   },
-   "EAb2": {
-    "predial_min": 1000,
-    "constructibilidad": 0.5,
-    "densidad_hab_ha": 32
-   },
-   "EAb3": {
-    "predial_min": 500,
-    "constructibilidad": 0.8,
-    "densidad_hab_ha": 56
-   },
-   "EAb4": {
-    "predial_min": 250,
-    "constructibilidad": 0.8,
-    "densidad_hab_ha": 104
-   },
-   "EAm1": {
-    "predial_min": 1000,
-    "constructibilidad": 0.8,
-    "densidad_hab_ha": 216
-   },
-   "EAm2": {
-    "predial_min": 4000,
-    "constructibilidad": 0.4,
-    "densidad_hab_ha": 28
-   },
-   "EAm3": {
-    "predial_min": 1500,
-    "constructibilidad": 1.0,
-    "densidad_hab_ha": 328
-   },
-   "EAm4": {
-    "predial_min": 800,
-    "constructibilidad": 1.0,
-    "densidad_hab_ha": 360
-   },
-   "EAm5": {
-    "predial_min": 1200,
-    "constructibilidad": 1.6,
-    "densidad_hab_ha": 508
-   },
-   "EAm6": {
-    "predial_min": 4000,
-    "constructibilidad": 0.6,
-    "densidad_hab_ha": 84
-   },
-   "EAa1": {
-    "predial_min": 1500,
-    "constructibilidad": 2.0,
-    "densidad_hab_ha": 612
-   },
-   "EAa2": {
-    "predial_min": 1000,
-    "constructibilidad": 2.8,
-    "densidad_hab_ha": 840
-   }
+  "LO BARNECHEA": {
+    "_fuente": "Ordenanza Local PRC Lo Barnechea (Actualización 2025), Condiciones de Edificación por Zona. Predial = Superficie de Subdivisión Predial Mínima base (no incentivos). Códigos = capa MINVU PRC_RM_Norte/13.",
+    "zonas": {
+      "ZHE-2-DC1": {
+        "predial_min": 2500,
+        "constructibilidad": 0.2,
+        "densidad_hab_ha": 10
+      },
+      "ZHE-2-DC2": {
+        "predial_min": 1500,
+        "constructibilidad": 0.2,
+        "densidad_hab_ha": 10
+      },
+      "ZHE-2-DC3": {
+        "predial_min": 5000,
+        "constructibilidad": 0.1,
+        "densidad_hab_ha": 8
+      },
+      "ZHE-2.1": {
+        "predial_min": 630,
+        "constructibilidad": 0.4,
+        "densidad_hab_ha": 40
+      },
+      "ZHE-2.2": {
+        "predial_min": 350,
+        "constructibilidad": 0.9,
+        "densidad_hab_ha": 456
+      },
+      "ZHE-3": {
+        "predial_min": 1400,
+        "constructibilidad": 0.2,
+        "densidad_hab_ha": 30
+      },
+      "ZHE-4a": {
+        "predial_min": 900,
+        "constructibilidad": 0.4,
+        "densidad_hab_ha": 40
+      },
+      "ZHE-4b": {
+        "predial_min": 900,
+        "constructibilidad": 1.5,
+        "densidad_hab_ha": 400
+      },
+      "ZHE-6": {
+        "predial_min": 1800,
+        "constructibilidad": 2.0,
+        "densidad_hab_ha": 200
+      },
+      "ZHP-3.1": {
+        "predial_min": 700,
+        "constructibilidad": 0.6,
+        "densidad_hab_ha": 60
+      },
+      "ZHP-3.2": {
+        "predial_min": 400,
+        "constructibilidad": 1.25
+      },
+      "ZHP-4.1": {
+        "predial_min": 350,
+        "constructibilidad": 0.42
+      },
+      "ZHP-4.2": {
+        "predial_min": 400
+      },
+      "ZHP-4.3": {
+        "predial_min": 200
+      },
+      "ZHP-6.1": {
+        "predial_min": 350
+      },
+      "ZHP-6.2": {
+        "predial_min": 250
+      },
+      "ZHP-8": {
+        "predial_min": 600
+      },
+      "ZHP-10": {
+        "predial_min": 600
+      },
+      "ZM-2": {
+        "predial_min": 350
+      },
+      "ZM-4.1": {
+        "predial_min": 900
+      },
+      "ZM-4.2": {
+        "predial_min": 900
+      },
+      "ZM-6a": {
+        "predial_min": 400
+      },
+      "ZM-6b": {
+        "predial_min": 400
+      },
+      "ZM-6c": {
+        "predial_min": 400
+      },
+      "ZM-8": {
+        "predial_min": 600
+      }
+    }
   },
-  "zonas": {}
- },
- "ÑUÑOA": {
-  "_fuente": "Ordenanza PRC Ñuñoa (Texto Refundido 2025), Art. 26 subdivisión predial. Predial = Superficie de subdivisión predial mínima. Códigos = capa MINVU PRC_RM_Norte/17 (consulta en tiempo real).",
-  "zonas": {
-   "Z-1": {
-    "predial_min": 500,
-    "constructibilidad": 4.0
-   },
-   "Z-1A": {
-    "predial_min": 500,
-    "constructibilidad": 3.6,
-    "densidad_hab_ha": 1800
-   },
-   "Z-1B": {
-    "predial_min": 500,
-    "constructibilidad": 3.2,
-    "densidad_hab_ha": 1600
-   },
-   "Z-1C": {
-    "predial_min": 500,
-    "constructibilidad": 2.5
-   },
-   "Z-1D": {
-    "predial_min": 500
-   },
-   "Z-2": {
-    "predial_min": 500
-   },
-   "Z-3": {
-    "predial_min": 300
-   },
-   "Z-3A": {
-    "predial_min": 300
-   },
-   "Z-4": {
-    "predial_min": 300
-   },
-   "Z-4A": {
-    "predial_min": 300
-   },
-   "Z-4B": {
-    "predial_min": 300
-   },
-   "Z-4C": {
-    "predial_min": 300
-   },
-   "Z-4C+R": {
-    "predial_min": 300
-   },
-   "Z-4C+RB": {
-    "predial_min": 300
-   },
-   "Z-4m": {
-    "predial_min": 500
-   },
-   "Z-5": {
-    "predial_min": 300
-   },
-   "Z-5A": {
-    "predial_min": 300
-   },
-   "Z-5B": {
-    "predial_min": 6500
-   },
-   "Z-6": {
-    "predial_min": 300
-   }
+  "VITACURA": {
+    "_fuente": "Ordenanza PRC Vitacura (Texto Refundido Marzo 2020), Art. 41 Condiciones de Edificación por Áreas (Cuadros 11-22). Predial = Superficie de Subdivisión Predial Mínima base. Códigos de edificación (E-Ab/E-Am/E-Aa) desde la capa ArcGIS PRC_Vitacura.",
+    "por_edificacion": {
+      "EAb1": {
+        "predial_min": 4000,
+        "constructibilidad": 0.4,
+        "densidad_hab_ha": 17
+      },
+      "EAb2": {
+        "predial_min": 1000,
+        "constructibilidad": 0.5,
+        "densidad_hab_ha": 32
+      },
+      "EAb3": {
+        "predial_min": 500,
+        "constructibilidad": 0.8,
+        "densidad_hab_ha": 56
+      },
+      "EAb4": {
+        "predial_min": 250,
+        "constructibilidad": 0.8,
+        "densidad_hab_ha": 104
+      },
+      "EAm1": {
+        "predial_min": 1000,
+        "constructibilidad": 0.8,
+        "densidad_hab_ha": 216
+      },
+      "EAm2": {
+        "predial_min": 4000,
+        "constructibilidad": 0.4,
+        "densidad_hab_ha": 28
+      },
+      "EAm3": {
+        "predial_min": 1500,
+        "constructibilidad": 1.0,
+        "densidad_hab_ha": 328
+      },
+      "EAm4": {
+        "predial_min": 800,
+        "constructibilidad": 1.0,
+        "densidad_hab_ha": 360
+      },
+      "EAm5": {
+        "predial_min": 1200,
+        "constructibilidad": 1.6,
+        "densidad_hab_ha": 508
+      },
+      "EAm6": {
+        "predial_min": 4000,
+        "constructibilidad": 0.6,
+        "densidad_hab_ha": 84
+      },
+      "EAa1": {
+        "predial_min": 1500,
+        "constructibilidad": 2.0,
+        "densidad_hab_ha": 612
+      },
+      "EAa2": {
+        "predial_min": 1000,
+        "constructibilidad": 2.8,
+        "densidad_hab_ha": 840
+      }
+    },
+    "zonas": {}
+  },
+  "ÑUÑOA": {
+    "_fuente": "Ordenanza PRC Ñuñoa (Texto Refundido 2025), Art. 26 subdivisión predial. Predial = Superficie de subdivisión predial mínima. Códigos = capa MINVU PRC_RM_Norte/17 (consulta en tiempo real).",
+    "zonas": {
+      "Z-1": {
+        "predial_min": 500,
+        "constructibilidad": 4.0
+      },
+      "Z-1A": {
+        "predial_min": 500,
+        "constructibilidad": 3.6,
+        "densidad_hab_ha": 1800
+      },
+      "Z-1B": {
+        "predial_min": 500,
+        "constructibilidad": 3.2,
+        "densidad_hab_ha": 1600
+      },
+      "Z-1C": {
+        "predial_min": 500,
+        "constructibilidad": 2.5
+      },
+      "Z-1D": {
+        "predial_min": 500
+      },
+      "Z-2": {
+        "predial_min": 500
+      },
+      "Z-3": {
+        "predial_min": 300
+      },
+      "Z-3A": {
+        "predial_min": 300
+      },
+      "Z-4": {
+        "predial_min": 300
+      },
+      "Z-4A": {
+        "predial_min": 300
+      },
+      "Z-4B": {
+        "predial_min": 300
+      },
+      "Z-4C": {
+        "predial_min": 300
+      },
+      "Z-4C+R": {
+        "predial_min": 300
+      },
+      "Z-4C+RB": {
+        "predial_min": 300
+      },
+      "Z-4m": {
+        "predial_min": 500
+      },
+      "Z-5": {
+        "predial_min": 300
+      },
+      "Z-5A": {
+        "predial_min": 300
+      },
+      "Z-5B": {
+        "predial_min": 6500
+      },
+      "Z-6": {
+        "predial_min": 300
+      }
+    }
+  },
+  "MACUL": {
+    "_fuente": "Ordenanza PRC Macul (DTO 552/2004 + mod. zonas residenciales mixtas). Subdivisión predial mínima general 300 m² (Art. 9), salvo ZR-6 (160 m²). Constructibilidad = 1er tramo del cuadro de normas.",
+    "zonas": {
+      "ZM-1": {
+        "predial_min": 300,
+        "constructibilidad": 2.5
+      },
+      "ZM-2": {
+        "predial_min": 300,
+        "constructibilidad": 2.0
+      },
+      "ZM-3": {
+        "predial_min": 300,
+        "constructibilidad": 2.0
+      },
+      "ZM-4": {
+        "predial_min": 300,
+        "constructibilidad": 2.0
+      },
+      "ZM-5": {
+        "predial_min": 300,
+        "constructibilidad": 1.5
+      },
+      "ZM-6": {
+        "predial_min": 300
+      },
+      "ZM-7": {
+        "predial_min": 300
+      },
+      "ZR-6": {
+        "predial_min": 160,
+        "constructibilidad": 1.0
+      },
+      "ZR-7": {
+        "predial_min": 300
+      },
+      "ZR-8": {
+        "predial_min": 300
+      }
+    }
+  },
+  "PROVIDENCIA": {
+    "_fuente": "Ordenanza Local PRC Providencia 2007 (incluye FE de errata ORD Nº3544/2007), Art. 3.3.01: subdivisión predial mínima = 800 m² para TODAS las zonas de edificación (valor uniforme, confirmado en los cuadros prediales Art. 4.1.06 de cada zona). Llaves = campo ZONA de la capa MINVU PRC_RM_Norte/21 (zonas de uso). Constructibilidad varía por zona de edificación (no por zona de uso) y se omite.",
+    "zonas": {
+      "UR": {
+        "predial_min": 800
+      },
+      "UpR y E": {
+        "predial_min": 800
+      },
+      "UpR y E-CC": {
+        "predial_min": 800
+      },
+      "UpR y ECr": {
+        "predial_min": 800
+      },
+      "UpR y Er": {
+        "predial_min": 800
+      },
+      "UpEC": {
+        "predial_min": 800
+      },
+      "UpAp e Ir": {
+        "predial_min": 800
+      },
+      "ZE": {
+        "predial_min": 800
+      },
+      "ZEMoI": {
+        "predial_min": 800
+      },
+      "ZIM": {
+        "predial_min": 800
+      }
+    }
+  },
+  "PEÑALOLÉN": {
+    "_fuente": "Ordenanza PRC Peñalolén (Decreto 55/1989), Art. 29 - subdivisión predial por zona (fila 'Para Vivienda'). Cobertura parcial: zonas R4-R11 y ZHM-* (modificación posterior) pendientes de la Ordenanza modificada.",
+    "zonas": {
+      "R.1": {
+        "predial_min": 200,
+        "constructibilidad": 1.0,
+        "densidad_hab_ha": 196
+      },
+      "R.2": {
+        "predial_min": 100,
+        "constructibilidad": 1.4,
+        "densidad_hab_ha": 385
+      },
+      "R.3": {
+        "predial_min": 160,
+        "constructibilidad": 1.0,
+        "densidad_hab_ha": 200
+      },
+      "S.M.1": {
+        "predial_min": 120,
+        "constructibilidad": 2.8,
+        "densidad_hab_ha": 385
+      },
+      "S.M.2": {
+        "predial_min": 120,
+        "constructibilidad": 2.8,
+        "densidad_hab_ha": 385
+      },
+      "Z.1": {
+        "predial_min": 480,
+        "constructibilidad": 0.4,
+        "densidad_hab_ha": 150
+      }
+    }
+  },
+  "LA FLORIDA": {
+    "_fuente": "Ordenanza PRC La Florida (Texto Refundido Sept 2016), Cap. 9 'Zonas del Sector Centro' (norma de edificación y uso conjunta, Art. 29): subdivisión predial mínima por zona. Llaves = campo ZONA capa MINVU PRC_RM_Sur/5.",
+    "_cobertura_parcial": "Solo zonas del Sector Centro (Z-AA*/Z-AM), que tienen norma conjunta. Las zonas de USO U-VEV1-4 y U-EC1/3/4 NO se pueden cargar: en La Florida el predial se define por ÁREA DE EDIFICACIÓN (E-AB/E-AM/E-AA, plano PRLF-1), un overlay distinto del de uso (plano PRLF-2) que entrega la capa. El cruce uso->edificación es espacial (Art. 28) y la capa MINVU no expone el campo de edificación. ZRM-DT (modificación posterior) sin predial extraíble.",
+    "zonas": {
+      "Z-AA1": {
+        "predial_min": 1000
+      },
+      "Z-AA2": {
+        "predial_min": 1000
+      },
+      "Z-AA+CB/CM": {
+        "predial_min": 1000
+      },
+      "Z-AA+CM": {
+        "predial_min": 1500
+      },
+      "Z-AM": {
+        "predial_min": 1000
+      }
+    }
+  },
+  "LA REINA": {
+    "_fuente": "Ordenanza PRC La Reina (Memoria y Ordenanza, PDF escaneado, OCR local con tesseract). Art. 24+ 'Usos de Suelo y Normas Específicas' por zona. Predial = 'Superficie Predial Mínima' columna LOTEOS (subdivisión predial mínima). Llaves = campo ZONA capa MINVU PRC_RM_Norte/10.",
+    "_cobertura_parcial": "Cargadas zonas base A-K y subzonas con misma función (NOM) que su zona madre. NO cargadas por incerteza: C-1/C-2/C-3 (la capa las rotula 'Equipamiento y Residencial Complementario', función distinta a Zona C; esta Ordenanza no las desglosa), O, R-6, ZEE (no figuran en esta Ordenanza, probable modificación posterior), J-2 (protección ecológica), L-1/L-2 (equipamiento metrop.), M-1..M-5/PC-*/PV-* (áreas verdes y polos de equipamiento). Valores OCR (eng); verificar B=7000 y los altos.",
+    "zonas": {
+      "A": {
+        "predial_min": 300
+      },
+      "A-1": {
+        "predial_min": 300
+      },
+      "A-2": {
+        "predial_min": 300
+      },
+      "B": {
+        "predial_min": 7000
+      },
+      "C": {
+        "predial_min": 300
+      },
+      "C-4": {
+        "predial_min": 300
+      },
+      "C-5": {
+        "predial_min": 300
+      },
+      "D": {
+        "predial_min": 600
+      },
+      "E": {
+        "predial_min": 100
+      },
+      "F": {
+        "predial_min": 1500
+      },
+      "G": {
+        "predial_min": 800
+      },
+      "H": {
+        "predial_min": 2000
+      },
+      "I": {
+        "predial_min": 10000
+      },
+      "J-1": {
+        "predial_min": 2000
+      },
+      "K": {
+        "predial_min": 200
+      }
+    }
+  },
+  "SAN MIGUEL": {
+    "_fuente": "Ordenanza PRC San Miguel VIGENTE (Decreto N°2500, D.O. 25/11/2016), planos PRSM-1. PDF escaneado, OCR local. Art. 10: subdivisión predial mínima general comuna = 250 m². Cuadros de Normas de Edificación y Subdivisión por zona (columna Uso Residencial). Llaves = campo ZONA capa MINVU PRC_RM_Sur/23.",
+    "_nota": "Cargadas las zonas residenciales Z-1..Z-7 y ZU-2. No cargadas (no residenciales / sin cuadro de subdivisión propio): EC-1/EC-2 (equip. comunal), EM1 (equip. metrop., predial 2000), ES (salud), AC1/AC2/AM1 (áreas verdes), ZCH (conservación histórica, se rige por Art. 23). ZU-2=2500 verificar (zona de renovación, predio grande).",
+    "zonas": {
+      "Z-1": {
+        "predial_min": 600
+      },
+      "Z-2": {
+        "predial_min": 250
+      },
+      "Z-3": {
+        "predial_min": 250
+      },
+      "Z-4": {
+        "predial_min": 250
+      },
+      "Z-5": {
+        "predial_min": 250
+      },
+      "Z-6": {
+        "predial_min": 250
+      },
+      "Z-7": {
+        "predial_min": 500
+      },
+      "ZU-2": {
+        "predial_min": 2500
+      }
+    }
+  },
+  "INDEPENDENCIA": {
+    "_fuente": "Ordenanza PRC Independencia (Decreto 179/2014, independencia.cl), Art. 12 'Usos de Suelo y Condiciones de Subdivisión y Edificación', fila Superficie Predial Mínima (uso residencial). Procesada vía web_fetch. Llaves = campo ZONA capa MINVU PRC_RM_Norte/9.",
+    "_nota": "No cargadas: P-1-1-2 y P-2-1-1 (sin cuadro de predial propio, remiten a normas específicas), RD-2 y AV (áreas verdes). A-1P = Ordenanza 'A-1-P'.",
+    "zonas": {
+      "A": {
+        "predial_min": 200
+      },
+      "A-1": {
+        "predial_min": 200
+      },
+      "A-1P": {
+        "predial_min": 200
+      },
+      "B": {
+        "predial_min": 200
+      },
+      "B-P": {
+        "predial_min": 200
+      },
+      "C": {
+        "predial_min": 300
+      },
+      "C-1": {
+        "predial_min": 300
+      },
+      "C-2": {
+        "predial_min": 300
+      },
+      "C-P": {
+        "predial_min": 300
+      },
+      "D": {
+        "predial_min": 500
+      },
+      "EQ": {
+        "predial_min": 2500
+      },
+      "EQ-1": {
+        "predial_min": 1000
+      },
+      "P-1-1-1": {
+        "predial_min": 300
+      },
+      "P-2-1-2": {
+        "predial_min": 300
+      },
+      "RD-1": {
+        "predial_min": 2500
+      }
+    }
+  },
+  "MAIPU": {
+    "_fuente": "Ordenanza PRC Maipú (Decreto 6383/2004), cuadros 'Condiciones de edificación y subdivisión', columna Vivienda (unifamiliar). Llaves = campo ZONA capa MINVU PRC_RM_Sur/10.",
+    "zonas": {
+      "ZC-1": {
+        "predial_min": 1500
+      },
+      "ZC-2": {
+        "predial_min": 500
+      },
+      "ZC-3": {
+        "predial_min": 250
+      },
+      "ZC-4": {
+        "predial_min": 200
+      },
+      "ZH-1": {
+        "predial_min": 2500
+      },
+      "ZH-2": {
+        "predial_min": 250
+      },
+      "ZH-3": {
+        "predial_min": 180
+      },
+      "ZH-4": {
+        "predial_min": 200
+      },
+      "ZH-5": {
+        "predial_min": 300
+      },
+      "ZH-6": {
+        "predial_min": 200
+      },
+      "ZH-7": {
+        "predial_min": 200
+      },
+      "ZH-8": {
+        "predial_min": 200
+      },
+      "ZH-9": {
+        "predial_min": 200
+      },
+      "ZH-10": {
+        "predial_min": 250
+      },
+      "ZE-5": {
+        "predial_min": 250
+      }
+    },
+    "_nota": "COMPLETA. ZC-1..4 y ZH-1..10 + ZE-5 (equip. comunitario con vivienda, 250 unifam/1000 multifam). PDF 65 pág procesado localmente con pdfplumber. ZH-8/ZH-9 multifamiliar=500/1500; se carga el predial unifamiliar como base."
+  },
+  "PUENTE ALTO": {
+    "_fuente": "Ordenanza PRC Puente Alto (transparencia.mpuentealto.cl), cuadros por zona, fila Superficie Predial Mínima (columna vivienda). Vía web_fetch. Llaves = capa MINVU PRC_RM_Sur/20.",
+    "zonas": {
+      "H1": {
+        "predial_min": 150
+      },
+      "H2": {
+        "predial_min": 200
+      },
+      "H3": {
+        "predial_min": 200
+      },
+      "H4": {
+        "predial_min": 150
+      },
+      "H5": {
+        "predial_min": 300
+      },
+      "H6": {
+        "predial_min": 450
+      },
+      "HET1": {
+        "predial_min": 800
+      },
+      "HE(m)1": {
+        "predial_min": 600
+      },
+      "HE(m)2": {
+        "predial_min": 600
+      }
+    }
+  },
+  "SANTIAGO": {
+    "_fuente": "Ordenanza PRC Santiago (Texto Refundido 2021, munistgo.cl), cuadros 'Superficie subdivisión predial mínima' por zona. PDF subido, pdfplumber. Llaves = capa MINVU PRC_RM_Norte/31.",
+    "_nota": "Residenciales A/B/D/E = 150 m². Omitidas: F y F-Pq* (parques), G (zona especial baja ocupación sin predial residencial), H (Club Hípico, 34 há), y los sufijos -EI (equipamiento intercomunal en predios institucionales específicos: Diego Portales, PUC, Hospital San Borja, etc.).",
+    "zonas": {
+      "A": {
+        "predial_min": 150
+      },
+      "B": {
+        "predial_min": 150
+      },
+      "D": {
+        "predial_min": 150
+      },
+      "E": {
+        "predial_min": 150
+      }
+    }
+  },
+  "LA CISTERNA": {
+    "_fuente": "Ordenanza PRC La Cisterna (Art. 19, Cuadro de Normas Urbanísticas y de Edificación por zona, 1ª fila Sup. predial mín). Vía web_fetch. Llaves = capa MINVU PRC_RM_Sur/4. ZU-5A/ZU-7A = Subsector A (restricción aérea) de ZU-5/ZU-7, mismo predial.",
+    "zonas": {
+      "ZU-1": {
+        "predial_min": 1000
+      },
+      "ZU-2": {
+        "predial_min": 500
+      },
+      "ZU-3": {
+        "predial_min": 500
+      },
+      "ZU-4": {
+        "predial_min": 500
+      },
+      "ZU-5": {
+        "predial_min": 160
+      },
+      "ZU-5A": {
+        "predial_min": 160
+      },
+      "ZU-6": {
+        "predial_min": 1000
+      },
+      "ZU-7": {
+        "predial_min": 500
+      },
+      "ZU-7A": {
+        "predial_min": 500
+      },
+      "ZU-9": {
+        "predial_min": 1500
+      }
+    }
+  },
+  "CERRO NAVIA": {
+    "_fuente": "Ordenanza PRC Cerro Navia (Decreto 1760/2019), sección 'Condiciones de Subdivisión' por zona. Vía web_fetch. Llaves = capa MINVU PRC_RM_Norte/4. Equipamiento (ED/EE/EI/ES/RD) y parques omitidos.",
+    "zonas": {
+      "H1": {
+        "predial_min": 200
+      },
+      "H2": {
+        "predial_min": 200
+      },
+      "HE": {
+        "predial_min": 400
+      },
+      "HT": {
+        "predial_min": 200
+      },
+      "ZM": {
+        "predial_min": 1000
+      }
+    }
+  },
+  "RENCA": {
+    "_fuente": "Ordenanza PRC Renca (Decreto 214/2022), Cuadros 'Normas urbanísticas de subdivisión y/o edificación' por zona, fila Superficie de subdivisión predial mínima (m²). Vía web_fetch. Llaves = capa MINVU PRC_RM_Norte/29. Equipamiento (EP/EE), industrial (I), resguardo y áreas verdes omitidos.",
+    "zonas": {
+      "HM-1": {
+        "predial_min": 160
+      },
+      "HM-2": {
+        "predial_min": 500
+      },
+      "HM-3": {
+        "predial_min": 500
+      },
+      "HM-4": {
+        "predial_min": 500
+      },
+      "RM": {
+        "predial_min": 2000
+      },
+      "HT-1": {
+        "predial_min": 160
+      },
+      "HT-2": {
+        "predial_min": 160
+      },
+      "HT-3": {
+        "predial_min": 500
+      },
+      "HT-4": {
+        "predial_min": 160
+      }
+    }
+  },
+  "RECOLETA": {
+    "_fuente": "Ordenanza PRC Recoleta (planos PRR-01 uso / PRR-02 edificacion). El predial vive en las AREAS E de edificacion (PRR-02): E-A1/A2=600, E-M1/M2/M3=600, E-B1=160 (vivienda), E-B2=10000 (equip). La capa MINVU PRC_RM_Norte/24 expone las ZONAS U de uso (PRR-01, nombres de sector).",
+    "_cobertura_parcial": "Bloqueo estructural tipo La Florida: predial = overlay de edificacion (PRR-02), capa = overlay de uso (PRR-01). Cargados solo los sectores de uso que caen INTEGRAMENTE en areas de edificacion de 600 m2 (Bellavista=E-M3, La Vega/Patronato=E-M1/M2/A1/A2, Mexico Centro=E-M1). NO cargado \"Area Norte y Oriente\" (U-H): cruza E-B1=160 norte y E-M3=600 oriente, requiere plano PRR-02 para desambiguar. Los Turistas=E-B2 (equip 10000, sin vivienda). Tirso de Molina/Entrecerros = Z-S sin subdivision.",
+    "zonas": {
+      "Barrio Bellavista": {
+        "predial_min": 600
+      },
+      "Barrio la Vega, Barrio Patronato y ejes comunales": {
+        "predial_min": 600
+      },
+      "México Centro": {
+        "predial_min": 600
+      }
+    }
+  },
+  "SAN JOAQUIN": {
+    "_fuente": "Ordenanza PRC San Joaquin (Actualizacion, PRC 2019), \"Normas de Urbanizacion y/o Edificacion\", linea Superficie de Subdivision Predial Minima. PDF de texto procesado con pdfplumber. Llaves = campo ZONA capa MINVU PRC_RM_Sur (ZU2a/2b/4/5/6/8/12).",
+    "_nota": "Cargadas las zonas residenciales mixtas ZU2a..ZU12. Predial uniforme por zona salvo ZU12: la capa expone el codigo base ZU12 pero el predial se diferencia por subzona (ZU12(1)(2)(4)(5)(6)=2000, ZU12(3)=500); se carga 2000 (5 de 6 subzonas). No cargadas: ZAPP/ZAPR (act. productivas+vivienda), ZE/ZED/ZI (equip/infra), areas verdes.",
+    "zonas": {
+      "ZU2a": {
+        "predial_min": 125
+      },
+      "ZU2b": {
+        "predial_min": 180
+      },
+      "ZU4": {
+        "predial_min": 200
+      },
+      "ZU5": {
+        "predial_min": 500
+      },
+      "ZU6": {
+        "predial_min": 1200
+      },
+      "ZU8": {
+        "predial_min": 1000
+      },
+      "ZU12": {
+        "predial_min": 2000
+      }
+    }
+  },
+  "EL BOSQUE": {
+    "_fuente": "Enmienda Ordenanza PRC El Bosque 2025 (EPRC25), texto refundido D.O. N°44.360 del 27-ene-2026, linea \"Superficie predial minima\" col. Otros usos (vivienda). Codigos = campo ZONA REAL capa MINVU PRC_RM_Sur/2 (verificado via geoide 25-jun-2026).",
+    "_nota": "Mapeo Ordenanza->capa: ZONA C=300; H/HC=160; R/RC=160; ZONA 1-2-3 = codigos 1/1C/2/2C/3AMIR/3AMIRC/3AR/3ARC=210; Lo Moreno Z-A = LM/LMC=200; ZONA 4 = 4AI=1500 (industrial). El sufijo C = variante edificacion continua (mismo predial). NO cargadas: \"a\"/\"f\" (areas de riesgo/area verde) y variantes \"3AMIR/ a\",\"3AR/ a\" (overlay alto riesgo: Art. no permite nuevas subdivisiones).",
+    "zonas": {
+      "C": {
+        "predial_min": 300
+      },
+      "H": {
+        "predial_min": 160
+      },
+      "HC": {
+        "predial_min": 160
+      },
+      "R": {
+        "predial_min": 160
+      },
+      "RC": {
+        "predial_min": 160
+      },
+      "1": {
+        "predial_min": 210
+      },
+      "1C": {
+        "predial_min": 210
+      },
+      "2": {
+        "predial_min": 210
+      },
+      "2C": {
+        "predial_min": 210
+      },
+      "3AMIR": {
+        "predial_min": 210
+      },
+      "3AMIRC": {
+        "predial_min": 210
+      },
+      "3AR": {
+        "predial_min": 210
+      },
+      "3ARC": {
+        "predial_min": 210
+      },
+      "LM": {
+        "predial_min": 200
+      },
+      "LMC": {
+        "predial_min": 200
+      },
+      "4AI": {
+        "predial_min": 1500
+      }
+    }
+  },
+  "QUINTA NORMAL": {
+    "_fuente": "PRC Quinta Normal, actualizacion 2019 (planos PRCQN-2019-Z / PRCQN-2019-VZR), Titulo II Cap.1 \"Normas de Edificacion y Subdivision\", linea Superficie de Subdivision Predial Minima. PDF escaneado (43 pag), OCR local (tesseract eng 300 DPI + crop por celda); valores criticos (E,I,J,K + headers) verificados visualmente. Capa MINVU PRC_RM_Norte.",
+    "_nota": "Zonas A-O codificadas por letra. Residenciales/mixtas con vivienda: A,B (preferente residencial), C,D,E,F,H,L,N (mixta residencial+equipamiento). I,J,K = ejes preferentes equipamiento/comercio (admiten vivienda). G = Influencia Gruta de Lourdes (especial). M, O = mixta industrial/equip (vivienda restringida). VERIFICAR que la capa MINVU use estos codigos de letra (geoide timeout al consultar campo ZONA).",
+    "zonas": {
+      "A": {
+        "predial_min": 120
+      },
+      "B": {
+        "predial_min": 300
+      },
+      "C": {
+        "predial_min": 500
+      },
+      "D": {
+        "predial_min": 500
+      },
+      "E": {
+        "predial_min": 500
+      },
+      "F": {
+        "predial_min": 2000
+      },
+      "G": {
+        "predial_min": 300
+      },
+      "H": {
+        "predial_min": 2000
+      },
+      "I": {
+        "predial_min": 1000
+      },
+      "J": {
+        "predial_min": 1000
+      },
+      "K": {
+        "predial_min": 800
+      },
+      "L": {
+        "predial_min": 800
+      },
+      "M": {
+        "predial_min": 2500
+      },
+      "N": {
+        "predial_min": 2000
+      },
+      "O": {
+        "predial_min": 2500
+      }
+    }
   }
- },
- "MACUL": {
-  "_fuente": "Ordenanza PRC Macul (DTO 552/2004 + mod. zonas residenciales mixtas). Subdivisión predial mínima general 300 m² (Art. 9), salvo ZR-6 (160 m²). Constructibilidad = 1er tramo del cuadro de normas.",
-  "zonas": {
-   "ZM-1": {
-    "predial_min": 300,
-    "constructibilidad": 2.5
-   },
-   "ZM-2": {
-    "predial_min": 300,
-    "constructibilidad": 2.0
-   },
-   "ZM-3": {
-    "predial_min": 300,
-    "constructibilidad": 2.0
-   },
-   "ZM-4": {
-    "predial_min": 300,
-    "constructibilidad": 2.0
-   },
-   "ZM-5": {
-    "predial_min": 300,
-    "constructibilidad": 1.5
-   },
-   "ZM-6": {
-    "predial_min": 300
-   },
-   "ZM-7": {
-    "predial_min": 300
-   },
-   "ZR-6": {
-    "predial_min": 160,
-    "constructibilidad": 1.0
-   },
-   "ZR-7": {
-    "predial_min": 300
-   },
-   "ZR-8": {
-    "predial_min": 300
-   }
-  }
- },
- "PROVIDENCIA": {
-  "_fuente": "Ordenanza Local PRC Providencia 2007 (incluye FE de errata ORD Nº3544/2007), Art. 3.3.01: subdivisión predial mínima = 800 m² para TODAS las zonas de edificación (valor uniforme, confirmado en los cuadros prediales Art. 4.1.06 de cada zona). Llaves = campo ZONA de la capa MINVU PRC_RM_Norte/21 (zonas de uso). Constructibilidad varía por zona de edificación (no por zona de uso) y se omite.",
-  "zonas": {
-   "UR": {
-    "predial_min": 800
-   },
-   "UpR y E": {
-    "predial_min": 800
-   },
-   "UpR y E-CC": {
-    "predial_min": 800
-   },
-   "UpR y ECr": {
-    "predial_min": 800
-   },
-   "UpR y Er": {
-    "predial_min": 800
-   },
-   "UpEC": {
-    "predial_min": 800
-   },
-   "UpAp e Ir": {
-    "predial_min": 800
-   },
-   "ZE": {
-    "predial_min": 800
-   },
-   "ZEMoI": {
-    "predial_min": 800
-   },
-   "ZIM": {
-    "predial_min": 800
-   }
-  }
- },
- "PEÑALOLÉN": {
-  "_fuente": "Ordenanza PRC Peñalolén (Decreto 55/1989), Art. 29 - subdivisión predial por zona (fila 'Para Vivienda'). Cobertura parcial: zonas R4-R11 y ZHM-* (modificación posterior) pendientes de la Ordenanza modificada.",
-  "zonas": {
-   "R.1": {
-    "predial_min": 200,
-    "constructibilidad": 1.0,
-    "densidad_hab_ha": 196
-   },
-   "R.2": {
-    "predial_min": 100,
-    "constructibilidad": 1.4,
-    "densidad_hab_ha": 385
-   },
-   "R.3": {
-    "predial_min": 160,
-    "constructibilidad": 1.0,
-    "densidad_hab_ha": 200
-   },
-   "S.M.1": {
-    "predial_min": 120,
-    "constructibilidad": 2.8,
-    "densidad_hab_ha": 385
-   },
-   "S.M.2": {
-    "predial_min": 120,
-    "constructibilidad": 2.8,
-    "densidad_hab_ha": 385
-   },
-   "Z.1": {
-    "predial_min": 480,
-    "constructibilidad": 0.4,
-    "densidad_hab_ha": 150
-   }
-  }
- },
- "LA FLORIDA": {
-  "_fuente": "Ordenanza PRC La Florida (Texto Refundido Sept 2016), Cap. 9 'Zonas del Sector Centro' (norma de edificación y uso conjunta, Art. 29): subdivisión predial mínima por zona. Llaves = campo ZONA capa MINVU PRC_RM_Sur/5.",
-  "_cobertura_parcial": "Solo zonas del Sector Centro (Z-AA*/Z-AM), que tienen norma conjunta. Las zonas de USO U-VEV1-4 y U-EC1/3/4 NO se pueden cargar: en La Florida el predial se define por ÁREA DE EDIFICACIÓN (E-AB/E-AM/E-AA, plano PRLF-1), un overlay distinto del de uso (plano PRLF-2) que entrega la capa. El cruce uso->edificación es espacial (Art. 28) y la capa MINVU no expone el campo de edificación. ZRM-DT (modificación posterior) sin predial extraíble.",
-  "zonas": {
-   "Z-AA1": {
-    "predial_min": 1000
-   },
-   "Z-AA2": {
-    "predial_min": 1000
-   },
-   "Z-AA+CB/CM": {
-    "predial_min": 1000
-   },
-   "Z-AA+CM": {
-    "predial_min": 1500
-   },
-   "Z-AM": {
-    "predial_min": 1000
-   }
-  }
- },
- "LA REINA": {
-  "_fuente": "Ordenanza PRC La Reina (Memoria y Ordenanza, PDF escaneado, OCR local con tesseract). Art. 24+ 'Usos de Suelo y Normas Específicas' por zona. Predial = 'Superficie Predial Mínima' columna LOTEOS (subdivisión predial mínima). Llaves = campo ZONA capa MINVU PRC_RM_Norte/10.",
-  "_cobertura_parcial": "Cargadas zonas base A-K y subzonas con misma función (NOM) que su zona madre. NO cargadas por incerteza: C-1/C-2/C-3 (la capa las rotula 'Equipamiento y Residencial Complementario', función distinta a Zona C; esta Ordenanza no las desglosa), O, R-6, ZEE (no figuran en esta Ordenanza, probable modificación posterior), J-2 (protección ecológica), L-1/L-2 (equipamiento metrop.), M-1..M-5/PC-*/PV-* (áreas verdes y polos de equipamiento). Valores OCR (eng); verificar B=7000 y los altos.",
-  "zonas": {
-   "A": {
-    "predial_min": 300
-   },
-   "A-1": {
-    "predial_min": 300
-   },
-   "A-2": {
-    "predial_min": 300
-   },
-   "B": {
-    "predial_min": 7000
-   },
-   "C": {
-    "predial_min": 300
-   },
-   "C-4": {
-    "predial_min": 300
-   },
-   "C-5": {
-    "predial_min": 300
-   },
-   "D": {
-    "predial_min": 600
-   },
-   "E": {
-    "predial_min": 100
-   },
-   "F": {
-    "predial_min": 1500
-   },
-   "G": {
-    "predial_min": 800
-   },
-   "H": {
-    "predial_min": 2000
-   },
-   "I": {
-    "predial_min": 10000
-   },
-   "J-1": {
-    "predial_min": 2000
-   },
-   "K": {
-    "predial_min": 200
-   }
-  }
- },
- "SAN MIGUEL": {
-  "_fuente": "Ordenanza PRC San Miguel VIGENTE (Decreto N°2500, D.O. 25/11/2016), planos PRSM-1. PDF escaneado, OCR local. Art. 10: subdivisión predial mínima general comuna = 250 m². Cuadros de Normas de Edificación y Subdivisión por zona (columna Uso Residencial). Llaves = campo ZONA capa MINVU PRC_RM_Sur/23.",
-  "_nota": "Cargadas las zonas residenciales Z-1..Z-7 y ZU-2. No cargadas (no residenciales / sin cuadro de subdivisión propio): EC-1/EC-2 (equip. comunal), EM1 (equip. metrop., predial 2000), ES (salud), AC1/AC2/AM1 (áreas verdes), ZCH (conservación histórica, se rige por Art. 23). ZU-2=2500 verificar (zona de renovación, predio grande).",
-  "zonas": {
-   "Z-1": {
-    "predial_min": 600
-   },
-   "Z-2": {
-    "predial_min": 250
-   },
-   "Z-3": {
-    "predial_min": 250
-   },
-   "Z-4": {
-    "predial_min": 250
-   },
-   "Z-5": {
-    "predial_min": 250
-   },
-   "Z-6": {
-    "predial_min": 250
-   },
-   "Z-7": {
-    "predial_min": 500
-   },
-   "ZU-2": {
-    "predial_min": 2500
-   }
-  }
- }
 }
