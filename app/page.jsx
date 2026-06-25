@@ -1483,7 +1483,7 @@ function FormComprador({ onBack }) {
         if (mapObj.current) return
         const map = new g.Map(mapRef.current, {
           center: { lat: -33.45, lng: -70.62 }, zoom: 12,
-          mapTypeControl: false, streetViewControl: false, fullscreenControl: false,
+          mapTypeControl: false, streetViewControl: false, fullscreenControl: false, clickableIcons: false,
         })
         mapObj.current = map
 
