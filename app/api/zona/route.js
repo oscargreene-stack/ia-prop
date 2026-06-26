@@ -370,9 +370,28 @@ export async function POST(request) {
       }
     }
 
+    // Ventas similares para el mapa del comprador (mismas comparables: tipo + m² parecidos).
+    const ventas_mapa = filtradas
+      .map((v) => {
+        const la = parseFloat(v.lat), ln = parseFloat(v.lng), uf = Math.round(parseFloat(v.price))
+        const m2c = Math.round(parseFloat(v.superficie_construccion))
+        if (!Number.isFinite(la) || !Number.isFinite(ln) || !(uf > 0)) return null
+        return {
+          lat: la, lng: ln, uf,
+          m2: m2c > 0 ? m2c : null,
+          uf_m2: m2c > 0 ? Math.round(uf / m2c) : null,
+          fecha: String(v.date_inscripcion || v.fecha || '').slice(0, 10),
+          dir: String(v.direccion_sii || '').replace(/\s+/g, ' ').trim() || null,
+        }
+      })
+      .filter(Boolean)
+      .sort((a, b) => (a.fecha < b.fecha ? 1 : -1))
+      .slice(0, 150)
+
     return Response.json({
       _modo: 'real',
       tipo: objetivo,
+      ventas_mapa,
       sector: { lat: punto.lat, lng: punto.lng, comuna: comuna || null, por_mapa: !!userPoly },
       // Mercado (UF/m² construido). Para depto/oficina/comercial es la métrica principal.
       precio_sector: { uf_m2_mediana: med, uf_m2_p25: p25, uf_m2_p75: p75, n_comparables: n, confianza },
