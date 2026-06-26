@@ -1452,11 +1452,68 @@ function FCBold({ text }) {
   )
 }
 
+// Ficha de propiedad (modal, diseño propio) — se abre al pinchar una venta del mapa.
+const FC_DESTINO = { H: 'Habitacional', A: 'Bodega/Almacén', B: 'Bodega', C: 'Comercio', D: 'Educación/Culto', E: 'Educación', G: 'Hotel/Turismo', I: 'Industria', P: 'Estacionamiento', S: 'Sitio/Terreno' }
+function FichaPropiedad({ venta, onClose }) {
+  const satRef = useRef(null)
+  useEffect(() => {
+    if (!venta) return
+    let cancel = false
+    fcLoadGmaps().then(() => {
+      const g = window.google && window.google.maps
+      if (cancel || !g || !satRef.current) return
+      const m = new g.Map(satRef.current, { center: { lat: venta.lat, lng: venta.lng }, zoom: 19, mapTypeId: 'satellite', mapTypeControl: false, streetViewControl: false, fullscreenControl: false })
+      new g.Marker({ position: { lat: venta.lat, lng: venta.lng }, map: m })
+    })
+    return () => { cancel = true }
+  }, [venta])
+  if (!venta) return null
+  const ufStr = (n) => (n ? Number(n).toLocaleString('es-CL') + ' UF' : '—')
+  const clpStr = (n) => (n ? '$' + Number(n).toLocaleString('es-CL') : '—')
+  const destino = FC_DESTINO[venta.destino] || venta.destino || '—'
+  const items = [
+    ['Precio de venta', ufStr(venta.uf)],
+    ['UF/m²', venta.uf_m2 ? venta.uf_m2 + ' UF/m²' : '—'],
+    ['Fecha de venta', venta.fecha || '—'],
+    ['Sup. construida', venta.m2 ? venta.m2 + ' m²' : '—'],
+    ['Sup. terreno', venta.m2_terreno ? venta.m2_terreno + ' m²' : '—'],
+    ['Año construcción', venta.ano || '—'],
+    ['Destino', destino],
+    ['Avalúo fiscal', clpStr(venta.avaluo_clp)],
+    ['Contribuciones', venta.contrib_clp ? clpStr(venta.contrib_clp) + ' /trim.' : '—'],
+    ['ROL', venta.rol || '—'],
+  ]
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: '#fff', color: '#1a1a1a', borderRadius: 16, width: '100%', maxWidth: 640, maxHeight: '90vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.4)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid #eee' }}>
+          <div>
+            <div style={{ fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: '#c0392b', fontWeight: 700 }}>Detalle de propiedad</div>
+            <div style={{ fontSize: 17, fontWeight: 700, marginTop: 2 }}>{venta.dir || 'Propiedad'}</div>
+          </div>
+          <button onClick={onClose} style={{ border: 'none', background: '#f1f1f1', borderRadius: 8, width: 32, height: 32, fontSize: 18, cursor: 'pointer', color: '#555' }}>×</button>
+        </div>
+        <div ref={satRef} style={{ width: '100%', height: 220, background: '#e9e9e9' }} />
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 1, background: '#eee' }}>
+          {items.map(([l, val], i) => (
+            <div key={i} style={{ background: '#fff', padding: '12px 16px' }}>
+              <div style={{ fontSize: 11, color: '#888', textTransform: 'uppercase', letterSpacing: 0.5 }}>{l}</div>
+              <div style={{ fontSize: 15, fontWeight: 600, marginTop: 2 }}>{val}</div>
+            </div>
+          ))}
+        </div>
+        <div style={{ padding: '10px 16px', fontSize: 11, color: '#999', borderTop: '1px solid #eee' }}>Datos de transacciones registradas (CBR/SII). Propietario y material: próximamente.</div>
+      </div>
+    </div>
+  )
+}
+
 // Mapa reutilizable de ventas (pastillas de precio + clusters), modelo Data Inmobiliaria.
 function VentasMapa({ ventas, titulo }) {
   const mapRef = useRef(null)
   const mkRef = useRef([])
   const iwRef = useRef(null)
+  const [sel, setSel] = useState(null)
   useEffect(() => {
     if (!Array.isArray(ventas) || ventas.length === 0) return
     let cancel = false
@@ -1512,12 +1569,7 @@ function VentasMapa({ ventas, titulo }) {
             if (arr.length === 1) {
               const v = arr[0]
               const mk = new g.Marker({ position: { lat: v.lat, lng: v.lng }, map, icon: pillIcon(fmtK(v.uf) + ' UF') })
-              mk.addListener('click', () => {
-                const html = `<div style="font-family:Arial,sans-serif;font-size:13px;line-height:1.5;color:#1a1a1a"><b>${fmtK(v.uf)} UF</b>${v.uf_m2 ? ' &middot; ' + v.uf_m2 + ' UF/m&sup2;' : ''}${v.m2 ? '<br>' + v.m2 + ' m&sup2; construidos' : ''}${v.fecha ? '<br>Venta: ' + v.fecha : ''}${v.dir ? '<br>' + v.dir : ''}</div>`
-                iwRef.current.setContent(html)
-                iwRef.current.setPosition({ lat: v.lat, lng: v.lng })
-                iwRef.current.open(map)
-              })
+              mk.addListener('click', () => setSel(v))
               mkRef.current.push(mk)
             } else {
               let la = 0, ln = 0
@@ -1542,11 +1594,14 @@ function VentasMapa({ ventas, titulo }) {
   }, [ventas])
   if (!Array.isArray(ventas) || ventas.length === 0) return null
   return (
-    <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(202,161,90,0.25)' }}>
-      <div style={{ fontWeight: 700, color: 'var(--gold-light)', marginBottom: 8 }}>🗺️ {titulo} ({ventas.length})</div>
-      <div ref={mapRef} style={{ width: '100%', height: 360, borderRadius: 12, border: '1px solid rgba(255,255,255,0.12)', overflow: 'hidden' }} />
-      <div style={{ fontSize: 12, color: '#9a9a9a', marginTop: 6 }}>Cada pastilla es una venta registrada (precio en UF). Tocá un grupo para acercarte, o una venta para ver el detalle.</div>
-    </div>
+    <>
+      <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(202,161,90,0.25)' }}>
+        <div style={{ fontWeight: 700, color: 'var(--gold-light)', marginBottom: 8 }}>🗺️ {titulo} ({ventas.length})</div>
+        <div ref={mapRef} style={{ width: '100%', height: 360, borderRadius: 12, border: '1px solid rgba(255,255,255,0.12)', overflow: 'hidden' }} />
+        <div style={{ fontSize: 12, color: '#9a9a9a', marginTop: 6 }}>Cada pastilla es una venta registrada (precio en UF). Tocá un grupo para acercarte, o una venta para ver su ficha.</div>
+      </div>
+      {sel && <FichaPropiedad venta={sel} onClose={() => setSel(null)} />}
+    </>
   )
 }
 

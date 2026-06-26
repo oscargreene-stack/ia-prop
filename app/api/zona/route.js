@@ -376,12 +376,21 @@ export async function POST(request) {
         const la = parseFloat(v.lat), ln = parseFloat(v.lng), uf = Math.round(parseFloat(v.price))
         const m2c = Math.round(parseFloat(v.superficie_construccion))
         if (!Number.isFinite(la) || !Number.isFinite(ln) || !(uf > 0)) return null
+        const ter = parseFloat(v.superficie_total_terreno)
+        const av = parseFloat(v.avaluo_fiscal_clp)
+        const co = parseFloat(v.contribuciones_clp)
         return {
           lat: la, lng: ln, uf,
           m2: m2c > 0 ? m2c : null,
           uf_m2: m2c > 0 ? Math.round(uf / m2c) : null,
           fecha: String(v.date_inscripcion || v.fecha || '').slice(0, 10),
           dir: String(v.direccion_sii || '').replace(/\s+/g, ' ').trim() || null,
+          m2_terreno: ter > 0 ? Math.round(ter) : null,
+          ano: v.ano_construccion ? String(v.ano_construccion) : null,
+          destino: v.cod_destino || null,
+          avaluo_clp: av > 0 ? Math.round(av) : null,
+          contrib_clp: co > 0 ? Math.round(co) : null,
+          rol: v.rol || null,
         }
       })
       .filter(Boolean)
