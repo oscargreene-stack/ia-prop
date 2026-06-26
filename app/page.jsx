@@ -1559,10 +1559,6 @@ function FormComprador({ onBack }) {
   const dmRef = useRef(null)
   const polyRef = useRef(null)
   const drawRef = useRef(null)
-  const ventasMapRef = useRef(null)
-  const ventasMapObj = useRef(null)
-  const ventasMkRef = useRef([])
-  const ventasIwRef = useRef(null)
 
   const toggle = (arr, set, id) => set(arr.includes(id) ? arr.filter((x) => x !== id) : [...arr, id])
 
@@ -1646,79 +1642,6 @@ function FormComprador({ onBack }) {
     if (polyRef.current) { polyRef.current.setMap(null); polyRef.current = null }
     setPolygon(null)
   }
-
-  // Mapa de ventas similares (modelo Data Inmobiliaria): pastillas de precio + clusters.
-  useEffect(() => {
-    const ventas = resultado && resultado._modo === 'real' && Array.isArray(resultado.ventas_mapa) ? resultado.ventas_mapa : null
-    if (!ventas || ventas.length === 0) return
-    let cancel = false
-    fcLoadGmaps().then(() => {
-      const g = window.google && window.google.maps
-      if (cancel || !g) return
-      const tryInit = (n) => {
-        if (cancel) return
-        if (!ventasMapRef.current) { if (n > 0) setTimeout(() => tryInit(n - 1), 150); return }
-        const map = new g.Map(ventasMapRef.current, { mapTypeControl: false, streetViewControl: false, fullscreenControl: false, clickableIcons: false })
-        ventasMapObj.current = map
-        ventasIwRef.current = new g.InfoWindow()
-        const bounds = new g.LatLngBounds()
-        ventas.forEach((v) => bounds.extend({ lat: v.lat, lng: v.lng }))
-        map.fitBounds(bounds, 40)
-
-        const fmtK = (uf) => {
-          if (uf < 1000) return String(uf)
-          const k = Math.round(uf / 100) / 10
-          return (Number.isInteger(k) ? k.toFixed(0) : k.toFixed(1)).replace('.', ',') + 'K'
-        }
-        const pillIcon = (txt) => {
-          const w = Math.ceil(18 + txt.length * 7)
-          const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="22"><rect rx="11" ry="11" width="${w}" height="22" fill="#c0392b"/><text x="${w / 2}" y="15" font-family="Arial,sans-serif" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle">${txt}</text></svg>`
-          return { url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg), anchor: new g.Point(Math.round(w / 2), 11) }
-        }
-        const clusterIcon = (count) => {
-          const d = count >= 100 ? 46 : count >= 10 ? 40 : 34
-          const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${d}" height="${d}"><circle cx="${d / 2}" cy="${d / 2}" r="${d / 2 - 2}" fill="#1f2d3d" stroke="#ffffff" stroke-width="2"/><text x="${d / 2}" y="${d / 2 + 4}" font-family="Arial,sans-serif" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">${count}</text></svg>`
-          return { url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg), anchor: new g.Point(Math.round(d / 2), Math.round(d / 2)) }
-        }
-        const clearMk = () => { ventasMkRef.current.forEach((m) => m.setMap(null)); ventasMkRef.current = [] }
-        const render = () => {
-          clearMk()
-          const zoom = map.getZoom() || 13
-          const cell = 80 / Math.pow(2, zoom)
-          const groups = {}
-          ventas.forEach((v) => {
-            const key = Math.floor(v.lat / cell) + '_' + Math.floor(v.lng / cell)
-            ;(groups[key] = groups[key] || []).push(v)
-          })
-          Object.keys(groups).forEach((k) => {
-            const arr = groups[k]
-            if (arr.length === 1) {
-              const v = arr[0]
-              const mk = new g.Marker({ position: { lat: v.lat, lng: v.lng }, map, icon: pillIcon(fmtK(v.uf) + ' UF') })
-              mk.addListener('click', () => {
-                const html = `<div style="font-family:Arial,sans-serif;font-size:13px;line-height:1.5;color:#1a1a1a"><b>${fmtK(v.uf)} UF</b>${v.uf_m2 ? ' &middot; ' + v.uf_m2 + ' UF/m&sup2;' : ''}${v.m2 ? '<br>' + v.m2 + ' m&sup2; construidos' : ''}${v.fecha ? '<br>Venta: ' + v.fecha : ''}${v.dir ? '<br>' + v.dir : ''}</div>`
-                ventasIwRef.current.setContent(html)
-                ventasIwRef.current.setPosition({ lat: v.lat, lng: v.lng })
-                ventasIwRef.current.open(map)
-              })
-              ventasMkRef.current.push(mk)
-            } else {
-              let la = 0, ln = 0
-              arr.forEach((v) => { la += v.lat; ln += v.lng })
-              const c = { lat: la / arr.length, lng: ln / arr.length }
-              const mk = new g.Marker({ position: c, map, icon: clusterIcon(arr.length) })
-              mk.addListener('click', () => { map.setZoom(Math.min((map.getZoom() || 13) + 2, 20)); map.panTo(c) })
-              ventasMkRef.current.push(mk)
-            }
-          })
-        }
-        render()
-        map.addListener('idle', render)
-      }
-      tryInit(25)
-    })
-    return () => { cancel = true }
-  }, [resultado])
 
   const presMid = (FC_PRES.find((p) => p.id === pres) || {}).mid || null
   const presUF = presMax && parseFloat(presMax) > 0 ? parseFloat(presMax) : presMid
@@ -1892,13 +1815,7 @@ function FormComprador({ onBack }) {
             {resultado.reality && <div style={{ marginTop: 8 }}>💰 Con tu presupuesto alcanzarías ~<strong>{resultado.reality.m2_alcanzable_min}–{resultado.reality.m2_alcanzable_max} m²</strong> en este sector.</div>}
             {resultado.estimacion && m2 && <div style={{ marginTop: 8 }}>🏷️ Una propiedad de ~{m2} m² ahí debería costar <strong>{resultado.estimacion.uf_min.toLocaleString('es-CL')}–{resultado.estimacion.uf_max.toLocaleString('es-CL')} UF</strong>.</div>}
           </div>
-          {Array.isArray(resultado.ventas_mapa) && resultado.ventas_mapa.length > 0 && (
-            <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(202,161,90,0.25)' }}>
-              <div style={{ fontWeight: 700, color: 'var(--gold-light)', marginBottom: 8 }}>🗺️ Últimas ventas similares en el sector ({resultado.ventas_mapa.length})</div>
-              <div ref={ventasMapRef} style={{ width: '100%', height: 360, borderRadius: 12, border: '1px solid rgba(255,255,255,0.12)', overflow: 'hidden' }} />
-              <div style={{ fontSize: 12, color: '#9a9a9a', marginTop: 6 }}>Cada pastilla es una venta registrada (precio en UF). Tocá un grupo para acercarte, o una venta para ver el detalle.</div>
-            </div>
-          )}
+          <VentasMapa ventas={resultado.ventas_mapa} titulo="Últimas ventas similares en el sector" />
         </div>
       )}
       {enviado && resultado && resultado._modo !== 'real' && !loading && (
