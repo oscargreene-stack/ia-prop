@@ -237,6 +237,7 @@ function ChatVendedor({ onBack }) {
   const [searchTab, setSearchTab] = useState('direccion')
   const [placesResult, setPlacesResult] = useState(null) // {calle, numero, comunaNorm, fullAddress}
   const [comunaForm, setComunaForm] = useState('')
+  const [ventasTasacion, setVentasTasacion] = useState(null)
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
 
@@ -638,6 +639,7 @@ function ChatVendedor({ onBack }) {
   }
 
   const iniciarTasacion = async (finalData) => {
+    setVentasTasacion(null)
     await addAgent('¡Perfecto! Calculando la tasación con datos reales del mercado…', 500)
     setMessages(m => [...m, { role:'agent', content:{ type:'loading', text:'Consultando transacciones reales del CBR, comparables y plan regulador…' }}])
     setStage('tasando')
@@ -662,6 +664,12 @@ function ChatVendedor({ onBack }) {
       const rangoMin = Math.round(valorFinal * 0.93)
       const rangoMax = Math.round(valorFinal * 1.07)
       setMessages(m => [...m, { role:'agent', content:{ type:'tasacion', resultado, valorFinal, rangoMin, rangoMax, ajRemo, ajCar, ajJardin, valorBase, remoInfo:{ tipo: finalData.remodelacion, m2: m2Util, ufM2: AJUSTE_REMO[finalData.remodelacion]||0, tiempo: finalData.tiempo_remo } }}])
+      // Carga (no bloqueante) del mapa de ventas comparables cerca de la propiedad.
+      try {
+        const m2Built = parseFloat(finalData.siiData?.m2_construido || finalData.siiData?.m2_util || m2Util) || null
+        fetch('/api/zona', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tipo: finalData.tipo, m2_objetivo: m2Built, direccion: finalData.direccion, comuna: finalData.comuna || '' }) })
+          .then((r) => r.json()).then((zj) => { if (zj && Array.isArray(zj.ventas_mapa)) setVentasTasacion(zj.ventas_mapa) }).catch(() => {})
+      } catch (e) {}
       const expectativaUF = parseExpectativaUF(finalData.precio_idea)
       const { mensajes } = valorizacionValentina({
         comuna: finalData.comuna || '',
@@ -874,6 +882,7 @@ function ChatVendedor({ onBack }) {
           : <UserBubble key={i}>{msg.content}</UserBubble>
         )}
         {typing && <AgentBubble typing/>}
+        <VentasMapa ventas={ventasTasacion} titulo="Ventas comparables cerca de la propiedad" />
         <div ref={bottomRef}/>
       </div>
 
@@ -1440,6 +1449,89 @@ function FCBold({ text }) {
         )
       })}
     </>
+  )
+}
+
+// Mapa reutilizable de ventas (pastillas de precio + clusters), modelo Data Inmobiliaria.
+function VentasMapa({ ventas, titulo }) {
+  const mapRef = useRef(null)
+  const mkRef = useRef([])
+  const iwRef = useRef(null)
+  useEffect(() => {
+    if (!Array.isArray(ventas) || ventas.length === 0) return
+    let cancel = false
+    fcLoadGmaps().then(() => {
+      const g = window.google && window.google.maps
+      if (cancel || !g) return
+      const tryInit = (n) => {
+        if (cancel) return
+        if (!mapRef.current) { if (n > 0) setTimeout(() => tryInit(n - 1), 150); return }
+        const map = new g.Map(mapRef.current, { mapTypeControl: false, streetViewControl: false, fullscreenControl: false, clickableIcons: false })
+        iwRef.current = new g.InfoWindow()
+        const bounds = new g.LatLngBounds()
+        ventas.forEach((v) => bounds.extend({ lat: v.lat, lng: v.lng }))
+        map.fitBounds(bounds, 40)
+        const fmtK = (uf) => {
+          if (uf < 1000) return String(uf)
+          const k = Math.round(uf / 100) / 10
+          return (Number.isInteger(k) ? k.toFixed(0) : k.toFixed(1)).replace('.', ',') + 'K'
+        }
+        const pillIcon = (txt) => {
+          const w = Math.ceil(18 + txt.length * 7)
+          const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="22"><rect rx="11" ry="11" width="${w}" height="22" fill="#c0392b"/><text x="${w / 2}" y="15" font-family="Arial,sans-serif" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle">${txt}</text></svg>`
+          return { url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg), anchor: new g.Point(Math.round(w / 2), 11) }
+        }
+        const clusterIcon = (count) => {
+          const d = count >= 100 ? 46 : count >= 10 ? 40 : 34
+          const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${d}" height="${d}"><circle cx="${d / 2}" cy="${d / 2}" r="${d / 2 - 2}" fill="#1f2d3d" stroke="#ffffff" stroke-width="2"/><text x="${d / 2}" y="${d / 2 + 4}" font-family="Arial,sans-serif" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">${count}</text></svg>`
+          return { url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg), anchor: new g.Point(Math.round(d / 2), Math.round(d / 2)) }
+        }
+        const clearMk = () => { mkRef.current.forEach((m) => m.setMap(null)); mkRef.current = [] }
+        const render = () => {
+          clearMk()
+          const zoom = map.getZoom() || 13
+          const cell = 80 / Math.pow(2, zoom)
+          const groups = {}
+          ventas.forEach((v) => {
+            const key = Math.floor(v.lat / cell) + '_' + Math.floor(v.lng / cell)
+            ;(groups[key] = groups[key] || []).push(v)
+          })
+          Object.keys(groups).forEach((k) => {
+            const arr = groups[k]
+            if (arr.length === 1) {
+              const v = arr[0]
+              const mk = new g.Marker({ position: { lat: v.lat, lng: v.lng }, map, icon: pillIcon(fmtK(v.uf) + ' UF') })
+              mk.addListener('click', () => {
+                const html = `<div style="font-family:Arial,sans-serif;font-size:13px;line-height:1.5;color:#1a1a1a"><b>${fmtK(v.uf)} UF</b>${v.uf_m2 ? ' &middot; ' + v.uf_m2 + ' UF/m&sup2;' : ''}${v.m2 ? '<br>' + v.m2 + ' m&sup2; construidos' : ''}${v.fecha ? '<br>Venta: ' + v.fecha : ''}${v.dir ? '<br>' + v.dir : ''}</div>`
+                iwRef.current.setContent(html)
+                iwRef.current.setPosition({ lat: v.lat, lng: v.lng })
+                iwRef.current.open(map)
+              })
+              mkRef.current.push(mk)
+            } else {
+              let la = 0, ln = 0
+              arr.forEach((v) => { la += v.lat; ln += v.lng })
+              const c = { lat: la / arr.length, lng: ln / arr.length }
+              const mk = new g.Marker({ position: c, map, icon: clusterIcon(arr.length) })
+              mk.addListener('click', () => { map.setZoom(Math.min((map.getZoom() || 13) + 2, 20)); map.panTo(c) })
+              mkRef.current.push(mk)
+            }
+          })
+        }
+        render()
+        map.addListener('idle', render)
+      }
+      tryInit(25)
+    })
+    return () => { cancel = true }
+  }, [ventas])
+  if (!Array.isArray(ventas) || ventas.length === 0) return null
+  return (
+    <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(202,161,90,0.25)' }}>
+      <div style={{ fontWeight: 700, color: 'var(--gold-light)', marginBottom: 8 }}>🗺️ {titulo} ({ventas.length})</div>
+      <div ref={mapRef} style={{ width: '100%', height: 360, borderRadius: 12, border: '1px solid rgba(255,255,255,0.12)', overflow: 'hidden' }} />
+      <div style={{ fontSize: 12, color: '#9a9a9a', marginTop: 6 }}>Cada pastilla es una venta registrada (precio en UF). Tocá un grupo para acercarte, o una venta para ver el detalle.</div>
+    </div>
   )
 }
 
