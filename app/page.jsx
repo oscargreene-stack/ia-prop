@@ -2004,15 +2004,17 @@ export default function Home() {
   // Permite abrir directo desde el shell C2C:
   //   /tasar?view=vendedor  → ChatVendedor (Valentina)
   //   /tasar?view=comprador → FormComprador (Isidora)
-  const initialView = (() => {
-    if (typeof window === 'undefined') return 'landing'
+  // Vista inicial SSR-safe: en el server y en el primer render del cliente vale
+  // null (mismo HTML en ambos -> sin mismatch de hidratacion #418/#423).
+  // Tras montar leemos ?view= y fijamos la vista real.
+  const [view, setView] = useState(null)
+  useEffect(() => {
     try {
       const v = new URLSearchParams(window.location.search).get('view')
-      if (v === 'vendedor' || v === 'comprador') return v
-    } catch(e) {}
-    return 'landing'
-  })()
-  const [view, setView] = useState(initialView)
+      setView(v === 'vendedor' || v === 'comprador' ? v : 'landing')
+    } catch (e) { setView('landing') }
+  }, [])
+  if (view === null) return null
   if (view === 'vendedor') return <ChatVendedor onBack={() => setView('landing')}/>
   if (view === 'comprador') return <FormComprador onBack={() => setView('landing')}/>
   return (
