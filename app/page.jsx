@@ -1691,11 +1691,11 @@ function FormComprador({ onBack }) {
           </div>
         ) : (
           <div>
-            <div style={{ fontSize: 13, color: '#9a9a9a', marginBottom: 8 }}>Tocá el mapa para ir marcando los vértices del sector; cerrá el polígono tocando de nuevo el primer punto.</div>
+            <div style={{ fontSize: 13, color: '#9a9a9a', marginBottom: 8 }}>Tocá el mapa para ir marcando los vértices del sector; cerrá el polígono tocando de nuevo el primer punto. ¿Te equivocaste? Usá «Borrar y redibujar» para limpiar el mapa y empezar de nuevo.</div>
             <div ref={mapRef} style={{ width: '100%', height: 380, borderRadius: 12, border: '1px solid rgba(255,255,255,0.12)', overflow: 'hidden' }} />
             <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 8 }}>
               <span style={{ fontSize: 13, color: polygon ? 'var(--gold-light)' : '#8a8a8a' }}>{polygon && polygon.length >= 3 ? '✓ Sector marcado' : 'Sin sector marcado'}</span>
-              {polygon && <button onClick={limpiarPoligono} style={{ ...chip(false), fontSize: 13, padding: '5px 12px' }}>Borrar y redibujar</button>}
+              <button onClick={limpiarPoligono} style={{ ...chip(false), fontSize: 13, padding: '5px 12px' }}>Borrar y redibujar</button>
             </div>
           </div>
         )}
