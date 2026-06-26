@@ -1487,6 +1487,17 @@ function VentasMapa({ ventas, titulo }) {
           return { url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg), anchor: new g.Point(Math.round(d / 2), Math.round(d / 2)) }
         }
         const clearMk = () => { mkRef.current.forEach((m) => m.setMap(null)); mkRef.current = [] }
+        const med = (a) => { const x = [...a].sort((p, q) => p - q); const n = x.length; return n ? (n % 2 ? x[(n - 1) / 2] : Math.round((x[n / 2 - 1] + x[n / 2]) / 2)) : 0 }
+        const clusterHtml = (arr) => {
+          const ufs = arr.map((v) => v.uf).filter((x) => x > 0)
+          const um2 = arr.map((v) => v.uf_m2).filter((x) => x > 0)
+          const minU = ufs.length ? Math.min(...ufs) : 0
+          const maxU = ufs.length ? Math.max(...ufs) : 0
+          const recientes = [...arr].sort((a, b) => (a.fecha < b.fecha ? 1 : -1)).slice(0, 5)
+          const items = recientes.map((v) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:2px 0"><span style="color:#444;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px">${v.dir || 'Venta'}</span><span style="font-weight:700;white-space:nowrap">${fmtK(v.uf)} UF</span></div>`).join('')
+          const mas = arr.length > 5 ? `<div style="color:#888;font-size:11px;margin-top:4px">+${arr.length - 5} ventas más · acercá el mapa para separarlas</div>` : ''
+          return `<div style="font-family:Arial,sans-serif;font-size:13px;color:#1a1a1a;max-width:250px"><div style="font-weight:700;color:#c0392b;margin-bottom:4px">${arr.length} ventas en esta zona</div><div>Mediana: <b>${fmtK(med(ufs))} UF</b> <span style="color:#888">(${fmtK(minU)}–${fmtK(maxU)})</span></div>${um2.length ? `<div>UF/m²: <b>${med(um2)}</b> mediana</div>` : ''}<div style="margin-top:6px;border-top:1px solid #eee;padding-top:6px">${items}${mas}</div></div>`
+        }
         const render = () => {
           clearMk()
           const zoom = map.getZoom() || 13
@@ -1513,7 +1524,11 @@ function VentasMapa({ ventas, titulo }) {
               arr.forEach((v) => { la += v.lat; ln += v.lng })
               const c = { lat: la / arr.length, lng: ln / arr.length }
               const mk = new g.Marker({ position: c, map, icon: clusterIcon(arr.length) })
-              mk.addListener('click', () => { map.setZoom(Math.min((map.getZoom() || 13) + 2, 20)); map.panTo(c) })
+              mk.addListener('click', () => {
+                iwRef.current.setContent(clusterHtml(arr))
+                iwRef.current.setPosition(c)
+                iwRef.current.open(map)
+              })
               mkRef.current.push(mk)
             }
           })
