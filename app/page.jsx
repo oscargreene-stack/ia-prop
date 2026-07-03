@@ -1598,7 +1598,21 @@ function VentasMapa({ ventas, titulo }) {
       <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(202,161,90,0.25)' }}>
         <div style={{ fontWeight: 700, color: 'var(--gold-light)', marginBottom: 8 }}>🗺️ {titulo} ({ventas.length})</div>
         <div ref={mapRef} style={{ width: '100%', height: 360, borderRadius: 12, border: '1px solid rgba(255,255,255,0.12)', overflow: 'hidden' }} />
-        <div style={{ fontSize: 12, color: '#9a9a9a', marginTop: 6 }}>Cada pastilla es una venta registrada (precio en UF). Tocá un grupo para acercarte, o una venta para ver su ficha.</div>
+        <div style={{ fontSize: 12, color: '#9a9a9a', marginTop: 6 }}>Tocá una pastilla en el mapa, o una fila de la lista de abajo, para ver la ficha de la propiedad.</div>
+        <div style={{ marginTop: 10, maxHeight: 280, overflow: 'auto', borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)' }}>
+          {ventas.map((v, i) => (
+            <div key={i} onClick={() => setSel(v)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '9px 12px', borderBottom: i < ventas.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none', cursor: 'pointer' }}>
+              <div style={{ overflow: 'hidden' }}>
+                <div style={{ fontSize: 13, color: '#e8e8e8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.dir || 'Propiedad'}</div>
+                <div style={{ fontSize: 11, color: '#9a9a9a' }}>{[v.m2 ? v.m2 + ' m²' : null, v.fecha || null].filter(Boolean).join(' · ')}</div>
+              </div>
+              <div style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--gold-light)' }}>{v.uf ? v.uf.toLocaleString('es-CL') + ' UF' : ''}</div>
+                {v.uf_m2 ? <div style={{ fontSize: 11, color: '#9a9a9a' }}>{v.uf_m2} UF/m²</div> : null}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
       {sel && <FichaPropiedad venta={sel} onClose={() => setSel(null)} />}
     </>
