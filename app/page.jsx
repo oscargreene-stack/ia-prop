@@ -1508,6 +1508,122 @@ function FichaPropiedad({ venta, onClose }) {
   )
 }
 
+// Ficha de una OFERTA (aviso de portal) — foto + datos + link al aviso original.
+function FichaOferta({ oferta, onClose }) {
+  if (!oferta) return null
+  const o = oferta
+  const precio = o.precio ? (o.moneda === 'UF' || !o.moneda ? Number(o.precio).toLocaleString('es-CL') + ' UF' : '$' + Number(o.precio).toLocaleString('es-CL')) : 'Precio no informado'
+  const chips = [o.dorms != null ? o.dorms + ' dorm.' : null, o.banos != null ? o.banos + (o.banos === 1 ? ' baño' : ' baños') : null, o.m2 ? o.m2 + ' m²' : null].filter(Boolean)
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: '#fff', color: '#1a1a1a', borderRadius: 16, width: '100%', maxWidth: 560, maxHeight: '90vh', overflow: 'auto', boxShadow: '0 20px 60px rgba(0,0,0,0.4)' }}>
+        <div style={{ position: 'relative' }}>
+          {o.imagen
+            ? <img src={o.imagen} alt="" style={{ width: '100%', height: 260, objectFit: 'cover', display: 'block' }} />
+            : <div style={{ width: '100%', height: 140, background: '#e9e9e9', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#999' }}>Sin foto</div>}
+          <button onClick={onClose} style={{ position: 'absolute', top: 10, right: 10, border: 'none', background: 'rgba(0,0,0,0.55)', color: '#fff', borderRadius: 8, width: 32, height: 32, fontSize: 18, cursor: 'pointer' }}>×</button>
+        </div>
+        <div style={{ padding: '16px 20px' }}>
+          <div style={{ fontSize: 11, letterSpacing: 1, textTransform: 'uppercase', color: '#2563eb', fontWeight: 700 }}>Oferta vigente</div>
+          <div style={{ fontSize: 17, fontWeight: 700, marginTop: 2 }}>{o.titulo || o.dir || 'Propiedad en venta'}</div>
+          {o.dir && o.titulo && <div style={{ fontSize: 13, color: '#666', marginTop: 2 }}>{o.dir}</div>}
+          <div style={{ fontSize: 22, fontWeight: 800, marginTop: 10 }}>{precio}</div>
+          {chips.length > 0 && <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>{chips.map((c, i) => <span key={i} style={{ background: '#f1f1f1', borderRadius: 8, padding: '4px 10px', fontSize: 13 }}>{c}</span>)}</div>}
+          <div style={{ marginTop: 12, fontSize: 13, color: '#555' }}>{[o.inmobiliaria, o.fecha ? 'Publicado: ' + o.fecha : null].filter(Boolean).join(' · ')}</div>
+          {o.url && <a href={o.url} target="_blank" rel="noopener noreferrer" style={{ display: 'block', textAlign: 'center', marginTop: 16, background: '#2563eb', color: '#fff', textDecoration: 'none', padding: '11px', borderRadius: 10, fontWeight: 700 }}>Ver aviso original ↗</a>}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// Mapa de OFERTAS (avisos de portales) — pines azules + ficha con foto y link.
+function OfertasMapa({ ofertas }) {
+  const mapRef = useRef(null)
+  const mkRef = useRef([])
+  const [sel, setSel] = useState(null)
+  const fmtK = (n) => { if (!n) return ''; if (n < 1000) return String(n); const k = Math.round(n / 100) / 10; return (Number.isInteger(k) ? k.toFixed(0) : k.toFixed(1)).replace('.', ',') + 'K' }
+  const label = (o) => { if (!o.precio) return 's/p'; if (o.moneda === 'UF' || !o.moneda) return fmtK(o.precio) + ' UF'; const m = o.precio; return m >= 1000000 ? '$' + (Math.round(m / 100000) / 10).toString().replace('.', ',') + 'M' : '$' + Math.round(m / 1000) + 'K' }
+  const precioStr = (o) => (o.precio ? (o.moneda === 'UF' || !o.moneda ? Number(o.precio).toLocaleString('es-CL') + ' UF' : '$' + Number(o.precio).toLocaleString('es-CL')) : '')
+  useEffect(() => {
+    if (!Array.isArray(ofertas) || ofertas.length === 0) return
+    let cancel = false
+    fcLoadGmaps().then(() => {
+      const g = window.google && window.google.maps
+      if (cancel || !g) return
+      const tryInit = (n) => {
+        if (cancel) return
+        if (!mapRef.current) { if (n > 0) setTimeout(() => tryInit(n - 1), 150); return }
+        const map = new g.Map(mapRef.current, { mapTypeControl: false, streetViewControl: false, fullscreenControl: false, clickableIcons: false })
+        const bounds = new g.LatLngBounds()
+        ofertas.forEach((o) => bounds.extend({ lat: o.lat, lng: o.lng }))
+        map.fitBounds(bounds, 40)
+        const pillIcon = (txt) => {
+          const w = Math.ceil(18 + txt.length * 7)
+          const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="22"><rect rx="11" ry="11" width="${w}" height="22" fill="#2563eb"/><text x="${w / 2}" y="15" font-family="Arial,sans-serif" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle">${txt}</text></svg>`
+          return { url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg), anchor: new g.Point(Math.round(w / 2), 11) }
+        }
+        const clusterIcon = (count) => {
+          const d = count >= 100 ? 46 : count >= 10 ? 40 : 34
+          const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${d}" height="${d}"><circle cx="${d / 2}" cy="${d / 2}" r="${d / 2 - 2}" fill="#1e3a8a" stroke="#ffffff" stroke-width="2"/><text x="${d / 2}" y="${d / 2 + 4}" font-family="Arial,sans-serif" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">${count}</text></svg>`
+          return { url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg), anchor: new g.Point(Math.round(d / 2), Math.round(d / 2)) }
+        }
+        const clearMk = () => { mkRef.current.forEach((m) => m.setMap(null)); mkRef.current = [] }
+        const render = () => {
+          clearMk()
+          const zoom = map.getZoom() || 13
+          const cell = 80 / Math.pow(2, zoom)
+          const groups = {}
+          ofertas.forEach((o) => { const key = Math.floor(o.lat / cell) + '_' + Math.floor(o.lng / cell); (groups[key] = groups[key] || []).push(o) })
+          Object.keys(groups).forEach((k) => {
+            const arr = groups[k]
+            if (arr.length === 1) {
+              const o = arr[0]
+              const mk = new g.Marker({ position: { lat: o.lat, lng: o.lng }, map, icon: pillIcon(label(o)) })
+              mk.addListener('click', () => setSel(o))
+              mkRef.current.push(mk)
+            } else {
+              let la = 0, ln = 0
+              arr.forEach((o) => { la += o.lat; ln += o.lng })
+              const c = { lat: la / arr.length, lng: ln / arr.length }
+              const mk = new g.Marker({ position: c, map, icon: clusterIcon(arr.length) })
+              mk.addListener('click', () => { map.setZoom(Math.min((map.getZoom() || 13) + 2, 20)); map.panTo(c) })
+              mkRef.current.push(mk)
+            }
+          })
+        }
+        render()
+        map.addListener('idle', render)
+      }
+      tryInit(25)
+    })
+    return () => { cancel = true }
+  }, [ofertas])
+  if (!Array.isArray(ofertas)) return <div style={{ marginTop: 14, color: '#9a9a9a', fontSize: 14 }}>Buscando ofertas…</div>
+  if (ofertas.length === 0) return <div style={{ marginTop: 14, color: '#9a9a9a', fontSize: 14 }}>No encontré ofertas vigentes en este sector.</div>
+  return (
+    <>
+      <div style={{ marginTop: 14 }}>
+        <div style={{ fontWeight: 700, color: 'var(--gold-light)', marginBottom: 8 }}>🏷️ Ofertas en venta en el sector ({ofertas.length})</div>
+        <div ref={mapRef} style={{ width: '100%', height: 360, borderRadius: 12, border: '1px solid rgba(255,255,255,0.12)', overflow: 'hidden' }} />
+        <div style={{ fontSize: 12, color: '#9a9a9a', marginTop: 6 }}>Avisos vigentes en portales. Tocá un pin azul o una fila para ver la foto y el enlace al aviso.</div>
+        <div style={{ marginTop: 10, maxHeight: 280, overflow: 'auto', borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)' }}>
+          {ofertas.map((o, i) => (
+            <div key={i} onClick={() => setSel(o)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '9px 12px', borderBottom: i < ofertas.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none', cursor: 'pointer' }}>
+              <div style={{ overflow: 'hidden' }}>
+                <div style={{ fontSize: 13, color: '#e8e8e8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.titulo || o.dir || 'Propiedad'}</div>
+                <div style={{ fontSize: 11, color: '#9a9a9a' }}>{[o.dorms != null ? o.dorms + 'D' : null, o.banos != null ? o.banos + 'B' : null, o.m2 ? o.m2 + ' m²' : null, o.inmobiliaria].filter(Boolean).join(' · ')}</div>
+              </div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--gold-light)', whiteSpace: 'nowrap' }}>{precioStr(o)}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+      {sel && <FichaOferta oferta={sel} onClose={() => setSel(null)} />}
+    </>
+  )
+}
+
 // Mapa reutilizable de ventas (pastillas de precio + clusters), modelo Data Inmobiliaria.
 function VentasMapa({ ventas, titulo }) {
   const mapRef = useRef(null)
@@ -1633,6 +1749,10 @@ function FormComprador({ onBack }) {
   const [polygon, setPolygon] = useState(null)
   const [loading, setLoading] = useState(false)
   const [resultado, setResultado] = useState(null)
+  const [lastBody, setLastBody] = useState(null)
+  const [vista, setVista] = useState('ventas')
+  const [ofertas, setOfertas] = useState(null)
+  const [ofLoading, setOfLoading] = useState(false)
   const [mensajes, setMensajes] = useState([])
   const [chatHistory, setChatHistory] = useState([])
   const [pregunta, setPregunta] = useState('')
@@ -1750,12 +1870,26 @@ function FormComprador({ onBack }) {
     }
   }
 
+  const verOfertas = async () => {
+    setVista('ofertas')
+    if (ofertas !== null || !lastBody) return
+    setOfLoading(true)
+    try {
+      const r = await fetch('/api/ofertas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(lastBody) })
+      const j = await r.json()
+      setOfertas(Array.isArray(j.ofertas) ? j.ofertas : [])
+    } catch (e) { setOfertas([]) }
+    setOfLoading(false)
+  }
+
   const buscar = async () => {
     setLoading(true); setResultado(null); setMensajes([]); setEnviado(true)
+    setOfertas(null); setVista('ventas')
     const body = { tipo, presupuesto_uf: presUF, m2_objetivo: m2 ? parseFloat(m2) : null }
     if (sectorMode === 'mapa' && polygon && polygon.length >= 3) body.polygon = polygon
     else if (barrioSel && comunas.length === 1) { body.comuna = comunas[0]; body.direccion = barrioSel.query }
     else if (comunas.length) body.comuna = comunas[0]
+    setLastBody(body)
     let zj = null
     try { zj = await (await fetch('/api/zona', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })).json() } catch (e) {}
     setResultado(zj)
@@ -1899,7 +2033,15 @@ function FormComprador({ onBack }) {
             {resultado.reality && <div style={{ marginTop: 8 }}>💰 Con tu presupuesto alcanzarías ~<strong>{resultado.reality.m2_alcanzable_min}–{resultado.reality.m2_alcanzable_max} m²</strong> en este sector.</div>}
             {resultado.estimacion && m2 && <div style={{ marginTop: 8 }}>🏷️ Una propiedad de ~{m2} m² ahí debería costar <strong>{resultado.estimacion.uf_min.toLocaleString('es-CL')}–{resultado.estimacion.uf_max.toLocaleString('es-CL')} UF</strong>.</div>}
           </div>
-          <VentasMapa ventas={resultado.ventas_mapa} titulo="Últimas ventas similares en el sector" />
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(202,161,90,0.25)', display: 'flex', gap: 8 }}>
+            <button onClick={() => setVista('ventas')} style={{ ...chip(vista === 'ventas'), fontSize: 13, padding: '6px 12px' }}>🏠 Ventas registradas</button>
+            <button onClick={verOfertas} style={{ ...chip(vista === 'ofertas'), fontSize: 13, padding: '6px 12px' }}>🏷️ Ofertas en venta</button>
+          </div>
+          {vista === 'ventas'
+            ? <VentasMapa ventas={resultado.ventas_mapa} titulo="Últimas ventas similares en el sector" />
+            : ofLoading
+              ? <div style={{ marginTop: 14, color: '#9a9a9a', fontSize: 14 }}>Buscando ofertas vigentes en el sector…</div>
+              : <OfertasMapa ofertas={ofertas} />}
         </div>
       )}
       {enviado && resultado && resultado._modo !== 'real' && !loading && (
