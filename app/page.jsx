@@ -238,6 +238,10 @@ function ChatVendedor({ onBack }) {
   const [placesResult, setPlacesResult] = useState(null) // {calle, numero, comunaNorm, fullAddress}
   const [comunaForm, setComunaForm] = useState('')
   const [ventasTasacion, setVentasTasacion] = useState(null)
+  const [ofertasTasacion, setOfertasTasacion] = useState(null)
+  const [vistaTas, setVistaTas] = useState('ventas')
+  const [ofTasLoading, setOfTasLoading] = useState(false)
+  const [tasBody, setTasBody] = useState(null)
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
 
@@ -412,18 +416,18 @@ function ChatVendedor({ onBack }) {
         const tipoActual = data.tipo
         const terrenoSII = parseFloat(data.siiData?.m2_terreno) || 0
         if (['casa', 'terreno', 'parcela'].includes(tipoActual)) {
-          const msgTerreno = terrenoSII > 0
-            ? `El SII registra **${terrenoSII.toLocaleString('es-CL')} m² de terreno** para esta propiedad. ¿Es correcto este dato?`
-            : '¿Cuántos m² de terreno tiene la propiedad? (el SII no registra este dato para esta propiedad)'
-          await addAgent(msgTerreno, 500)
+          // El terreno del SII ya se muestra y confirma en la ficha de arriba: no repreguntar.
           if (terrenoSII > 0) {
-            setInputMode('options')
-            setOptions([
-              { id: 'si_terreno', label: `Sí, ${terrenoSII.toLocaleString('es-CL')} m² es correcto`, icon: '✅' },
-              { id: 'no_terreno', label: 'No, el dato es incorrecto', icon: '✏️' },
-            ])
-            setStage('confirmar_terreno')
+            const m2C = parseFloat(data.siiData?.m2_construido) || 0
+            if (!m2C && ['casa', 'departamento'].includes(tipoActual)) {
+              await addAgent('¿Cuántos **m² construidos** tiene la propiedad? (superficie total construida)', 400)
+              setInputMode('text'); setPlaceholder('Ej: 440')
+              setStage('ingresar_m2_construido')
+            } else {
+              await nextStep(data, 0)
+            }
           } else {
+            await addAgent('¿Cuántos m² de terreno tiene la propiedad? (el SII no registra este dato para esta propiedad)', 500)
             setInputMode('text')
             setPlaceholder('Ej: 3982')
             setStage('ingresar_terreno')
@@ -638,8 +642,20 @@ function ChatVendedor({ onBack }) {
     }
   }
 
+  const verOfertasTas = async () => {
+    setVistaTas('ofertas')
+    if (ofertasTasacion !== null || !tasBody) return
+    setOfTasLoading(true)
+    try {
+      const r = await fetch('/api/ofertas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(tasBody) })
+      const j = await r.json()
+      setOfertasTasacion(Array.isArray(j.ofertas) ? j.ofertas : [])
+    } catch (e) { setOfertasTasacion([]) }
+    setOfTasLoading(false)
+  }
+
   const iniciarTasacion = async (finalData) => {
-    setVentasTasacion(null)
+    setVentasTasacion(null); setOfertasTasacion(null); setVistaTas('ventas')
     await addAgent('¡Perfecto! Calculando la tasación con datos reales del mercado…', 500)
     setMessages(m => [...m, { role:'agent', content:{ type:'loading', text:'Consultando transacciones reales del CBR, comparables y plan regulador…' }}])
     setStage('tasando')
@@ -667,7 +683,9 @@ function ChatVendedor({ onBack }) {
       // Carga (no bloqueante) del mapa de ventas comparables cerca de la propiedad.
       try {
         const m2Built = parseFloat(finalData.siiData?.m2_construido || finalData.siiData?.m2_util || m2Util) || null
-        fetch('/api/zona', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tipo: finalData.tipo, m2_objetivo: m2Built, direccion: finalData.direccion, comuna: finalData.comuna || '' }) })
+        const tb = { tipo: finalData.tipo, m2_objetivo: m2Built, direccion: finalData.direccion, comuna: finalData.comuna || '' }
+        setTasBody(tb)
+        fetch('/api/zona', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(tb) })
           .then((r) => r.json()).then((zj) => { if (zj && Array.isArray(zj.ventas_mapa)) setVentasTasacion(zj.ventas_mapa) }).catch(() => {})
       } catch (e) {}
       const expectativaUF = parseExpectativaUF(finalData.precio_idea)
@@ -685,7 +703,7 @@ function ChatVendedor({ onBack }) {
         await addAgent(msg, 900)
       }
       setInputMode('options')
-      setOptions([{id:'nueva',label:'Tasar otra propiedad',icon:'🔄'},{id:'detalle',label:'Quiero más detalle',icon:'🔍'}])
+      setOptions([{id:'detalle',label:'Quiero más detalle',icon:'🔍'}])
       setStage('resultado')
     } catch(e) {
       setMessages(m => m.filter(x => !(x.role==='agent' && x.content?.type==='loading')))
@@ -882,7 +900,17 @@ function ChatVendedor({ onBack }) {
           : <UserBubble key={i}>{msg.content}</UserBubble>
         )}
         {typing && <AgentBubble typing/>}
-        <VentasMapa ventas={ventasTasacion} titulo="Ventas comparables cerca de la propiedad" />
+        {ventasTasacion && ventasTasacion.length > 0 && (
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(202,161,90,0.25)', display: 'flex', gap: 8 }}>
+            <button onClick={() => setVistaTas('ventas')} style={{ padding: '6px 12px', borderRadius: 20, border: '1px solid ' + (vistaTas === 'ventas' ? 'var(--gold)' : 'rgba(255,255,255,0.18)'), background: vistaTas === 'ventas' ? 'var(--gold-dim)' : 'transparent', color: vistaTas === 'ventas' ? 'var(--gold-light)' : '#cfcfcf', cursor: 'pointer', fontSize: 13 }}>🏠 Ventas registradas</button>
+            <button onClick={verOfertasTas} style={{ padding: '6px 12px', borderRadius: 20, border: '1px solid ' + (vistaTas === 'ofertas' ? 'var(--gold)' : 'rgba(255,255,255,0.18)'), background: vistaTas === 'ofertas' ? 'var(--gold-dim)' : 'transparent', color: vistaTas === 'ofertas' ? 'var(--gold-light)' : '#cfcfcf', cursor: 'pointer', fontSize: 13 }}>🏷️ Ofertas en venta</button>
+          </div>
+        )}
+        {vistaTas === 'ventas'
+          ? <VentasMapa ventas={ventasTasacion} titulo="Ventas comparables cerca de la propiedad" />
+          : ofTasLoading
+            ? <div style={{ marginTop: 14, color: '#8a8a8a', fontSize: 14 }}>Buscando ofertas vigentes en el sector…</div>
+            : <OfertasMapa ofertas={ofertasTasacion} />}
         <div ref={bottomRef}/>
       </div>
 
@@ -1667,9 +1695,9 @@ function VentasMapa({ ventas, titulo }) {
           const minU = ufs.length ? Math.min(...ufs) : 0
           const maxU = ufs.length ? Math.max(...ufs) : 0
           const recientes = [...arr].sort((a, b) => (a.fecha < b.fecha ? 1 : -1)).slice(0, 5)
-          const items = recientes.map((v) => `<div style="display:flex;justify-content:space-between;gap:10px;padding:2px 0"><span style="color:#444;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:160px">${v.dir || 'Venta'}</span><span style="font-weight:700;white-space:nowrap">${fmtK(v.uf)} UF</span></div>`).join('')
+          const items = recientes.map((v, idx) => `<div class="fc-cl-item" data-i="${idx}" style="display:flex;justify-content:space-between;gap:10px;padding:5px 4px;cursor:pointer;border-radius:6px;background:#f6f6f6;margin-bottom:3px"><span style="color:#1a1a1a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px">${v.dir || 'Venta'}</span><span style="font-weight:700;white-space:nowrap">${fmtK(v.uf)} UF</span></div>`).join('')
           const mas = arr.length > 5 ? `<div style="color:#888;font-size:11px;margin-top:4px">+${arr.length - 5} ventas más · acercá el mapa para separarlas</div>` : ''
-          return `<div style="font-family:Arial,sans-serif;font-size:13px;color:#1a1a1a;max-width:250px"><div style="font-weight:700;color:#c0392b;margin-bottom:4px">${arr.length} ventas en esta zona</div><div>Mediana: <b>${fmtK(med(ufs))} UF</b> <span style="color:#888">(${fmtK(minU)}–${fmtK(maxU)})</span></div>${um2.length ? `<div>UF/m²: <b>${med(um2)}</b> mediana</div>` : ''}<div style="margin-top:6px;border-top:1px solid #eee;padding-top:6px">${items}${mas}</div></div>`
+          return `<div style="font-family:Arial,sans-serif;font-size:13px;color:#1a1a1a;max-width:250px"><div style="font-weight:700;color:#c0392b;margin-bottom:4px">${arr.length} ventas en esta zona</div><div>Mediana: <b>${fmtK(med(ufs))} UF</b> <span style="color:#888">(${fmtK(minU)}–${fmtK(maxU)})</span></div>${um2.length ? `<div>UF/m²: <b>${med(um2)}</b> mediana</div>` : ''}<div style="margin-top:6px;border-top:1px solid #eee;padding-top:6px"><div style="font-size:11px;color:#2563eb;margin-bottom:4px">Tocá una propiedad para ver su ficha:</div>${items}${mas}</div></div>`
         }
         const render = () => {
           clearMk()
@@ -1696,6 +1724,13 @@ function VentasMapa({ ventas, titulo }) {
                 iwRef.current.setContent(clusterHtml(arr))
                 iwRef.current.setPosition(c)
                 iwRef.current.open(map)
+                const recientes = [...arr].sort((a, b) => (a.fecha < b.fecha ? 1 : -1)).slice(0, 5)
+                g.event.addListenerOnce(iwRef.current, 'domready', () => {
+                  if (typeof document === 'undefined') return
+                  document.querySelectorAll('.fc-cl-item').forEach((el) => {
+                    el.addEventListener('click', () => { const ix = +el.getAttribute('data-i'); if (recientes[ix]) { iwRef.current.close(); setSel(recientes[ix]) } })
+                  })
+                })
               })
               mkRef.current.push(mk)
             }
