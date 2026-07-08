@@ -14,7 +14,7 @@
 //       (tabla COSTO_CONSTRUCCION_UF_M2, ~15 a 45 UF/m²), editable.
 //     Para departamentos/oficinas/comercial se mantiene el UF/m² construido de mercado.
 import { NextResponse } from 'next/server'
-import { normativaEnPunto } from '../../lib/prc.js'
+import { normativaEnPunto, zonaLocalEnPunto } from '../../lib/prc.js'
 
 export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
@@ -122,6 +122,9 @@ function clasificaTipo(v) {
   if (dest === 'O') return 'oficina'
   if (dest === 'C') return 'comercial'
   if (dest !== 'H') return 'otro'
+  // Copropiedad (unidad en edificio) => departamento, aunque el registro traiga
+  // terreno (el del lote del edificio). Evita meter deptos entre las casas.
+  if (String(v.copropiedad || '').toLowerCase() === 't') return 'departamento'
   return terreno > 0 ? 'casa' : 'departamento'
 }
 
@@ -190,8 +193,13 @@ export async function POST(request) {
       if (delTipo >= 12) break
     }
 
+    // Solo ventas de los últimos 5 años: el precio de mercado varía con el tiempo.
+    const _cutoff = new Date(); _cutoff.setFullYear(_cutoff.getFullYear() - 5)
+    const _cutoffStr = _cutoff.toISOString().slice(0, 10)
+    ventas = ventas.filter((v) => { const f = String(v.date_inscripcion || v.fecha || '').slice(0, 10); return !f || f >= _cutoffStr })
+
     // ── Comparables del tipo objetivo (mercado, UF/m² construido) ────────────────
-    const filtradas = ventas.filter((v) => {
+    let filtradas = ventas.filter((v) => {
       if (clasificaTipo(v) !== objetivo) return false
       if (String(v.unit || '').toUpperCase() !== 'UF') return false
       const m2 = parseFloat(v.superficie_construccion)
@@ -202,6 +210,26 @@ export async function POST(request) {
       if (m2obj > 0 && (m2 < m2obj * 0.4 || m2 > m2obj * 2.2)) return false
       return true
     })
+
+    // #2: para CASAS, restringir comparables a la MISMA zona del PRC (misma normativa),
+    // cuando la comuna tiene GeoJSON de zonas (lookup barato por punto). Si quedan pocas,
+    // se mantiene el set por proximidad (fallback).
+    if (esCasa && comuna) {
+      let bu = ''
+      try { bu = new URL(request.url).origin } catch (e) {}
+      if (!bu && process.env.VERCEL_URL) bu = `https://${process.env.VERCEL_URL}`
+      const zonaTarget = await zonaLocalEnPunto(punto.lng, punto.lat, comuna, bu)
+      if (zonaTarget) {
+        const conZona = []
+        for (const v of filtradas) {
+          const zv = await zonaLocalEnPunto(parseFloat(v.lng), parseFloat(v.lat), comuna, bu)
+          if (zv && String(zv) === String(zonaTarget)) conZona.push(v)
+        }
+        if (conZona.length >= 3) filtradas = conZona
+        if (dbg) dbg.zona_filtro = { zona: zonaTarget, n_en_zona: conZona.length, aplicado: conZona.length >= 3 }
+      }
+    }
+
     const ufm2List = filtradas.map((v) => parseFloat(v.price) / parseFloat(v.superficie_construccion))
 
     if (ufm2List.length < 3) {

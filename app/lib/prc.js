@@ -157,6 +157,24 @@ async function zonaArcGIS(lng, lat, cfg) {
 // normativaEnPunto(lng, lat, comuna, baseUrl) → { zona, nombre, densidad, predial_min,
 //   constructibilidad, altura, uso, fuente, clase, predial_min_aprox } | null
 // baseUrl: origin de la request (ej. https://ia-prop.vercel.app). Sin él intenta fs (local).
+// zonaLocalEnPunto(lng, lat, comuna, baseUrl) -> codigo de zona del PRC en el punto,
+// usando SOLO el GeoJSON local cacheado (sin ArcGIS por-punto). Barato para filtrar
+// comparables por misma zona. Devuelve null si la comuna usa ArcGIS o no tiene GeoJSON.
+export async function zonaLocalEnPunto(lng, lat, comuna, baseUrl = '') {
+  if (!Number.isFinite(lng) || !Number.isFinite(lat) || !comuna) return null
+  const slug = slugComuna(comuna)
+  if (ARCGIS_ZONA[slug]) return null
+  const gj = await cargarJSON(baseUrl, urlsZonas(slug))
+  if (!gj || !Array.isArray(gj.features)) return null
+  for (const f of gj.features) {
+    if (puntoEnGeometria(lng, lat, f.geometry)) {
+      const pr = f.properties || {}
+      return pr.ZONA || pr.zona || null
+    }
+  }
+  return null
+}
+
 export async function normativaEnPunto(lng, lat, comuna, baseUrl = '') {
   if (!Number.isFinite(lng) || !Number.isFinite(lat) || !comuna) return null
   const slug = slugComuna(comuna)
