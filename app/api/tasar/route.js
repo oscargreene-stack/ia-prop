@@ -54,6 +54,26 @@ const TIPO_OBJETIVO = {
   comercial: 'comercial',
 }
 
+// Polígono cuadrado de ~radioM metros alrededor de {lat,lng} (igual que /api/zona)
+function poligono(lat, lng, radioM) {
+  const dLat = radioM / 111320
+  const dLng = radioM / (111320 * Math.cos((lat * Math.PI) / 180))
+  return [
+    { lat: lat + dLat, lng: lng - dLng },
+    { lat: lat + dLat, lng: lng + dLng },
+    { lat: lat - dLat, lng: lng + dLng },
+    { lat: lat - dLat, lng: lng - dLng },
+  ]
+}
+
+// Distancia en metros entre dos puntos (haversine)
+function distanciaM(lat1, lng1, lat2, lng2) {
+  const R = 6371000, rad = Math.PI / 180
+  const dLat = (lat2 - lat1) * rad, dLng = (lng2 - lng1) * rad
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLng / 2) ** 2
+  return 2 * R * Math.asin(Math.sqrt(a))
+}
+
 // Geocodifica una dirección a {lat,lng} (mismo enfoque que /api/zona). Sirve para ubicar
 // la propiedad en su zona del Plan Regulador.
 const GKEY = process.env.NEXT_PUBLIC_GOOGLE_PLACES_KEY
@@ -233,9 +253,123 @@ export async function POST(request) {
     return 'Referencial'
   }
 
-  // ── 1. Obtener comparables REALES del CBR via REST ──────────────────────
+  // Punto geocodificado de la propiedad: se usa para los comparables por polígono
+  // (misma fuente que /api/zona) y para la zona del Plan Regulador.
+  const punto = await geocodeDireccion(`${form.direccion || ''}, ${comuna}`)
+
+  // ── 1. Comparables REALES del CBR — MISMA FUENTE que /api/zona (polígono) ──
+  // Ventas reales alrededor de la propiedad, clasificadas por tipo real. De esta
+  // única fuente salen: el valor de la tasación, la lista y el mapa.
   let comparablesReales = []
+  let ventasMapa = []
+  const tipoObjetivo = TIPO_OBJETIVO[String(tipo || '').toLowerCase()] || null
   try {
+    if (punto && DATAINM_TOKEN) {
+      const polys = [poligono(punto.lat, punto.lng, 800), poligono(punto.lat, punto.lng, 1600)]
+      let ventas = []
+      for (const poly of polys) {
+        let acc = []
+        for (let page = 1; page <= 3; page++) {
+          const r = await fetch('https://datainmobiliaria.cl/api/v1/busqueda_poligono', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + DATAINM_TOKEN },
+            body: JSON.stringify({ fuente: 'ventas', polygon: poly, page }),
+          })
+          if (!r.ok) break
+          const j = await r.json()
+          acc = acc.concat(Array.isArray(j.resultados) ? j.resultados : [])
+          const delTipo = acc.filter(v => !tipoObjetivo || clasificaTipo(v) === tipoObjetivo).length
+          if (delTipo >= 15 || !j.has_more) break
+        }
+        ventas = acc
+        const delTipo = ventas.filter(v => !tipoObjetivo || clasificaTipo(v) === tipoObjetivo).length
+        if (delTipo >= 12) break
+      }
+
+      // Solo ventas de los últimos 5 años (mismo criterio que /api/zona)
+      const _cutoff = new Date(); _cutoff.setFullYear(_cutoff.getFullYear() - 5)
+      const _cutoffStr = _cutoff.toISOString().slice(0, 10)
+
+      const base = ventas.filter(v => {
+        if (tipoObjetivo && clasificaTipo(v) !== tipoObjetivo) return false
+        if (String(v.unit || '').toUpperCase() !== 'UF') return false
+        const f = String(v.date_inscripcion || v.fecha || '').slice(0, 10)
+        if (f && f < _cutoffStr) return false
+        const m2 = parseFloat(v.superficie_construccion), uf = parseFloat(v.price)
+        if (!(m2 > 0) || !(uf > 0)) return false
+        const ufm2 = uf / m2
+        return ufm2 >= 3 && ufm2 <= 500
+      })
+
+      // Banda de superficie parecida a la propiedad; si quedan pocas, se relaja.
+      let similares = base
+      if (m2Construido) {
+        similares = base.filter(v => { const m2 = parseFloat(v.superficie_construccion); return m2 >= m2Construido * 0.6 && m2 <= m2Construido * 1.5 })
+        if (similares.length < 3) similares = base.filter(v => { const m2 = parseFloat(v.superficie_construccion); return m2 >= m2Construido * 0.4 && m2 <= m2Construido * 2.2 })
+        if (similares.length < 3) similares = base
+      }
+
+      // Ordenadas por cercanía a la propiedad
+      const rolParts = String(rol || '').split('-')
+      const mzProp = rolParts.length >= 2 ? `${rolParts[0]}-${rolParts[1]}` : null
+      const conDist = similares.map(v => {
+        const la = parseFloat(v.lat), ln = parseFloat(v.lng)
+        const d = (Number.isFinite(la) && Number.isFinite(ln)) ? distanciaM(punto.lat, punto.lng, la, ln) : null
+        return { v, d }
+      }).sort((a, b) => (a.d ?? 1e9) - (b.d ?? 1e9))
+
+      // Las 12 más cercanas alimentan el cálculo del valor (mediana UF/m²)
+      comparablesReales = conDist.slice(0, 12).map(({ v, d }) => {
+        const m2 = Math.round(parseFloat(v.superficie_construccion))
+        const uf = Math.round(parseFloat(v.price))
+        const terr = parseFloat(v.superficie_total_terreno) || 0
+        const mzV = String(v.rol || '').split('-').slice(0, 2).join('-')
+        return {
+          direccion: (v.direccion_sii || 'Sin direccion').toString().replace(/\s+/g, ' ').trim(),
+          tipo: tipoObjetivo || tipo,
+          m2,
+          m2_terreno: terr > 0 ? Math.round(terr) : null,
+          fecha: (v.date_inscripcion || v.fecha || 'N/D').toString().slice(0, 7),
+          precio_uf: uf,
+          uf_m2: m2 > 0 ? Math.round(uf / m2) : null,
+          ano_construccion: v.ano_construccion ? String(v.ano_construccion) : null,
+          mismo_edificio: !!(mzProp && mzV && mzV === mzProp),
+          distancia_m: d != null ? Math.round(d) : null,
+          similitud: calcularSimilitud({ m2_construido: v.superficie_construccion }, m2Construido, m2Terreno),
+        }
+      })
+
+      // Lista + mapa del frontend: LAS MISMAS ventas que respaldan el valor
+      ventasMapa = conDist.slice(0, 150).map(({ v }) => {
+        const la = parseFloat(v.lat), ln = parseFloat(v.lng), uf = Math.round(parseFloat(v.price))
+        if (!Number.isFinite(la) || !Number.isFinite(ln) || !(uf > 0)) return null
+        const m2c = Math.round(parseFloat(v.superficie_construccion))
+        const ter = parseFloat(v.superficie_total_terreno)
+        const av = parseFloat(v.avaluo_fiscal_clp)
+        const co = parseFloat(v.contribuciones_clp)
+        return {
+          lat: la, lng: ln, uf,
+          m2: m2c > 0 ? m2c : null,
+          uf_m2: m2c > 0 ? Math.round(uf / m2c) : null,
+          fecha: String(v.date_inscripcion || v.fecha || '').slice(0, 10),
+          dir: String(v.direccion_sii || '').replace(/\s+/g, ' ').trim() || null,
+          m2_terreno: ter > 0 ? Math.round(ter) : null,
+          ano: v.ano_construccion ? String(v.ano_construccion) : null,
+          destino: v.cod_destino || null,
+          avaluo_clp: av > 0 ? Math.round(av) : null,
+          contrib_clp: co > 0 ? Math.round(co) : null,
+          rol: v.rol || null,
+        }
+      }).filter(Boolean)
+    }
+  } catch (e) {
+    console.error('Error comparables (polígono):', e.message)
+  }
+
+  // ── 1b. Respaldo: método anterior (REST por ROL) si el polígono no alcanzó ──
+  if (comparablesReales.length < 3) {
+    ventasMapa = []
+    try {
     const codCom = siiData?.cod_comuna
       || (rol ? parseInt(String(rol).split('-')[0], 10) : null)
       || COD_COMUNA[normalizaComuna(comuna)]
@@ -290,8 +424,9 @@ export async function POST(request) {
           .slice(0, 12)
       }
     }
-  } catch (e) {
-    console.error('Error fetching comparables (REST):', e.message)
+    } catch (e) {
+      console.error('Error fetching comparables (REST):', e.message)
+    }
   }
 
   // ── 2. VALOR DETERMINÍSTICO ───────────────────────────────────────────────
@@ -340,7 +475,6 @@ export async function POST(request) {
     let baseUrl = ''
     try { baseUrl = new URL(request.url).origin } catch (e) {}
     if (!baseUrl && process.env.VERCEL_URL) baseUrl = `https://${process.env.VERCEL_URL}`
-    const punto = await geocodeDireccion(`${form.direccion || ''}, ${comuna}`)
     if (punto) prcZona = await normativaEnPunto(punto.lng, punto.lat, comuna, baseUrl)
   } catch (e) { console.error('PRC tasar:', e.message) }
   const normativaTexto = prcZona
@@ -568,6 +702,7 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
       }
 
       parsed.ajustes = ajustesExtra
+      parsed.ventas_mapa = ventasMapa
       return Response.json(parsed)
     } catch(parseErr) {
       console.error('JSON parse error:', parseErr.message)
@@ -580,6 +715,7 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
         analisis: extractStr('analisis') || 'Tasación completada.',
         recomendacion_precio_venta: extractStr('recomendacion_precio_venta') || '',
         comparables: comparablesReales,
+        ventas_mapa: ventasMapa,
         ajustes: ajustesExtra,
         desglose: valorDet?.desglose ?? [], factores_positivos: [], factores_negativos: [], plan_regulador: null
       }

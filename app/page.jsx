@@ -680,13 +680,11 @@ function ChatVendedor({ onBack }) {
       const rangoMin = Math.round(valorFinal * 0.93)
       const rangoMax = Math.round(valorFinal * 1.07)
       setMessages(m => [...m, { role:'agent', content:{ type:'tasacion', resultado, valorFinal, rangoMin, rangoMax, ajRemo, ajCar, ajJardin, valorBase, remoInfo:{ tipo: finalData.remodelacion, m2: m2Util, ufM2: AJUSTE_REMO[finalData.remodelacion]||0, tiempo: finalData.tiempo_remo } }}])
-      // Carga (no bloqueante) del mapa de ventas comparables cerca de la propiedad.
+      // Lista + mapa: LAS MISMAS ventas que respaldan el valor (vienen de /api/tasar).
       try {
         const m2Built = parseFloat(finalData.siiData?.m2_construido || finalData.siiData?.m2_util || m2Util) || null
-        const tb = { tipo: finalData.tipo, m2_objetivo: m2Built, direccion: finalData.direccion, comuna: finalData.comuna || '' }
-        setTasBody(tb)
-        fetch('/api/zona', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(tb) })
-          .then((r) => r.json()).then((zj) => { if (zj && Array.isArray(zj.ventas_mapa)) setVentasTasacion(zj.ventas_mapa) }).catch(() => {})
+        setTasBody({ tipo: finalData.tipo, m2_objetivo: m2Built, direccion: finalData.direccion, comuna: finalData.comuna || '' })
+        setVentasTasacion(Array.isArray(resultado.ventas_mapa) && resultado.ventas_mapa.length ? resultado.ventas_mapa : null)
       } catch (e) {}
       const expectativaUF = parseExpectativaUF(finalData.precio_idea)
       const { mensajes } = valorizacionValentina({
@@ -834,21 +832,6 @@ function ChatVendedor({ onBack }) {
             </div>
           )}
 
-          {/* Comparables */}
-          {resultado.comparables?.length>0 && (
-            <div className="comp-mini">
-              <div className="tas-section-title">Transacciones de referencia</div>
-              {resultado.comparables.slice(0,6).map((c,i) => (
-                <div key={i} className="comp-mini-item">
-                  <div>
-                    <div className="comp-mini-addr">{c.direccion} · {c.m2} m² construidos{c.m2_terreno ? ` · ${c.m2_terreno} m² terreno` : ''}</div>
-                    <div className="comp-mini-meta">{c.tipo} · {c.fecha}{c.similitud ? ` · ${c.similitud}` : ''}</div>
-                  </div>
-                  <div><div className="comp-mini-uf">{fmtUF(c.precio_uf)}</div><div className="comp-mini-m2">{c.uf_m2} UF/m²</div></div>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       )
     }
@@ -907,7 +890,7 @@ function ChatVendedor({ onBack }) {
           </div>
         )}
         {vistaTas === 'ventas'
-          ? <VentasMapa ventas={ventasTasacion} titulo="Ventas comparables cerca de la propiedad" />
+          ? <VentasMapa ventas={ventasTasacion} titulo="Ventas comparables que respaldan la tasación" />
           : ofTasLoading
             ? <div style={{ marginTop: 14, color: '#8a8a8a', fontSize: 14 }}>Buscando ofertas vigentes en el sector…</div>
             : <OfertasMapa ofertas={ofertasTasacion} />}
