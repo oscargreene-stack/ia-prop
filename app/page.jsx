@@ -832,6 +832,122 @@ function ChatVendedor({ onBack }) {
             </div>
           )}
 
+          {/* Fachada y vista satelital */}
+          {resultado.punto && process.env.NEXT_PUBLIC_GOOGLE_PLACES_KEY && (
+            <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+              <img
+                src={'https://maps.googleapis.com/maps/api/streetview?size=400x240&fov=75&location=' + resultado.punto.lat + ',' + resultado.punto.lng + '&key=' + process.env.NEXT_PUBLIC_GOOGLE_PLACES_KEY}
+                alt="Fachada (Street View)"
+                style={{ width: '50%', minWidth: 0, borderRadius: 10, objectFit: 'cover' }}
+                onError={(e) => { e.currentTarget.style.display = 'none' }}
+              />
+              <img
+                src={'https://maps.googleapis.com/maps/api/staticmap?zoom=18&size=400x240&maptype=hybrid&center=' + resultado.punto.lat + ',' + resultado.punto.lng + '&markers=color:red%7C' + resultado.punto.lat + ',' + resultado.punto.lng + '&key=' + process.env.NEXT_PUBLIC_GOOGLE_PLACES_KEY}
+                alt="Vista satelital"
+                style={{ width: '50%', minWidth: 0, borderRadius: 10, objectFit: 'cover' }}
+                onError={(e) => { e.currentTarget.style.display = 'none' }}
+              />
+            </div>
+          )}
+
+          {/* Arriendo y rentabilidad */}
+          {resultado.arriendo?.uf_mes > 0 && (
+            <div className="tas-section">
+              <div className="tas-section-title">💰 Arriendo y rentabilidad</div>
+              <div className="tasacion-grid">
+                <div className="tasacion-item"><div className="tasacion-item-label">Arriendo estimado</div><div className="tasacion-item-val">{resultado.arriendo.uf_mes} UF/mes</div></div>
+                {resultado.arriendo.rentabilidad_pct != null && <div className="tasacion-item"><div className="tasacion-item-label">Rentabilidad anual</div><div className="tasacion-item-val">{resultado.arriendo.rentabilidad_pct}%</div></div>}
+                {resultado.arriendo.retorno_anos != null && <div className="tasacion-item"><div className="tasacion-item-label">Retorno inversión</div><div className="tasacion-item-val">{resultado.arriendo.retorno_anos} años</div></div>}
+              </div>
+              <div style={{ fontSize: 11, color: '#9a9a9a', marginTop: 6 }}>Mediana de {resultado.arriendo.n_ofertas} ofertas de arriendo vigentes de tipología similar en el sector.</div>
+            </div>
+          )}
+
+          {/* Historial de esta propiedad */}
+          {resultado.historial_propiedad?.length > 0 && (
+            <div className="tas-section">
+              <div className="tas-section-title">📜 Ventas anteriores de esta propiedad</div>
+              {resultado.historial_propiedad.map((h, i) => (
+                <div key={i} className="tas-row">
+                  <div>
+                    <div className="tas-row-label">Inscrita el {h.fecha}</div>
+                    {h.m2 ? <div className="tas-row-calc">{h.m2} m²{h.uf_m2 ? ' · ' + h.uf_m2 + ' UF/m²' : ''}</div> : null}
+                  </div>
+                  <div className="tas-row-val">{fmtUF(h.uf)}</div>
+                </div>
+              ))}
+              {valorFinal > 0 && resultado.historial_propiedad[0]?.uf > 0 && (
+                <div style={{ fontSize: 12, color: '#cfcfcf', marginTop: 6 }}>
+                  Frente a la última venta registrada ({resultado.historial_propiedad[0].fecha}), esta tasación implica una variación de <b style={{ color: valorFinal >= resultado.historial_propiedad[0].uf ? '#7ac97a' : '#e07a7a' }}>{Math.round(((valorFinal / resultado.historial_propiedad[0].uf) - 1) * 100)}%</b>.
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Ventas en el mismo edificio / conjunto */}
+          {resultado.ventas_conjunto?.length > 0 && (
+            <div className="tas-section">
+              <div className="tas-section-title">🏢 Ventas en el mismo edificio o conjunto</div>
+              {resultado.ventas_conjunto.slice(0, 8).map((c, i) => (
+                <div key={i} className="tas-row">
+                  <div>
+                    <div className="tas-row-label">{c.direccion || 'Venta registrada'}</div>
+                    <div className="tas-row-calc">{[c.fecha, c.m2 ? c.m2 + ' m²' : null, c.uf_m2 ? c.uf_m2 + ' UF/m²' : null].filter(Boolean).join(' · ')}</div>
+                  </div>
+                  <div className="tas-row-val">{fmtUF(c.uf)}</div>
+                </div>
+              ))}
+              {resultado.ventas_conjunto.length > 8 && <div style={{ fontSize: 11, color: '#9a9a9a', marginTop: 6 }}>+{resultado.ventas_conjunto.length - 8} ventas más registradas en el conjunto.</div>}
+            </div>
+          )}
+
+          {/* Radiografía del sector */}
+          {resultado.sector && (resultado.sector.composicion || resultado.sector.indice_uf_m2 || resultado.sector.plusvalia_12m_pct != null) && (
+            <div className="tas-section">
+              <div className="tas-section-title">📊 Radiografía del sector</div>
+              {resultado.sector.plusvalia_12m_pct != null && (
+                <div style={{ margin: '6px 0 10px', fontSize: 14, color: '#e8e8e8' }}>
+                  Plusvalía últimos 12 meses: <b style={{ color: resultado.sector.plusvalia_12m_pct >= 0 ? '#7ac97a' : '#e07a7a' }}>{resultado.sector.plusvalia_12m_pct > 0 ? '+' : ''}{resultado.sector.plusvalia_12m_pct}%</b> <span style={{ color: '#9a9a9a', fontSize: 12 }}>(mediana UF/m² del sector, mismo tipo de propiedad)</span>
+                </div>
+              )}
+              {resultado.sector.composicion && (
+                <div style={{ marginBottom: 12 }}>
+                  <div style={{ display: 'flex', height: 10, borderRadius: 6, overflow: 'hidden', border: '1px solid rgba(255,255,255,0.12)' }}>
+                    {resultado.sector.composicion.map((c, i) => (
+                      <div key={i} style={{ width: c.pct + '%', background: ['#caa15a', '#5a86ca', '#7ac97a', '#b06fc9', '#888888'][i % 5] }} title={c.tipo + ' ' + c.pct + '%'} />
+                    ))}
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginTop: 6, fontSize: 12, color: '#cfcfcf' }}>
+                    {resultado.sector.composicion.map((c, i) => (
+                      <span key={i}><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: ['#caa15a', '#5a86ca', '#7ac97a', '#b06fc9', '#888888'][i % 5], marginRight: 4 }} />{c.tipo} {c.pct}%</span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {resultado.sector.indice_uf_m2?.length >= 2 && (() => {
+                const serieIdx = resultado.sector.indice_uf_m2
+                const maxIdx = Math.max(...serieIdx.map((x) => x.uf_m2))
+                return (
+                  <div>
+                    <div style={{ fontSize: 12, color: '#9a9a9a', marginBottom: 4 }}>Evolución UF/m² del sector (mediana por trimestre, ventas reales CBR)</div>
+                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 84 }}>
+                      {serieIdx.map((x, i) => (
+                        <div key={i} style={{ flex: 1, textAlign: 'center' }}>
+                          <div style={{ fontSize: 10, color: '#cfcfcf' }}>{x.uf_m2}</div>
+                          <div style={{ height: Math.max(6, Math.round((x.uf_m2 / maxIdx) * 58)), background: 'var(--gold-dim)', border: '1px solid var(--gold)', borderRadius: '4px 4px 0 0' }} />
+                          <div style={{ fontSize: 9, color: '#8a8a8a', marginTop: 2, whiteSpace: 'nowrap' }}>{x.trimestre}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })()}
+            </div>
+          )}
+
+          {/* Puntos de interés cercanos */}
+          {resultado.punto && <PuntosInteres punto={resultado.punto} />}
+
         </div>
       )
     }
@@ -1636,6 +1752,75 @@ function OfertasMapa({ ofertas }) {
 }
 
 // Mapa reutilizable de ventas (pastillas de precio + clusters), modelo Data Inmobiliaria.
+// Puntos de interés cercanos a la propiedad (Google Places): transporte,
+// educación, salud, comercio y áreas verdes, con distancia en metros.
+function PuntosInteres({ punto }) {
+  const [pois, setPois] = useState(null)
+  const holderRef = useRef(null)
+  useEffect(() => {
+    if (!punto) return
+    let cancel = false
+    fcLoadGmaps().then(() => {
+      const g = window.google && window.google.maps
+      if (cancel || !g || !g.places || !holderRef.current) return
+      const svc = new g.places.PlacesService(holderRef.current)
+      const loc = new g.LatLng(punto.lat, punto.lng)
+      const distM = (la, ln) => {
+        const rad = Math.PI / 180, R = 6371000
+        const dLa = (la - punto.lat) * rad, dLn = (ln - punto.lng) * rad
+        const a = Math.sin(dLa / 2) ** 2 + Math.cos(punto.lat * rad) * Math.cos(la * rad) * Math.sin(dLn / 2) ** 2
+        return Math.round(2 * R * Math.asin(Math.sqrt(a)))
+      }
+      const CATS = [
+        { id: 'Transporte', type: 'subway_station', icon: '🚇' },
+        { id: 'Educación', type: 'school', icon: '🎓' },
+        { id: 'Salud', type: 'hospital', icon: '🏥' },
+        { id: 'Áreas verdes', type: 'park', icon: '🌳' },
+        { id: 'Comercio', type: 'supermarket', icon: '🛒' },
+      ]
+      const out = []
+      let done = 0
+      CATS.forEach((cat) => {
+        svc.nearbySearch({ location: loc, radius: 1200, type: cat.type }, (res, status) => {
+          if (status === g.places.PlacesServiceStatus.OK && Array.isArray(res)) {
+            const items = res.slice(0, 3).map((pl) => ({
+              nombre: pl.name,
+              dist: pl.geometry?.location ? distM(pl.geometry.location.lat(), pl.geometry.location.lng()) : null,
+            }))
+            if (items.length) out.push({ ...cat, items })
+          }
+          done++
+          if (done === CATS.length && !cancel) setPois(out)
+        })
+      })
+    })
+    return () => { cancel = true }
+  }, [punto])
+  if (!punto) return null
+  return (
+    <div>
+      <div ref={holderRef} style={{ display: 'none' }} />
+      {pois?.length > 0 && (
+        <div className="tas-section">
+          <div className="tas-section-title">📍 Puntos de interés cercanos</div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10 }}>
+            {pois.map((c, i) => (
+              <div key={i}>
+                <div style={{ fontSize: 12, color: 'var(--gold-light)', fontWeight: 700, marginBottom: 4 }}>{c.icon} {c.id}</div>
+                {c.items.map((pl, j) => (
+                  <div key={j} style={{ fontSize: 12, color: '#cfcfcf', marginBottom: 2 }}>
+                    {pl.nombre} {pl.dist != null ? <span style={{ color: '#8a8a8a' }}>({pl.dist} m)</span> : null}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function VentasMapa({ ventas, titulo }) {
   const mapRef = useRef(null)
   const mkRef = useRef([])

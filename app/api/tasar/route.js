@@ -262,6 +262,13 @@ export async function POST(request) {
   // única fuente salen: el valor de la tasación, la lista y el mapa.
   let comparablesReales = []
   let ventasMapa = []
+  let sectorComposicion = null
+  let ventasConjunto = []
+  let historialPropiedad = []
+  let indiceSector = null
+  let plusvalia12m = null
+  let arriendoMediana = null
+  let arriendoN = 0
   const tipoObjetivo = TIPO_OBJETIVO[String(tipo || '').toLowerCase()] || null
   try {
     if (punto && DATAINM_TOKEN) {
@@ -361,6 +368,64 @@ export async function POST(request) {
           rol: v.rol || null,
         }
       }).filter(Boolean)
+
+      // ── Datos extra para el informe (sobre las mismas ventas del polígono) ──
+      // Composición del sector por tipo de propiedad
+      const compCount = {}
+      ventas.forEach(v => { const t = clasificaTipo(v); compCount[t] = (compCount[t] || 0) + 1 })
+      const compTot = Object.values(compCount).reduce((a, b) => a + b, 0)
+      if (compTot >= 10) {
+        sectorComposicion = Object.entries(compCount).sort((a, b) => b[1] - a[1])
+          .map(([t, n]) => ({ tipo: t, n, pct: Math.round((n * 100) / compTot) }))
+      }
+
+      const mediana_ = (arr) => { const st = [...arr].sort((a, b) => a - b); const m = Math.floor(st.length / 2); return st.length % 2 ? st[m] : (st[m - 1] + st[m]) / 2 }
+      const filaVenta = (v) => {
+        const m2f = Math.round(parseFloat(v.superficie_construccion)) || null
+        const uff = Math.round(parseFloat(v.price))
+        return {
+          direccion: String(v.direccion_sii || '').replace(/\s+/g, ' ').trim() || null,
+          rol: v.rol || null,
+          fecha: String(v.date_inscripcion || v.fecha || '').slice(0, 10),
+          m2: m2f, uf: uff, uf_m2: m2f && uff ? Math.round(uff / m2f) : null,
+        }
+      }
+
+      // Ventas en el mismo edificio / conjunto (misma manzana del ROL, mismo tipo)
+      if (mzProp) {
+        ventasConjunto = ventas
+          .filter(v => String(v.rol || '').split('-').slice(0, 2).join('-') === mzProp)
+          .filter(v => (!tipoObjetivo || clasificaTipo(v) === tipoObjetivo) && String(v.unit || '').toUpperCase() === 'UF' && parseFloat(v.price) > 0)
+          .map(filaVenta)
+          .sort((a, b) => (a.fecha < b.fecha ? 1 : -1))
+          .slice(0, 16)
+      }
+
+      // Historial de ventas de ESTA propiedad (mismo ROL exacto)
+      if (rol) {
+        historialPropiedad = ventas
+          .filter(v => String(v.rol || '') === String(rol) && String(v.unit || '').toUpperCase() === 'UF' && parseFloat(v.price) > 0)
+          .map(filaVenta)
+          .sort((a, b) => (a.fecha < b.fecha ? 1 : -1))
+          .slice(0, 6)
+      }
+
+      // Índice UF/m² del sector por trimestre + plusvalía 12 meses (mismo tipo)
+      const serie = base
+        .map(v => ({ f: String(v.date_inscripcion || v.fecha || '').slice(0, 10), r: parseFloat(v.price) / parseFloat(v.superficie_construccion) }))
+        .filter(x => x.f.length === 10 && x.r > 0)
+      const porTrim = {}
+      serie.forEach(({ f, r }) => { const q = f.slice(0, 4) + ' T' + (Math.floor((+f.slice(5, 7) - 1) / 3) + 1); (porTrim[q] = porTrim[q] || []).push(r) })
+      const trims = Object.keys(porTrim).sort()
+        .map(q => ({ trimestre: q, uf_m2: Math.round(mediana_(porTrim[q]) * 10) / 10, n: porTrim[q].length }))
+        .filter(x => x.n >= 3)
+      if (trims.length >= 2) indiceSector = trims.slice(-8)
+      const hoyD = new Date()
+      const d12 = new Date(hoyD); d12.setFullYear(hoyD.getFullYear() - 1)
+      const d24 = new Date(hoyD); d24.setFullYear(hoyD.getFullYear() - 2)
+      const s12 = serie.filter(x => x.f >= d12.toISOString().slice(0, 10)).map(x => x.r)
+      const s24 = serie.filter(x => x.f >= d24.toISOString().slice(0, 10) && x.f < d12.toISOString().slice(0, 10)).map(x => x.r)
+      if (s12.length >= 3 && s24.length >= 3) plusvalia12m = Math.round((mediana_(s12) / mediana_(s24) - 1) * 1000) / 10
     }
   } catch (e) {
     console.error('Error comparables (polígono):', e.message)
@@ -429,6 +494,41 @@ export async function POST(request) {
     }
   }
 
+  // ── 1c. Arriendo de referencia del sector (ofertas de portales) ────────────
+  try {
+    if (punto && DATAINM_TOKEN && ['departamento', 'casa', 'oficina'].includes(tipoObjetivo || '')) {
+      const polyArr = poligono(punto.lat, punto.lng, 1200)
+      let raw = []
+      for (let page = 1; page <= 2; page++) {
+        const r = await fetch('https://datainmobiliaria.cl/api/v1/busqueda_poligono', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + DATAINM_TOKEN },
+          body: JSON.stringify({ fuente: 'oferta', polygon: polyArr, page, property_type: [tipoObjetivo], transaction_type: 'arriendo', active_publications: 'true' }),
+        })
+        if (!r.ok) break
+        const j = await r.json()
+        raw = raw.concat(Array.isArray(j.resultados) ? j.resultados : [])
+        if (!j.has_more || raw.length >= 100) break
+      }
+      const UF_CLP = 40408
+      const vals = raw.map(v => {
+        let precio = parseFloat(v.price)
+        if (!(precio > 0)) return null
+        const mon = String(v.moneda || '').toUpperCase()
+        if (mon.includes('CLP') || mon === 'PESO' || precio > 3000) precio = precio / UF_CLP // publicado en pesos
+        const m2a = parseFloat(v.superficie_util)
+        if (m2Construido && m2a > 0 && (m2a < m2Construido * 0.6 || m2a > m2Construido * 1.5)) return null
+        if (precio < 3 || precio > 400) return null // UF/mes fuera de rango razonable
+        return precio
+      }).filter(x => x != null)
+      if (vals.length >= 3) {
+        const st = [...vals].sort((a, b) => a - b); const m = Math.floor(st.length / 2)
+        arriendoMediana = Math.round((st.length % 2 ? st[m] : (st[m - 1] + st[m]) / 2) * 10) / 10
+        arriendoN = vals.length
+      }
+    }
+  } catch (e) { console.error('Arriendo tasar:', e.message) }
+
   // ── 2. VALOR DETERMINÍSTICO ───────────────────────────────────────────────
   // Se calcula ANTES del LLM para poder pasárselo como dato autoritativo.
   const ajustesCfg = await getAjustesConfig()
@@ -479,6 +579,13 @@ export async function POST(request) {
   } catch (e) { console.error('PRC tasar:', e.message) }
   const normativaTexto = prcZona
     ? `\n\nNORMATIVA OFICIAL DEL PLAN REGULADOR (AUTORITATIVA — úsala tal cual en plan_regulador y en tu análisis, NO la inventes):\n${JSON.stringify({ zona: prcZona.zona, nombre_zona: prcZona.nombre, uso_suelo: prcZona.uso, densidad: prcZona.densidad, superficie_predial_minima_m2: prcZona.predial_min, constructibilidad: prcZona.constructibilidad, fuente: prcZona.fuente }, null, 2)}`
+    : ''
+
+  // Datos reales del sector para que la narración los use (no los invente)
+  const sectorTexto = (plusvalia12m != null || arriendoMediana)
+    ? '\n\nDATOS REALES DEL SECTOR (úsalos en tu análisis):'
+      + (plusvalia12m != null ? '\n- Plusvalía del sector últimos 12 meses (mediana UF/m²): ' + plusvalia12m + '%' : '')
+      + (arriendoMediana ? '\n- Arriendo de referencia para esta tipología: ' + arriendoMediana + ' UF/mes (' + arriendoN + ' ofertas vigentes del sector)' : '')
     : ''
 
   // ── 3. Armar prompt: el LLM SOLO narra ─────────────────────────────────────
@@ -600,7 +707,7 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
         model: 'claude-sonnet-4-5',
         max_tokens: 3000,
         system: systemPrompt,
-        messages: [{ role: 'user', content: `Tasa esta propiedad:\n\n${detalles}${comparablesTexto}${valorTexto}${normativaTexto}` }],
+        messages: [{ role: 'user', content: `Tasa esta propiedad:\n\n${detalles}${comparablesTexto}${valorTexto}${normativaTexto}${sectorTexto}` }],
       }),
     })
 
@@ -703,6 +810,17 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
 
       parsed.ajustes = ajustesExtra
       parsed.ventas_mapa = ventasMapa
+      parsed.punto = punto ? { lat: punto.lat, lng: punto.lng } : null
+      parsed.sector = { composicion: sectorComposicion, indice_uf_m2: indiceSector, plusvalia_12m_pct: plusvalia12m }
+      parsed.ventas_conjunto = ventasConjunto
+      parsed.historial_propiedad = historialPropiedad
+      const _valorRef = parsed.valor_uf || null
+      parsed.arriendo = arriendoMediana ? {
+        uf_mes: arriendoMediana,
+        n_ofertas: arriendoN,
+        rentabilidad_pct: _valorRef ? Math.round(((arriendoMediana * 12) / _valorRef) * 1000) / 10 : null,
+        retorno_anos: _valorRef ? Math.round(_valorRef / (arriendoMediana * 12)) : null,
+      } : null
       return Response.json(parsed)
     } catch(parseErr) {
       console.error('JSON parse error:', parseErr.message)
@@ -716,6 +834,11 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
         recomendacion_precio_venta: extractStr('recomendacion_precio_venta') || '',
         comparables: comparablesReales,
         ventas_mapa: ventasMapa,
+        punto: punto ? { lat: punto.lat, lng: punto.lng } : null,
+        sector: { composicion: sectorComposicion, indice_uf_m2: indiceSector, plusvalia_12m_pct: plusvalia12m },
+        ventas_conjunto: ventasConjunto,
+        historial_propiedad: historialPropiedad,
+        arriendo: arriendoMediana ? { uf_mes: arriendoMediana, n_ofertas: arriendoN, rentabilidad_pct: null, retorno_anos: null } : null,
         ajustes: ajustesExtra,
         desglose: valorDet?.desglose ?? [], factores_positivos: [], factores_negativos: [], plan_regulador: null
       }
