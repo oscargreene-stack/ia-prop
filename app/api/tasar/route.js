@@ -27,6 +27,33 @@ function normalizaComuna(s) {
     .replace(/Ñ/g,'N')
 }
 
+// ── Clasificación por TIPO REAL (mismo criterio que /api/zona) ────────────────
+// El cod_destino de la query ('H') mezcla casas y departamentos: cada venta se
+// clasifica por sus datos reales (copropiedad, cod_destino, superficies) y solo
+// se usan comparables del MISMO tipo que la propiedad tasada.
+function clasificaTipo(v) {
+  const dest = String(v.cod_destino || '').toUpperCase()
+  const constr = parseFloat(v.superficie_construccion || 0) || 0
+  const terreno = parseFloat(v.superficie_total_terreno || 0) || 0
+  // Sitio / terreno sin construcción (valor de suelo puro)
+  if (constr <= 5 && terreno > 0) return 'terreno'
+  if (dest === 'O') return 'oficina'
+  if (dest === 'C') return 'comercial'
+  if (dest && dest !== 'H') return 'otro'
+  // Copropiedad (unidad en edificio) => departamento, aunque el registro traiga
+  // terreno (el del lote del edificio). Evita mezclar casas entre los deptos.
+  if (String(v.copropiedad || '').toLowerCase() === 't') return 'departamento'
+  return terreno > 0 ? 'casa' : 'departamento'
+}
+
+const TIPO_OBJETIVO = {
+  casa: 'casa',
+  departamento: 'departamento',
+  depto: 'departamento',
+  oficina: 'oficina',
+  comercial: 'comercial',
+}
+
 // Geocodifica una dirección a {lat,lng} (mismo enfoque que /api/zona). Sirve para ubicar
 // la propiedad en su zona del Plan Regulador.
 const GKEY = process.env.NEXT_PUBLIC_GOOGLE_PLACES_KEY
@@ -232,16 +259,23 @@ export async function POST(request) {
         const ventas = Array.isArray(data.detalle_ventas_recientes) ? data.detalle_ventas_recientes : []
         const filtro = Array.isArray(data.comparables_filtro) ? data.comparables_filtro : []
         const fuente = filtro.length > 0 ? filtro : ventas
+        // Solo ventas de los últimos 5 años (mismo criterio que /api/zona).
+        const _cutoff = new Date(); _cutoff.setFullYear(_cutoff.getFullYear() - 5)
+        const _cutoffStr = _cutoff.toISOString().slice(0, 10)
+        // Solo comparables del MISMO tipo real que la propiedad tasada.
+        const tipoObjetivo = TIPO_OBJETIVO[String(tipo || '').toLowerCase()] || null
         comparablesReales = fuente
           .filter(v => parseFloat(v.superficie_construccion) > 0 && parseFloat(v.price) > 0 && (v.unit === 'UF' || !v.unit))
+          .filter(v => !tipoObjetivo || clasificaTipo(v) === tipoObjetivo)
+          .filter(v => { const f = String(v.date_inscripcion || v.fecha || '').slice(0, 10); return !f || f >= _cutoffStr })
           .map(v => {
             const m2 = Math.round(parseFloat(v.superficie_construccion))
             const uf = Math.round(parseFloat(v.price))
             return {
               direccion: (v.direccion_sii || 'Sin direccion').toString().trim(),
-              tipo: tipo,
+              tipo: tipoObjetivo || tipo,
               m2: m2,
-              m2_terreno: null,
+              m2_terreno: (parseFloat(v.superficie_total_terreno) > 0) ? Math.round(parseFloat(v.superficie_total_terreno)) : null,
               fecha: (v.fecha || 'N/D').toString().slice(0, 7),
               precio_uf: uf,
               uf_m2: m2 > 0 ? Math.round(uf / m2) : null,
