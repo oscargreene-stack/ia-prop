@@ -651,8 +651,12 @@ export async function POST(request) {
     if (!baseUrl && process.env.VERCEL_URL) baseUrl = `https://${process.env.VERCEL_URL}`
     if (punto) prcZona = await normativaEnPunto(punto.lng, punto.lat, comuna, baseUrl)
   } catch (e) { console.error('PRC tasar:', e.message) }
+  const esSubMinimo = !!(prcZona && prcZona.predial_min && m2Terreno && m2Terreno < prcZona.predial_min)
+  const notaPredial = esSubMinimo
+    ? `\nNOTA OBLIGATORIA: el terreno (${m2Terreno} m²) es menor al predial mínimo (${prcZona.predial_min} m²), pero el predio YA está subdividido e inscrito: SÍ puede demolerse y construirse una vivienda nueva. Menciona solo que no es apto para proyecto inmobiliario (subdividir o más de una vivienda). NO digas que no se puede demoler o reconstruir.`
+    : ''
   const normativaTexto = prcZona
-    ? `\n\nNORMATIVA OFICIAL DEL PLAN REGULADOR (AUTORITATIVA — úsala tal cual en plan_regulador y en tu análisis, NO la inventes):\n${JSON.stringify({ zona: prcZona.zona, nombre_zona: prcZona.nombre, uso_suelo: prcZona.uso, densidad: prcZona.densidad, superficie_predial_minima_m2: prcZona.predial_min, constructibilidad: prcZona.constructibilidad, fuente: prcZona.fuente }, null, 2)}`
+    ? `\n\nNORMATIVA OFICIAL DEL PLAN REGULADOR (AUTORITATIVA — úsala tal cual en plan_regulador y en tu análisis, NO la inventes):\n${JSON.stringify({ zona: prcZona.zona, nombre_zona: prcZona.nombre, uso_suelo: prcZona.uso, densidad: prcZona.densidad, superficie_predial_minima_m2: prcZona.predial_min, constructibilidad: prcZona.constructibilidad, fuente: prcZona.fuente }, null, 2)}${notaPredial}`
     : ''
 
   // Datos reales del sector para que la narración los use (no los invente)
@@ -679,6 +683,7 @@ VALOR DETERMINÍSTICO (AUTORITATIVO):
 PLAN REGULADOR:
 - Si se te entrega una "NORMATIVA OFICIAL DEL PLAN REGULADOR", úsala EXACTAMENTE (zona, nombre, uso de suelo, predial mínimo). NO inventes una zona distinta.
 - Si NO se te entrega, recién ahí estima la zonificación con tu conocimiento, y acláralo como referencial.
+- SUPERFICIE PREDIAL MÍNIMA — regla OBLIGATORIA: rige solo para NUEVAS subdivisiones y para proyectos de más de una vivienda. Un predio YA subdividido e inscrito con superficie menor MANTIENE sus derechos: SÍ se puede demoler la casa y construir una vivienda nueva. NUNCA digas que no se puede demoler, reconstruir, que el predio queda "congelado", "no conforme" o que pierde valor por no cumplir el predial mínimo. Si el terreno es menor al predial mínimo, di ÚNICAMENTE que no es apto para proyecto inmobiliario (subdividir o construir más de una vivienda), y nada más.
 
 PERFIL:
 - Conoces el mercado inmobiliario chileno 2023-2025: precios reales por comuna, tendencias, factores.
@@ -842,6 +847,10 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
       // Se mantiene densidad_max del LLM (la usa el cálculo de potencial); el resto es oficial.
       if (prcZona) {
         const prevObs = (parsed.plan_regulador && parsed.plan_regulador.observaciones) || ''
+        // Predio menor al predial mínimo: el mínimo rige para NUEVAS subdivisiones.
+        // Un predio ya inscrito mantiene sus derechos (demoler y reponer UNA vivienda);
+        // solo queda inhabilitado para proyecto inmobiliario. Texto fijo, sin dramatismo.
+        const obsBase = `Superficie predial mínima ~${prcZona.predial_min} m² · fuente: Plan Regulador${prcZona.fuente === 'ordenanza' ? ' (Ordenanza)' : ''}.`
         parsed.plan_regulador = {
           ...(parsed.plan_regulador || {}),
           zona: prcZona.zona,
@@ -849,7 +858,15 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
           uso_suelo: prcZona.uso || (parsed.plan_regulador && parsed.plan_regulador.uso_suelo) || null,
           ...(prcZona.constructibilidad != null ? { coef_constructibilidad: prcZona.constructibilidad } : {}),
           superficie_predial_minima_m2: prcZona.predial_min,
-          observaciones: `Superficie predial mínima ~${prcZona.predial_min} m² · fuente: Plan Regulador${prcZona.fuente === 'ordenanza' ? ' (Ordenanza)' : ''}. ${prevObs}`.trim(),
+          observaciones: esSubMinimo
+            ? `${obsBase} El mínimo rige para nuevas subdivisiones: este predio ya está subdividido e inscrito, por lo que puede demolerse y construirse una vivienda nueva. No es apto para proyecto inmobiliario (subdivisión o más de una vivienda).`
+            : `${obsBase} ${prevObs}`.trim(),
+        }
+        if (esSubMinimo) {
+          const canon = 'Terreno bajo el predial mínimo: apto para reponer una vivienda, no para proyecto inmobiliario.'
+          const reAlarma = /predial|demol|reconstru|subdivi|no conforme|congelad/i
+          parsed.factores_negativos = [...(Array.isArray(parsed.factores_negativos) ? parsed.factores_negativos : []).filter(f => !reAlarma.test(String(f))), canon]
+          if (parsed.plan_regulador && reAlarma.test(String(parsed.plan_regulador.impacto_valor || ''))) parsed.plan_regulador.impacto_valor = canon
         }
       }
 

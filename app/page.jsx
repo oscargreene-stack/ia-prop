@@ -784,7 +784,7 @@ function ChatVendedor({ onBack }) {
           {/* Plan Regulador */}
           {pr && (
             <div className="tas-section">
-              <div className="tas-section-title">📋 Plan Regulador — {pr.zona || ''} {pr.nombre_zona || ''}</div>
+              <div className="tas-section-title">📋 Plan Regulador — {pr.zona || ''}{pr.nombre_zona && pr.nombre_zona !== pr.zona ? ' · ' + pr.nombre_zona : ''}</div>
               <div className="plan-grid">
                 {pr.uso_suelo && <div className="plan-item"><div className="plan-label">Uso de suelo</div><div className="plan-val">{pr.uso_suelo}</div></div>}
                 {pr.altura_max_pisos && <div className="plan-item"><div className="plan-label">Altura máx.</div><div className="plan-val">{pr.altura_max_pisos} pisos{pr.altura_max_m ? ` / ${pr.altura_max_m}m` : ''}</div></div>}
@@ -1874,7 +1874,7 @@ function InformePrint({ data, onClose }) {
 
         {r.plan_regulador && (
           <div style={S.sec}>
-            <div style={S.h2}>4 · Plan regulador {r.plan_regulador.zona ? '— ' + r.plan_regulador.zona : ''} {r.plan_regulador.nombre_zona || ''}</div>
+            <div style={S.h2}>4 · Plan regulador {r.plan_regulador.zona ? '— ' + r.plan_regulador.zona : ''}{r.plan_regulador.nombre_zona && r.plan_regulador.nombre_zona !== r.plan_regulador.zona ? ' · ' + r.plan_regulador.nombre_zona : ''}</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '4px 14px' }}>
               {[
                 ['Uso de suelo', r.plan_regulador.uso_suelo],
