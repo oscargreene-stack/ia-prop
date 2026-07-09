@@ -269,6 +269,7 @@ export async function POST(request) {
   let plusvalia12m = null
   let arriendoMediana = null
   let arriendoN = 0
+  let sueloInfo = null
   const tipoObjetivo = TIPO_OBJETIVO[String(tipo || '').toLowerCase()] || null
   try {
     if (punto && DATAINM_TOKEN) {
@@ -426,6 +427,45 @@ export async function POST(request) {
       const s12 = serie.filter(x => x.f >= d12.toISOString().slice(0, 10)).map(x => x.r)
       const s24 = serie.filter(x => x.f >= d24.toISOString().slice(0, 10) && x.f < d12.toISOString().slice(0, 10)).map(x => x.r)
       if (s12.length >= 3 && s24.length >= 3) plusvalia12m = Math.round((mediana_(s12) / mediana_(s24) - 1) * 1000) / 10
+
+      // ── Valor de SUELO del sector (solo casas — modelo aditivo como /api/zona) ──
+      // (1) ventas de sitios (terreno sin construcción); (2) si no alcanzan,
+      // método residual sobre las ventas de casas: (precio − 32 UF/m²·constr) / terreno.
+      if (tipoObjetivo === 'casa') {
+        const sitios = ventas.filter(v => clasificaTipo(v) === 'terreno' && String(v.unit || '').toUpperCase() === 'UF')
+        const sueloVentasPts = sitios.map(v => {
+          const t = parseFloat(v.superficie_total_terreno), uf = parseFloat(v.price)
+          if (!(t > 0) || !(uf > 0)) return null
+          const rr = uf / t
+          return (rr >= 0.3 && rr <= 250) ? { r: rr, lot: t } : null
+        }).filter(Boolean)
+        const COSTO_RESIDUAL = 32 // UF/m² de construcción (≈ buen estado) para despejar el suelo
+        const sueloResidualPts = base.map(v => {
+          const t = parseFloat(v.superficie_total_terreno), c = parseFloat(v.superficie_construccion), uf = parseFloat(v.price)
+          if (!(t > 0) || !(c > 0) || !(uf > 0)) return null
+          const rr = (uf - COSTO_RESIDUAL * c) / t
+          return (rr >= 0.3 && rr <= 250) ? { r: rr, lot: t } : null
+        }).filter(Boolean)
+        const usarVentas = sueloVentasPts.length >= 3
+        const sueloPts = usarVentas ? sueloVentasPts : sueloResidualPts
+        if (sueloPts.length >= 3) {
+          // Tramo por tamaño de sitio: el UF/m² de suelo depende del tamaño del lote
+          const TRAMOS = [[0, 500], [500, 800], [800, 1200], [1200, Infinity]]
+          let vals = sueloPts.map(pt => pt.r)
+          let tramoTxt = 'todos los tamaños de sitio'
+          if (m2Terreno > 0) {
+            const tr = TRAMOS.find(([a, b]) => m2Terreno >= a && m2Terreno < b)
+            const enTramo = sueloPts.filter(pt => pt.lot >= tr[0] && pt.lot < tr[1]).map(pt => pt.r)
+            if (enTramo.length >= 3) { vals = enTramo; tramoTxt = 'sitios de ' + tr[0] + '–' + (tr[1] === Infinity ? 'más' : tr[1]) + ' m²' }
+          }
+          sueloInfo = {
+            uf_m2: Math.round(mediana_(vals) * 10) / 10,
+            n: vals.length,
+            fuente: usarVentas ? 'ventas reales de sitios' : 'residual sobre ventas de casas',
+            tramo: tramoTxt,
+          }
+        }
+      }
     }
   } catch (e) {
     console.error('Error comparables (polígono):', e.message)
@@ -534,7 +574,41 @@ export async function POST(request) {
   const ajustesCfg = await getAjustesConfig()
   let valorDet = null      // { valor_uf, precio_m2, confianza, desglose[] }
   let precioM2Base = null  // precio por m² base (mediana CBR), para el jardín
-  if (comparablesReales.length > 0 && m2Construido) {
+
+  // ── CASAS: modelo ADITIVO (suelo × m² terreno + construcción × m² construidos) ──
+  // El UF/m² construido de otras casas arrastra el valor de SUS terrenos: aplicarlo
+  // directo sobrevalora las casas con sitio chico y subvalora las de sitio grande.
+  if (tipoObjetivo === 'casa' && sueloInfo && m2Terreno > 0 && m2Construido) {
+    const COSTOS = {
+      premium:  { nueva: [40, 55], buena: [34, 40], regular: [24, 32], mala: [16, 22] },
+      alta:     { nueva: [40, 50], buena: [33, 41], regular: [24, 32], mala: [16, 23] },
+      estandar: { nueva: [38, 45], buena: [30, 38], regular: [22, 30], mala: [15, 22] },
+    }
+    const ETIQUETA = { nueva: 'a estrenar', buena: 'buen estado', regular: 'estado regular', mala: 'a refaccionar' }
+    const cNorm = normalizaComuna(comuna)
+    const tier = ['VITACURA', 'LAS CONDES', 'LO BARNECHEA'].includes(cNorm) ? 'premium'
+      : ['PROVIDENCIA', 'NUNOA', 'LA REINA'].includes(cNorm) ? 'alta' : 'estandar'
+    const edad = anio ? new Date().getFullYear() - parseInt(anio, 10) : 30
+    const remo = String(answers?.remodelacion || '').toLowerCase()
+    const estado = edad <= 8 ? 'nueva' : edad <= 25 ? 'buena' : edad <= 50 ? 'regular' : (remo && remo !== 'ninguna' ? 'regular' : 'mala')
+    const costoUfM2 = Math.round((COSTOS[tier][estado][0] + COSTOS[tier][estado][1]) / 2)
+    const sueloUf = Math.round(sueloInfo.uf_m2 * m2Terreno)
+    const constrUf = Math.round(costoUfM2 * m2Construido)
+    const baseUf = sueloUf + constrUf
+    precioM2Base = Math.round(baseUf / m2Construido)
+    const { finalUf, lineas } = aplicarAjustes({ baseUf, tipo, extras, answers, cfg: ajustesCfg })
+    valorDet = {
+      valor_uf: finalUf,
+      precio_m2: Math.round(finalUf / m2Construido),
+      confianza: sueloInfo.n >= 8 ? 'Alta' : (sueloInfo.n >= 4 ? 'Media' : 'Baja'),
+      metodo: 'aditivo: suelo + construcción',
+      desglose: [
+        { concepto: 'Valor del terreno', calculo: sueloInfo.uf_m2 + ' UF/m² de suelo x ' + m2Terreno + ' m² (' + sueloInfo.fuente + ', ' + sueloInfo.n + ' referencias, ' + sueloInfo.tramo + ')', valor_uf: sueloUf },
+        { concepto: 'Valor de la construcción', calculo: costoUfM2 + ' UF/m² (' + ETIQUETA[estado] + ') x ' + m2Construido + ' m² construidos', valor_uf: constrUf },
+        ...lineas,
+      ],
+    }
+  } else if (comparablesReales.length > 0 && m2Construido) {
     const ufm2List = comparablesReales.map(c => c.uf_m2).filter(x => x > 0).sort((a, b) => a - b)
     if (ufm2List.length) {
       const mid = Math.floor(ufm2List.length / 2)
