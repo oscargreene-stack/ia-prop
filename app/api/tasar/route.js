@@ -8,6 +8,14 @@
 //     coherentes con el valor determinístico (no recalcula valor)
 
 import { normativaEnPunto } from '../../lib/prc.js'
+// Fórmula compartida con /api/zona (Isidora): núcleo único de valorización.
+import {
+  COSTO_CONSTRUCCION_TIERS, elegirTierConstruccion, estadoConstruccion,
+  poligono, distanciaM, mediana, percentil,
+  clasificaTipo, TIPO_OBJETIVO, cutoffVentasStr, esVentaReciente, enBandaM2,
+  UFM2_MIN, UFM2_MAX, puntosSuelo, resumenSuelo, sueloPorTramo, sueloDeTramo,
+  valorAditivoCasa, confianzaPorN,
+} from '../../lib/tasacion-core.js'
 
 export const maxDuration = 60
 
@@ -25,53 +33,6 @@ function normalizaComuna(s) {
   return String(s || '').trim().toUpperCase()
     .replace(/Á/g,'A').replace(/É/g,'E').replace(/Í/g,'I').replace(/Ó/g,'O').replace(/Ú/g,'U')
     .replace(/Ñ/g,'N')
-}
-
-// ── Clasificación por TIPO REAL (mismo criterio que /api/zona) ────────────────
-// El cod_destino de la query ('H') mezcla casas y departamentos: cada venta se
-// clasifica por sus datos reales (copropiedad, cod_destino, superficies) y solo
-// se usan comparables del MISMO tipo que la propiedad tasada.
-function clasificaTipo(v) {
-  const dest = String(v.cod_destino || '').toUpperCase()
-  const constr = parseFloat(v.superficie_construccion || 0) || 0
-  const terreno = parseFloat(v.superficie_total_terreno || 0) || 0
-  // Sitio / terreno sin construcción (valor de suelo puro)
-  if (constr <= 5 && terreno > 0) return 'terreno'
-  if (dest === 'O') return 'oficina'
-  if (dest === 'C') return 'comercial'
-  if (dest && dest !== 'H') return 'otro'
-  // Copropiedad (unidad en edificio) => departamento, aunque el registro traiga
-  // terreno (el del lote del edificio). Evita mezclar casas entre los deptos.
-  if (String(v.copropiedad || '').toLowerCase() === 't') return 'departamento'
-  return terreno > 0 ? 'casa' : 'departamento'
-}
-
-const TIPO_OBJETIVO = {
-  casa: 'casa',
-  departamento: 'departamento',
-  depto: 'departamento',
-  oficina: 'oficina',
-  comercial: 'comercial',
-}
-
-// Polígono cuadrado de ~radioM metros alrededor de {lat,lng} (igual que /api/zona)
-function poligono(lat, lng, radioM) {
-  const dLat = radioM / 111320
-  const dLng = radioM / (111320 * Math.cos((lat * Math.PI) / 180))
-  return [
-    { lat: lat + dLat, lng: lng - dLng },
-    { lat: lat + dLat, lng: lng + dLng },
-    { lat: lat - dLat, lng: lng + dLng },
-    { lat: lat - dLat, lng: lng - dLng },
-  ]
-}
-
-// Distancia en metros entre dos puntos (haversine)
-function distanciaM(lat1, lng1, lat2, lng2) {
-  const R = 6371000, rad = Math.PI / 180
-  const dLat = (lat2 - lat1) * rad, dLng = (lng2 - lng1) * rad
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLng / 2) ** 2
-  return 2 * R * Math.asin(Math.sqrt(a))
 }
 
 // Geocodifica una dirección a {lat,lng} (mismo enfoque que /api/zona). Sirve para ubicar
@@ -270,6 +231,7 @@ export async function POST(request) {
   let arriendoMediana = null
   let arriendoN = 0
   let sueloInfo = null
+  let ufm2SectorList = []
   const tipoObjetivo = TIPO_OBJETIVO[String(tipo || '').toLowerCase()] || null
   try {
     if (punto && DATAINM_TOKEN) {
@@ -294,28 +256,23 @@ export async function POST(request) {
         if (delTipo >= 12) break
       }
 
-      // Solo ventas de los últimos 5 años (mismo criterio que /api/zona)
-      const _cutoff = new Date(); _cutoff.setFullYear(_cutoff.getFullYear() - 5)
-      const _cutoffStr = _cutoff.toISOString().slice(0, 10)
-
+      // Corte de 5 años, sanidad UF/m² y banda de superficie: núcleo compartido
+      // (idénticos a los de /api/zona / Isidora).
+      const _cutoffStr = cutoffVentasStr()
       const base = ventas.filter(v => {
         if (tipoObjetivo && clasificaTipo(v) !== tipoObjetivo) return false
         if (String(v.unit || '').toUpperCase() !== 'UF') return false
-        const f = String(v.date_inscripcion || v.fecha || '').slice(0, 10)
-        if (f && f < _cutoffStr) return false
+        if (!esVentaReciente(v, _cutoffStr)) return false
         const m2 = parseFloat(v.superficie_construccion), uf = parseFloat(v.price)
         if (!(m2 > 0) || !(uf > 0)) return false
         const ufm2 = uf / m2
-        return ufm2 >= 3 && ufm2 <= 500
+        return ufm2 >= UFM2_MIN && ufm2 <= UFM2_MAX
       })
 
-      // Banda de superficie parecida a la propiedad; si quedan pocas, se relaja.
-      let similares = base
-      if (m2Construido) {
-        similares = base.filter(v => { const m2 = parseFloat(v.superficie_construccion); return m2 >= m2Construido * 0.6 && m2 <= m2Construido * 1.5 })
-        if (similares.length < 3) similares = base.filter(v => { const m2 = parseFloat(v.superficie_construccion); return m2 >= m2Construido * 0.4 && m2 <= m2Construido * 2.2 })
-        if (similares.length < 3) similares = base
-      }
+      let similares = base.filter(v => enBandaM2(parseFloat(v.superficie_construccion), m2Construido))
+      if (similares.length < 3) similares = base
+      // UF/m² del universo comparable completo (misma mediana que vería Isidora)
+      ufm2SectorList = similares.map(v => parseFloat(v.price) / parseFloat(v.superficie_construccion)).filter(x => x > 0)
 
       // Ordenadas por cercanía a la propiedad
       const rolParts = String(rol || '').split('-')
@@ -380,7 +337,6 @@ export async function POST(request) {
           .map(([t, n]) => ({ tipo: t, n, pct: Math.round((n * 100) / compTot) }))
       }
 
-      const mediana_ = (arr) => { const st = [...arr].sort((a, b) => a - b); const m = Math.floor(st.length / 2); return st.length % 2 ? st[m] : (st[m - 1] + st[m]) / 2 }
       const filaVenta = (v) => {
         const m2f = Math.round(parseFloat(v.superficie_construccion)) || null
         const uff = Math.round(parseFloat(v.price))
@@ -418,7 +374,7 @@ export async function POST(request) {
       const porTrim = {}
       serie.forEach(({ f, r }) => { const q = f.slice(0, 4) + ' T' + (Math.floor((+f.slice(5, 7) - 1) / 3) + 1); (porTrim[q] = porTrim[q] || []).push(r) })
       const trims = Object.keys(porTrim).sort()
-        .map(q => ({ trimestre: q, uf_m2: Math.round(mediana_(porTrim[q]) * 10) / 10, n: porTrim[q].length }))
+        .map(q => ({ trimestre: q, uf_m2: Math.round(mediana(porTrim[q]) * 10) / 10, n: porTrim[q].length }))
         .filter(x => x.n >= 3)
       if (trims.length >= 2) indiceSector = trims.slice(-8)
       const hoyD = new Date()
@@ -426,43 +382,21 @@ export async function POST(request) {
       const d24 = new Date(hoyD); d24.setFullYear(hoyD.getFullYear() - 2)
       const s12 = serie.filter(x => x.f >= d12.toISOString().slice(0, 10)).map(x => x.r)
       const s24 = serie.filter(x => x.f >= d24.toISOString().slice(0, 10) && x.f < d12.toISOString().slice(0, 10)).map(x => x.r)
-      if (s12.length >= 3 && s24.length >= 3) plusvalia12m = Math.round((mediana_(s12) / mediana_(s24) - 1) * 1000) / 10
+      if (s12.length >= 3 && s24.length >= 3) plusvalia12m = Math.round((mediana(s12) / mediana(s24) - 1) * 1000) / 10
 
-      // ── Valor de SUELO del sector (solo casas — modelo aditivo como /api/zona) ──
-      // (1) ventas de sitios (terreno sin construcción); (2) si no alcanzan,
-      // método residual sobre las ventas de casas: (precio − 32 UF/m²·constr) / terreno.
+      // ── Valor de SUELO del sector (solo casas) — núcleo compartido ──
       if (tipoObjetivo === 'casa') {
-        const sitios = ventas.filter(v => clasificaTipo(v) === 'terreno' && String(v.unit || '').toUpperCase() === 'UF')
-        const sueloVentasPts = sitios.map(v => {
-          const t = parseFloat(v.superficie_total_terreno), uf = parseFloat(v.price)
-          if (!(t > 0) || !(uf > 0)) return null
-          const rr = uf / t
-          return (rr >= 0.3 && rr <= 250) ? { r: rr, lot: t } : null
-        }).filter(Boolean)
-        const COSTO_RESIDUAL = 32 // UF/m² de construcción (≈ buen estado) para despejar el suelo
-        const sueloResidualPts = base.map(v => {
-          const t = parseFloat(v.superficie_total_terreno), c = parseFloat(v.superficie_construccion), uf = parseFloat(v.price)
-          if (!(t > 0) || !(c > 0) || !(uf > 0)) return null
-          const rr = (uf - COSTO_RESIDUAL * c) / t
-          return (rr >= 0.3 && rr <= 250) ? { r: rr, lot: t } : null
-        }).filter(Boolean)
-        const usarVentas = sueloVentasPts.length >= 3
-        const sueloPts = usarVentas ? sueloVentasPts : sueloResidualPts
-        if (sueloPts.length >= 3) {
-          // Tramo por tamaño de sitio: el UF/m² de suelo depende del tamaño del lote
-          const TRAMOS = [[0, 500], [500, 800], [800, 1200], [1200, Infinity]]
-          let vals = sueloPts.map(pt => pt.r)
-          let tramoTxt = 'todos los tamaños de sitio'
-          if (m2Terreno > 0) {
-            const tr = TRAMOS.find(([a, b]) => m2Terreno >= a && m2Terreno < b)
-            const enTramo = sueloPts.filter(pt => pt.lot >= tr[0] && pt.lot < tr[1]).map(pt => pt.r)
-            if (enTramo.length >= 3) { vals = enTramo; tramoTxt = 'sitios de ' + tr[0] + '–' + (tr[1] === Infinity ? 'más' : tr[1]) + ' m²' }
-          }
+        const { pts: sueloPts, fuente: fuenteSuelo } = puntosSuelo(ventas, base)
+        const general = resumenSuelo(sueloPts, fuenteSuelo)
+        if (general) {
+          const tramos = sueloPorTramo(sueloPts)
+          const delTramo = m2Terreno > 0 ? sueloDeTramo(tramos, m2Terreno) : null
+          const usar = delTramo || general
           sueloInfo = {
-            uf_m2: Math.round(mediana_(vals) * 10) / 10,
-            n: vals.length,
-            fuente: usarVentas ? 'ventas reales de sitios' : 'residual sobre ventas de casas',
-            tramo: tramoTxt,
+            uf_m2: usar.uf_m2_mediana,
+            n: delTramo ? delTramo.n : general.n_comparables,
+            fuente: fuenteSuelo === 'ventas_terreno' ? 'ventas reales de sitios' : 'residual sobre ventas de casas',
+            tramo: delTramo ? delTramo.rango : 'todos los tamaños de sitio',
           }
         }
       }
@@ -498,15 +432,14 @@ export async function POST(request) {
         const ventas = Array.isArray(data.detalle_ventas_recientes) ? data.detalle_ventas_recientes : []
         const filtro = Array.isArray(data.comparables_filtro) ? data.comparables_filtro : []
         const fuente = filtro.length > 0 ? filtro : ventas
-        // Solo ventas de los últimos 5 años (mismo criterio que /api/zona).
-        const _cutoff = new Date(); _cutoff.setFullYear(_cutoff.getFullYear() - 5)
-        const _cutoffStr = _cutoff.toISOString().slice(0, 10)
+        // Solo ventas de los últimos 5 años (ventana compartida del núcleo).
+        const _cutoffStr = cutoffVentasStr()
         // Solo comparables del MISMO tipo real que la propiedad tasada.
         const tipoObjetivo = TIPO_OBJETIVO[String(tipo || '').toLowerCase()] || null
         comparablesReales = fuente
           .filter(v => parseFloat(v.superficie_construccion) > 0 && parseFloat(v.price) > 0 && (v.unit === 'UF' || !v.unit))
           .filter(v => !tipoObjetivo || clasificaTipo(v) === tipoObjetivo)
-          .filter(v => { const f = String(v.date_inscripcion || v.fecha || '').slice(0, 10); return !f || f >= _cutoffStr })
+          .filter(v => esVentaReciente(v, _cutoffStr))
           .map(v => {
             const m2 = Math.round(parseFloat(v.superficie_construccion))
             const uf = Math.round(parseFloat(v.price))
@@ -579,53 +512,43 @@ export async function POST(request) {
   // El UF/m² construido de otras casas arrastra el valor de SUS terrenos: aplicarlo
   // directo sobrevalora las casas con sitio chico y subvalora las de sitio grande.
   if (tipoObjetivo === 'casa' && sueloInfo && m2Terreno > 0 && m2Construido) {
-    const COSTOS = {
-      premium:  { nueva: [40, 55], buena: [34, 40], regular: [24, 32], mala: [16, 22] },
-      alta:     { nueva: [40, 50], buena: [33, 41], regular: [24, 32], mala: [16, 23] },
-      estandar: { nueva: [38, 45], buena: [30, 38], regular: [22, 30], mala: [15, 22] },
-    }
-    const ETIQUETA = { nueva: 'a estrenar', buena: 'buen estado', regular: 'estado regular', mala: 'a refaccionar' }
-    const cNorm = normalizaComuna(comuna)
-    const tier = ['VITACURA', 'LAS CONDES', 'LO BARNECHEA'].includes(cNorm) ? 'premium'
-      : ['PROVIDENCIA', 'NUNOA', 'LA REINA'].includes(cNorm) ? 'alta' : 'estandar'
-    const edad = anio ? new Date().getFullYear() - parseInt(anio, 10) : 30
-    const remo = String(answers?.remodelacion || '').toLowerCase()
-    const estado = edad <= 8 ? 'nueva' : edad <= 25 ? 'buena' : edad <= 50 ? 'regular' : (remo && remo !== 'ninguna' ? 'regular' : 'mala')
-    const costoUfM2 = Math.round((COSTOS[tier][estado][0] + COSTOS[tier][estado][1]) / 2)
-    const sueloUf = Math.round(sueloInfo.uf_m2 * m2Terreno)
-    const constrUf = Math.round(costoUfM2 * m2Construido)
-    const baseUf = sueloUf + constrUf
-    precioM2Base = Math.round(baseUf / m2Construido)
-    const { finalUf, lineas } = aplicarAjustes({ baseUf, tipo, extras, answers, cfg: ajustesCfg })
+    const { tier } = elegirTierConstruccion(comuna, sueloInfo.uf_m2)
+    const estado = estadoConstruccion(anio, answers?.remodelacion)
+    const cfgCosto = COSTO_CONSTRUCCION_TIERS[tier][estado]
+    const costoUfM2 = Math.round((cfgCosto.min + cfgCosto.max) / 2)
+    const { terreno_uf, construccion_uf, total_uf } = valorAditivoCasa({ sueloUfM2: sueloInfo.uf_m2, m2Terreno, costoUfM2, m2Construido })
+    precioM2Base = Math.round(total_uf / m2Construido)
+    const { finalUf, lineas } = aplicarAjustes({ baseUf: total_uf, tipo, extras, answers, cfg: ajustesCfg })
     valorDet = {
       valor_uf: finalUf,
       precio_m2: Math.round(finalUf / m2Construido),
-      confianza: sueloInfo.n >= 8 ? 'Alta' : (sueloInfo.n >= 4 ? 'Media' : 'Baja'),
-      metodo: 'aditivo: suelo + construcción',
+      confianza: confianzaPorN(sueloInfo.n),
+      metodo: 'aditivo: suelo + construcción (núcleo compartido con Isidora)',
       desglose: [
-        { concepto: 'Valor del terreno', calculo: sueloInfo.uf_m2 + ' UF/m² de suelo x ' + m2Terreno + ' m² (' + sueloInfo.fuente + ', ' + sueloInfo.n + ' referencias, ' + sueloInfo.tramo + ')', valor_uf: sueloUf },
-        { concepto: 'Valor de la construcción', calculo: costoUfM2 + ' UF/m² (' + ETIQUETA[estado] + ') x ' + m2Construido + ' m² construidos', valor_uf: constrUf },
+        { concepto: 'Valor del terreno', calculo: sueloInfo.uf_m2 + ' UF/m² de suelo x ' + m2Terreno + ' m² (' + sueloInfo.fuente + ', ' + sueloInfo.n + ' referencias, ' + sueloInfo.tramo + ')', valor_uf: terreno_uf },
+        { concepto: 'Valor de la construcción', calculo: costoUfM2 + ' UF/m² (' + cfgCosto.label.toLowerCase() + ') x ' + m2Construido + ' m² construidos', valor_uf: construccion_uf },
         ...lineas,
       ],
     }
-  } else if (comparablesReales.length > 0 && m2Construido) {
-    const ufm2List = comparablesReales.map(c => c.uf_m2).filter(x => x > 0).sort((a, b) => a - b)
+    } else if (comparablesReales.length > 0 && m2Construido) {
+    // Mediana sobre TODO el universo comparable del sector (la misma que ve
+    // Isidora en /api/zona), no solo sobre las 12 más cercanas que se muestran.
+    const ufm2List = (ufm2SectorList.length >= 3 ? ufm2SectorList : comparablesReales.map(c => c.uf_m2)).filter(x => x > 0)
     if (ufm2List.length) {
-      const mid = Math.floor(ufm2List.length / 2)
-      const medianaUfM2 = ufm2List.length % 2 ? ufm2List[mid] : Math.round((ufm2List[mid - 1] + ufm2List[mid]) / 2)
+      const medianaUfM2 = Math.round(mediana(ufm2List))
       const baseUf = Math.round(medianaUfM2 * m2Construido)
       precioM2Base = medianaUfM2
 
       const { finalUf, lineas } = aplicarAjustes({ baseUf, tipo, extras, answers, cfg: ajustesCfg })
 
       const desglose = [
-        { concepto: 'Valor base por comparables CBR', calculo: `mediana ${medianaUfM2} UF/m2 x ${m2Construido} m2 (${comparablesReales.length} ventas reales)`, valor_uf: baseUf },
+        { concepto: 'Valor base por comparables CBR', calculo: `mediana ${medianaUfM2} UF/m2 x ${m2Construido} m2 (${ufm2List.length} ventas reales del sector)`, valor_uf: baseUf },
         ...lineas,
       ]
       valorDet = {
         valor_uf: finalUf,
         precio_m2: Math.round(finalUf / m2Construido),
-        confianza: comparablesReales.length >= 5 ? 'Alta' : (comparablesReales.length >= 3 ? 'Media' : 'Baja'),
+        confianza: confianzaPorN(ufm2List.length),
         desglose,
       }
     }
