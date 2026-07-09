@@ -1934,20 +1934,30 @@ function InformePrint({ data, onClose }) {
           </div>
         )}
 
-        {r.comparables?.length > 0 && (
-          <div style={S.sec}>
-            <div style={S.h2}>8 · Ventas comparables que respaldan el valor (CBR)</div>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-              <thead><tr><th style={S.th}>Dirección</th><th style={S.th}>Fecha</th><th style={S.th}>m²</th><th style={{ ...S.th, textAlign: 'right' }}>UF/m²</th><th style={{ ...S.th, textAlign: 'right' }}>Valor</th><th style={{ ...S.th, textAlign: 'right' }}>Distancia</th></tr></thead>
-              <tbody>
-                {r.comparables.map((c, i) => (
-                  <tr key={i}><td style={S.td}>{c.direccion}{c.mismo_edificio ? ' ★' : ''}</td><td style={S.td}>{c.fecha}</td><td style={S.td}>{c.m2}</td><td style={S.tdr}>{c.uf_m2}</td><td style={S.tdr}>{fmtUF(c.precio_uf)}</td><td style={S.tdr}>{c.distancia_m != null ? c.distancia_m + ' m' : '—'}</td></tr>
-                ))}
-              </tbody>
-            </table>
-            <div style={{ fontSize: 10, color: '#999', marginTop: 4 }}>★ Venta en el mismo edificio o conjunto. Fuente: Conservador de Bienes Raíces / SII.</div>
-          </div>
-        )}
+        {(() => {
+          // Ventas reales inscritas en el CBR: comparables directas si las hay;
+          // si no, las mismas ventas del sector que respaldan el valor y el mapa.
+          const ventasCBR = (r.comparables?.length > 0)
+            ? r.comparables.map((c) => ({ dir: c.direccion, star: !!c.mismo_edificio, fecha: c.fecha, m2: c.m2, m2t: c.m2_terreno, ufm2: c.uf_m2, uf: c.precio_uf, dist: c.distancia_m }))
+            : (r.ventas_mapa || []).slice(0, 15).map((v) => ({ dir: v.dir, star: false, fecha: v.fecha, m2: v.m2, m2t: v.m2_terreno, ufm2: v.uf_m2, uf: v.uf, dist: null }))
+          if (!ventasCBR.length) return null
+          const hayDist = ventasCBR.some((c) => c.dist != null)
+          const hayStar = ventasCBR.some((c) => c.star)
+          return (
+            <div style={S.sec}>
+              <div style={S.h2}>8 · Ventas reales inscritas en el CBR del sector</div>
+              <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                <thead><tr><th style={S.th}>Dirección</th><th style={S.th}>Fecha</th><th style={S.th}>m² const.</th><th style={S.th}>m² terreno</th><th style={{ ...S.th, textAlign: 'right' }}>UF/m²</th><th style={{ ...S.th, textAlign: 'right' }}>Valor</th>{hayDist && <th style={{ ...S.th, textAlign: 'right' }}>Distancia</th>}</tr></thead>
+                <tbody>
+                  {ventasCBR.map((c, i) => (
+                    <tr key={i}><td style={S.td}>{c.dir || '—'}{c.star ? ' ★' : ''}</td><td style={S.td}>{c.fecha || '—'}</td><td style={S.td}>{c.m2 || '—'}</td><td style={S.td}>{c.m2t || '—'}</td><td style={S.tdr}>{c.ufm2 || '—'}</td><td style={S.tdr}>{fmtUF(c.uf)}</td>{hayDist && <td style={S.tdr}>{c.dist != null ? c.dist + ' m' : '—'}</td>}</tr>
+                  ))}
+                </tbody>
+              </table>
+              <div style={{ fontSize: 10, color: '#999', marginTop: 4 }}>{hayStar ? '★ Venta en el mismo edificio o conjunto. ' : ''}Fuente: Conservador de Bienes Raíces / SII (transacciones inscritas, últimos 5 años).</div>
+            </div>
+          )
+        })()}
 
         {r.ofertas_venta?.length > 0 && (
           <div style={S.sec}>
