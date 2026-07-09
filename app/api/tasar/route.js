@@ -14,7 +14,7 @@ import {
   poligono, distanciaM, mediana, percentil,
   clasificaTipo, TIPO_OBJETIVO, cutoffVentasStr, esVentaReciente, enBandaM2,
   UFM2_MIN, UFM2_MAX, puntosSuelo, resumenSuelo, sueloPorTramo, sueloDeTramo,
-  valorAditivoCasa, confianzaPorN, buscarVentasPoligono,
+  valorAditivoCasa, confianzaPorN, buscarVentasPoligono, COSTO_CONSTR_RESIDUAL, BANDA_M2,
 } from '../../lib/tasacion-core.js'
 
 export const maxDuration = 60
@@ -428,12 +428,12 @@ export async function POST(request) {
       const ccom = rolParts[0] || String(codCom)
       const cmz = rolParts[1] || ''
       const cpr = rolParts[2] || ''
-      const m2Min = Math.round(m2Construido * 0.6)
-      const m2Max = Math.round(m2Construido * 1.5)
+      const m2Min = Math.round(m2Construido * BANDA_M2.min)
+      const m2Max = Math.round(m2Construido * BANDA_M2.max)
       const cd = (tipo === 'oficina') ? 'O' : 'H'
       const qs = new URLSearchParams({
         cod_com: String(ccom), cod_mz: String(cmz), cod_pr: String(cpr),
-        radio: '2000', superficie_min: String(m2Min), superficie_max: String(m2Max), cod_destino: cd,
+        radio: tipoObjetivo === 'casa' ? '3000' : '2000', superficie_min: String(m2Min), superficie_max: String(m2Max), cod_destino: cd,
       }).toString()
       const restUrl = 'https://datainmobiliaria.cl/api/v1/propiedades/detalle?' + qs
       const restRes = await fetch(restUrl, { headers: { Authorization: 'Bearer ' + DATAINM_TOKEN } })
@@ -474,6 +474,31 @@ export async function POST(request) {
     }
     } catch (e) {
       console.error('Error fetching comparables (REST):', e.message)
+    }
+  }
+
+  // ── 1b-bis. Suelo residual desde los comparables REST (casas sin polígono) ──
+  // busqueda_poligono hoy solo georreferencia unidades en copropiedad, así que
+  // las casas llegan por el REST por ROL. Con esas mismas casas se estima el
+  // suelo (método residual) para no perder el desglose terreno + construcción.
+  if (tipoObjetivo === 'casa' && !sueloInfo && comparablesReales.length >= 3) {
+    const pts = comparablesReales.map(c => {
+      const tt = parseFloat(c.m2_terreno), m2c = parseFloat(c.m2), uf = parseFloat(c.precio_uf)
+      if (!(tt > 0) || !(m2c > 0) || !(uf > 0)) return null
+      const rr = (uf - COSTO_CONSTR_RESIDUAL * m2c) / tt
+      return (rr >= 0.3 && rr <= 250) ? { r: rr, lot: tt } : null
+    }).filter(Boolean)
+    const general = resumenSuelo(pts, 'residual_casas')
+    if (general) {
+      const tramos = sueloPorTramo(pts)
+      const delTramo = m2Terreno > 0 ? sueloDeTramo(tramos, m2Terreno) : null
+      const usar = delTramo || general
+      sueloInfo = {
+        uf_m2: usar.uf_m2_mediana,
+        n: delTramo ? delTramo.n : general.n_comparables,
+        fuente: 'residual sobre ventas de casas cercanas (búsqueda por ROL)',
+        tramo: delTramo ? delTramo.rango : 'todos los tamaños de sitio',
+      }
     }
   }
 
@@ -868,7 +893,7 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
       parsed.historial_propiedad = historialPropiedad
       parsed.ofertas_venta = ofertasVenta
       parsed.ofertas_arriendo = ofertasArriendo
-      parsed._diag = diag ? { ...diag, metodo: valorDet ? (valorDet.metodo || 'mediana sector') : 'SIN valor determinístico (estimación referencial del LLM)' } : null
+      parsed._diag = { ...(diag || {}), n_comparables: comparablesReales.length, n_suelo: sueloInfo ? sueloInfo.n : 0, metodo: valorDet ? (valorDet.metodo || 'mediana sector') : 'SIN valor determinístico (estimación referencial del LLM)' }
       const _valorRef = parsed.valor_uf || null
       parsed.arriendo = arriendoMediana ? {
         uf_mes: arriendoMediana,
