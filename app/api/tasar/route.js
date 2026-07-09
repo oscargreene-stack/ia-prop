@@ -14,7 +14,7 @@ import {
   poligono, distanciaM, mediana, percentil,
   clasificaTipo, TIPO_OBJETIVO, cutoffVentasStr, esVentaReciente, enBandaM2,
   UFM2_MIN, UFM2_MAX, puntosSuelo, resumenSuelo, sueloPorTramo, sueloDeTramo,
-  valorAditivoCasa, confianzaPorN,
+  valorAditivoCasa, confianzaPorN, buscarVentasPoligono,
 } from '../../lib/tasacion-core.js'
 
 export const maxDuration = 60
@@ -237,25 +237,8 @@ export async function POST(request) {
   try {
     if (punto && DATAINM_TOKEN) {
       const polys = [poligono(punto.lat, punto.lng, 800), poligono(punto.lat, punto.lng, 1600), poligono(punto.lat, punto.lng, 3200)]
-      let ventas = []
-      for (const poly of polys) {
-        let acc = []
-        for (let page = 1; page <= 3; page++) {
-          const r = await fetch('https://datainmobiliaria.cl/api/v1/busqueda_poligono', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + DATAINM_TOKEN },
-            body: JSON.stringify({ fuente: 'ventas', polygon: poly, page }),
-          })
-          if (!r.ok) break
-          const j = await r.json()
-          acc = acc.concat(Array.isArray(j.resultados) ? j.resultados : [])
-          const delTipo = acc.filter(v => !tipoObjetivo || clasificaTipo(v) === tipoObjetivo).length
-          if (delTipo >= 15 || !j.has_more) break
-        }
-        ventas = acc
-        const delTipo = ventas.filter(v => !tipoObjetivo || clasificaTipo(v) === tipoObjetivo).length
-        if (delTipo >= 12) break
-      }
+      // Búsqueda compartida del núcleo (doble pasada: sin filtro + property_type)
+      const { ventas } = await buscarVentasPoligono({ token: DATAINM_TOKEN, polys, objetivo: tipoObjetivo })
 
       // Corte de 5 años, sanidad UF/m² y banda de superficie: núcleo compartido
       // (idénticos a los de /api/zona / Isidora).

@@ -30,7 +30,7 @@ import {
   poligono, centroide, mediana, percentil, r1,
   clasificaTipo, TIPO_OBJETIVO, cutoffVentasStr, esVentaReciente, enBandaM2,
   UFM2_MIN, UFM2_MAX, puntosSuelo, resumenSuelo, sueloPorTramo, sueloDeTramo,
-  confianzaPorN,
+  confianzaPorN, buscarVentasPoligono,
 } from '../../lib/tasacion-core.js'
 
 async function geocode(texto) {
@@ -74,30 +74,12 @@ export async function POST(request) {
     const m2terrInput = parseFloat(m2_terreno) || 0
     const esCasa = objetivo === 'casa'
 
-    const polys = userPoly ? [userPoly] : [poligono(punto.lat, punto.lng, 800), poligono(punto.lat, punto.lng, 1600)]
+    const polys = userPoly ? [userPoly] : [poligono(punto.lat, punto.lng, 800), poligono(punto.lat, punto.lng, 1600), poligono(punto.lat, punto.lng, 3200)]
 
-    let ventas = []
-    let paginasUsadas = 0
-    for (const poly of polys) {
-      let acc = []
-      for (let page = 1; page <= 3; page++) {
-        const r = await fetch(`${API_BASE}/busqueda_poligono`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + DATAINM_TOKEN },
-          body: JSON.stringify({ fuente: 'ventas', polygon: poly, page }),
-        })
-        paginasUsadas++
-        if (!r.ok) break
-        const j = await r.json()
-        const arr = Array.isArray(j.resultados) ? j.resultados : []
-        acc = acc.concat(arr)
-        const delTipo = acc.filter((v) => clasificaTipo(v) === objetivo).length
-        if (delTipo >= 15 || !j.has_more) break
-      }
-      ventas = acc
-      const delTipo = ventas.filter((v) => clasificaTipo(v) === objetivo).length
-      if (delTipo >= 12) break
-    }
+    // Búsqueda compartida del núcleo (doble pasada: sin filtro + property_type)
+    const busq = await buscarVentasPoligono({ token: DATAINM_TOKEN, polys, objetivo })
+    let ventas = busq.ventas
+    const paginasUsadas = busq.paginas
 
     // Solo ventas de los últimos 5 años (ventana compartida del núcleo).
     const _cutoffStr = cutoffVentasStr()

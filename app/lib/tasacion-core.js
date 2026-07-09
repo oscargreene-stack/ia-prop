@@ -250,6 +250,50 @@ export function valorAditivoCasa({ sueloUfM2, m2Terreno, costoUfM2, m2Construido
   return { terreno_uf, construccion_uf, total_uf: terreno_uf + construccion_uf }
 }
 
+// ── Búsqueda de ventas por polígono (compartida por ambos agentes) ──────────
+// Pasada 1: sin filtro (sirve para composición del sector y tipos abundantes).
+// Pasada 2: si el tipo objetivo quedó corto (ej. casas diluidas entre miles de
+// registros de deptos/estacionamientos), se pide a la API SOLO ese tipo con
+// property_type. Si la API ignora el filtro, el dedup deja todo igual; si lo
+// soporta, trae las ventas que faltaban.
+export async function buscarVentasPoligono({ token, polys, objetivo, apiBase = 'https://datainmobiliaria.cl/api/v1' }) {
+  const delTipo = (arr) => arr.filter((v) => !objetivo || clasificaTipo(v) === objetivo).length
+  let paginas = 0
+  const fetchPoly = async (poly, conFiltro) => {
+    let acc = []
+    for (let page = 1; page <= 3; page++) {
+      const body = { fuente: 'ventas', polygon: poly, page }
+      if (conFiltro && objetivo) body.property_type = [objetivo]
+      const r = await fetch(apiBase + '/busqueda_poligono', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify(body),
+      })
+      paginas++
+      if (!r.ok) break
+      const j = await r.json()
+      acc = acc.concat(Array.isArray(j.resultados) ? j.resultados : [])
+      if (delTipo(acc) >= 15 || !j.has_more) break
+    }
+    return acc
+  }
+  let ventas = []
+  for (const poly of polys) {
+    ventas = await fetchPoly(poly, false)
+    if (delTipo(ventas) >= 12) break
+  }
+  if (objetivo && delTipo(ventas) < 12) {
+    const key = (v) => [v.rol, v.date_inscripcion || v.fecha, v.price].join('|')
+    const vistos = new Set(ventas.map(key))
+    for (const poly of polys) {
+      const extra = await fetchPoly(poly, true)
+      for (const v of extra) { const k = key(v); if (!vistos.has(k)) { vistos.add(k); ventas.push(v) } }
+      if (delTipo(ventas) >= 12) break
+    }
+  }
+  return { ventas, paginas }
+}
+
 // Confianza según número de referencias (mismos umbrales para ambos agentes).
 export function confianzaPorN(n) {
   return n >= 8 ? 'Alta' : n >= 4 ? 'Media' : 'Baja'
