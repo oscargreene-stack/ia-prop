@@ -137,7 +137,7 @@ export function terrenoDe(v) {
 export function tipoDesdeDireccionSII(dir) {
   const d = ' ' + String(dir || '').toUpperCase().replace(/\s+/g, ' ').trim() + ' '
   if (!d.trim()) return 'otro'
-  if (/ (DP|DEPTO|DEPT|DPTO) /.test(d)) return 'departamento'
+  if (/ (DP|DEPTO|DEPT|DPTO) /.test(d) || / D \d/.test(d)) return 'departamento'
   if (/ (OF|OFIC|OFICINA) /.test(d)) return 'oficina'
   if (/ (LC|LOC|LOCAL) /.test(d)) return 'comercial'
   if (/ (BD|BOD|BODEGA|EST|ESTAC) /.test(d)) return 'otro'
