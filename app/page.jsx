@@ -245,8 +245,18 @@ function ChatVendedor({ onBack }) {
   const [tasBody, setTasBody] = useState(null)
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
+  const tasRef = useRef(null)
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior:'smooth' }) }, [messages, typing])
+  // Al llegar la TASACIÓN, posicionar el chat en la tarjeta del VALOR (inicio),
+  // no al fondo: el informe es largo y el precio quedaba fuera de pantalla.
+  useEffect(() => {
+    const last = messages[messages.length - 1]
+    if (last?.role === 'agent' && last?.content?.type === 'tasacion') {
+      setTimeout(() => { tasRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, 200)
+    } else {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [messages, typing])
 
   // Google Places Autocomplete para campo de dirección
   useEffect(() => {
@@ -741,7 +751,7 @@ function ChatVendedor({ onBack }) {
       const cc = conf?.includes('alta') ? 'conf-alta' : conf?.includes('media') ? 'conf-media' : 'conf-baja'
       const pr = resultado.plan_regulador
       return (
-        <div className="tasacion-card">
+        <div className="tasacion-card" ref={tasRef}>
           {/* Valor principal */}
           <div className="tasacion-label">Tasación de mercado</div>
           <div className="tasacion-valor">{fmtUF(valorFinal)}</div>
