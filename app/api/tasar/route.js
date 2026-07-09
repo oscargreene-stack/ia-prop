@@ -514,6 +514,11 @@ export async function POST(request) {
     }
     return raw
   }
+  // Texto útil de un aviso: descarta "N/A", "S/D", "-" y similares.
+  const limpiaTxt = (x) => {
+    const t = String(x || '').replace(/\s+/g, ' ').trim()
+    return (!t || /^(n\/?a|s\/?d|sin ?dato s?|-+)$/i.test(t)) ? null : t
+  }
   const enUF = (v) => {
     const pr = parseFloat(v.price)
     if (!(pr > 0)) return null
@@ -529,7 +534,7 @@ export async function POST(request) {
       const m2o = parseFloat(v.superficie_util) > 0 ? Math.round(parseFloat(v.superficie_util)) : null
       if (m2o && m2Construido && !enBandaM2(m2o, m2Construido)) return null
       if (uf < 500 || uf > 200000) return null
-      return { dir: String(v.direccion || v.titulo || '').replace(/\s+/g, ' ').trim() || null, m2: m2o, uf: Math.round(uf), uf_m2: m2o ? Math.round(uf / m2o) : null, fecha: String(v.fecha_publicacion || '').slice(0, 10) || null, url: v.url || null }
+      return { dir: limpiaTxt(v.direccion) || limpiaTxt(v.titulo) || null, m2: m2o, uf: Math.round(uf), uf_m2: m2o ? Math.round(uf / m2o) : null, fecha: String(v.fecha_publicacion || '').slice(0, 10) || null, url: v.url || null }
     }).filter(Boolean).sort((a, b) => ((a.fecha || '') < (b.fecha || '') ? 1 : -1))
     ofertasVenta = lista.slice(0, 12)
     const medV = mediana(lista.map(o => o.uf).filter(x => x > 0))
@@ -542,7 +547,7 @@ export async function POST(request) {
       const m2o = parseFloat(v.superficie_util) > 0 ? Math.round(parseFloat(v.superficie_util)) : null
       if (m2o && m2Construido && !enBandaM2(m2o, m2Construido)) return null
       if (pm < 3 || pm > 400) return null
-      return { dir: String(v.direccion || v.titulo || '').replace(/\s+/g, ' ').trim() || null, m2: m2o, uf_mes: Math.round(pm * 10) / 10, fecha: String(v.fecha_publicacion || '').slice(0, 10) || null, url: v.url || null }
+      return { dir: limpiaTxt(v.direccion) || limpiaTxt(v.titulo) || null, m2: m2o, uf_mes: Math.round(pm * 10) / 10, fecha: String(v.fecha_publicacion || '').slice(0, 10) || null, url: v.url || null }
     }).filter(Boolean).sort((a, b) => ((a.fecha || '') < (b.fecha || '') ? 1 : -1))
     ofertasArriendo = lista.slice(0, 12)
     if (lista.length >= 3) {

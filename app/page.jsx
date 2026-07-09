@@ -1956,7 +1956,10 @@ function InformePrint({ data, onClose }) {
               <thead><tr><th style={S.th}>Dirección / aviso</th><th style={S.th}>Publicado</th><th style={S.th}>m²</th><th style={{ ...S.th, textAlign: 'right' }}>UF/m²</th><th style={{ ...S.th, textAlign: 'right' }}>Precio</th></tr></thead>
               <tbody>
                 {r.ofertas_venta.map((o, i) => (
-                  <tr key={i}><td style={S.td}>{o.dir || 'Aviso'}</td><td style={S.td}>{o.fecha || '—'}</td><td style={S.td}>{o.m2 || '—'}</td><td style={S.tdr}>{o.uf_m2 || '—'}</td><td style={S.tdr}>{fmtUF(o.uf)}</td></tr>
+                  <tr key={i}>
+                    <td style={S.td}>{o.url ? <a href={o.url} target="_blank" rel="noreferrer" style={{ color: '#2563eb', textDecoration: 'none' }}>{o.dir || 'Ver aviso ↗'}</a> : (o.dir || 'Aviso')}</td>
+                    <td style={S.td}>{o.fecha || '—'}</td><td style={S.td}>{o.m2 || '—'}</td><td style={S.tdr}>{o.uf_m2 || '—'}</td><td style={S.tdr}>{fmtUF(o.uf)}</td>
+                  </tr>
                 ))}
               </tbody>
             </table>
@@ -1971,7 +1974,10 @@ function InformePrint({ data, onClose }) {
               <thead><tr><th style={S.th}>Dirección / aviso</th><th style={S.th}>Publicado</th><th style={S.th}>m²</th><th style={{ ...S.th, textAlign: 'right' }}>UF/mes</th></tr></thead>
               <tbody>
                 {r.ofertas_arriendo.map((o, i) => (
-                  <tr key={i}><td style={S.td}>{o.dir || 'Aviso'}</td><td style={S.td}>{o.fecha || '—'}</td><td style={S.td}>{o.m2 || '—'}</td><td style={S.tdr}>{o.uf_mes}</td></tr>
+                  <tr key={i}>
+                    <td style={S.td}>{o.url ? <a href={o.url} target="_blank" rel="noreferrer" style={{ color: '#2563eb', textDecoration: 'none' }}>{o.dir || 'Ver aviso ↗'}</a> : (o.dir || 'Aviso')}</td>
+                    <td style={S.td}>{o.fecha || '—'}</td><td style={S.td}>{o.m2 || '—'}</td><td style={S.tdr}>{o.uf_mes}</td>
+                  </tr>
                 ))}
               </tbody>
             </table>
