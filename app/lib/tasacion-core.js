@@ -130,6 +130,20 @@ export function terrenoDe(v) {
   return parseFloat(v?.superficie_total_terreno ?? v?.superficie_terreno ?? v?.terreno ?? 0) || 0
 }
 
+// Tipo inferido desde el sufijo de unidad de la dirección SII (para fuentes
+// que no traen copropiedad ni terreno, como el endpoint detalle por ROL):
+// "... DP 1101" = departamento, "... OF 502" = oficina, "... LC 3" = local,
+// "... BOD/EST" = bodega/estacionamiento; sin sufijo (o "CS") = casa/predio.
+export function tipoDesdeDireccionSII(dir) {
+  const d = ' ' + String(dir || '').toUpperCase().replace(/\s+/g, ' ').trim() + ' '
+  if (!d.trim()) return 'otro'
+  if (/ (DP|DEPTO|DEPT|DPTO) /.test(d)) return 'departamento'
+  if (/ (OF|OFIC|OFICINA) /.test(d)) return 'oficina'
+  if (/ (LC|LOC|LOCAL) /.test(d)) return 'comercial'
+  if (/ (BD|BOD|BODEGA|EST|ESTAC) /.test(d)) return 'otro'
+  return 'casa'
+}
+
 export function clasificaTipo(v) {
   const dest = String(v.cod_destino || '').trim().toUpperCase()
   const d0 = dest.charAt(0) // 'H'/'HABITACIONAL' → H; 'O'/'OFICINA' → O; 'C'/'COMERCIO' → C
@@ -141,6 +155,11 @@ export function clasificaTipo(v) {
   if (d0 === 'O') return 'oficina'
   if (d0 === 'C') return 'comercial'
   if (d0 && d0 !== 'H') return 'otro'
+  // Fila sin copropiedad NI terreno (p.ej. endpoint detalle por ROL): inferir
+  // por la dirección SII — es el único dato disponible para separar casa/depto.
+  if (v.copropiedad == null && v.superficie_total_terreno == null) {
+    return tipoDesdeDireccionSII(v.direccion_sii)
+  }
   // Copropiedad (unidad en edificio) => departamento, aunque el registro traiga
   // terreno (el del lote del edificio). Evita mezclar casas y departamentos.
   if (esCopropiedad(v)) return 'departamento'

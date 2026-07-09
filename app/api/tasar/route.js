@@ -454,10 +454,27 @@ export async function POST(request) {
         const _cutoffStr = cutoffVentasStr()
         // Solo comparables del MISMO tipo real que la propiedad tasada.
         const tipoObjetivo = TIPO_OBJETIVO[String(tipo || '').toLowerCase()] || null
-        comparablesReales = fuente
+        const filtradosRest = fuente
           .filter(v => parseFloat(v.superficie_construccion) > 0 && parseFloat(v.price) > 0 && (v.unit === 'UF' || !v.unit))
           .filter(v => !tipoObjetivo || clasificaTipo(v) === tipoObjetivo)
           .filter(v => esVentaReciente(v, _cutoffStr))
+        // Estos rows traen latitud/longitud: alimentan también el mapa y el cuadro
+        ventasMapa = filtradosRest.map(v => {
+          const la = parseFloat(v.latitud), ln = parseFloat(v.longitud), uf = Math.round(parseFloat(v.price))
+          if (!Number.isFinite(la) || !Number.isFinite(ln) || !(uf > 0)) return null
+          const m2c = Math.round(parseFloat(v.superficie_construccion))
+          return {
+            lat: la, lng: ln, uf,
+            m2: m2c > 0 ? m2c : null,
+            uf_m2: m2c > 0 ? Math.round(uf / m2c) : null,
+            fecha: String(v.fecha || '').slice(0, 10),
+            dir: String(v.direccion_sii || '').replace(/\s+/g, ' ').trim() || null,
+            m2_terreno: null, ano: null,
+            destino: v.cod_destino || null,
+            rol: [v.cod_com, v.cod_mz, v.cod_pr].filter(x => x != null).join('-') || null,
+          }
+        }).filter(Boolean).slice(0, 150)
+        comparablesReales = filtradosRest
           .map(v => {
             const m2 = Math.round(parseFloat(v.superficie_construccion))
             const uf = Math.round(parseFloat(v.price))
