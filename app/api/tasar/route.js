@@ -416,6 +416,7 @@ export async function POST(request) {
   }
 
   // ── 1b. Respaldo: método anterior (REST por ROL) si el polígono no alcanzó ──
+  let diagRest = null
   if (comparablesReales.length < 3) {
     ventasMapa = []
     try {
@@ -433,15 +434,22 @@ export async function POST(request) {
       const cd = (tipo === 'oficina') ? 'O' : 'H'
       const qs = new URLSearchParams({
         cod_com: String(ccom), cod_mz: String(cmz), cod_pr: String(cpr),
-        radio: tipoObjetivo === 'casa' ? '3000' : '2000', superficie_min: String(m2Min), superficie_max: String(m2Max), cod_destino: cd,
+        radio: '2000', superficie_min: String(m2Min), superficie_max: String(m2Max), cod_destino: cd,
       }).toString()
       const restUrl = 'https://datainmobiliaria.cl/api/v1/propiedades/detalle?' + qs
       const restRes = await fetch(restUrl, { headers: { Authorization: 'Bearer ' + DATAINM_TOKEN } })
+      diagRest = { status: restRes.status }
       if (restRes.ok) {
         const data = await restRes.json()
         const ventas = Array.isArray(data.detalle_ventas_recientes) ? data.detalle_ventas_recientes : []
         const filtro = Array.isArray(data.comparables_filtro) ? data.comparables_filtro : []
         const fuente = filtro.length > 0 ? filtro : ventas
+        diagRest.n_ventas = ventas.length
+        diagRest.n_filtro = filtro.length
+        diagRest.muestra = fuente.slice(0, 2)
+        const cts = {}
+        fuente.forEach(v => { const tp = clasificaTipo(v); cts[tp] = (cts[tp] || 0) + 1 })
+        diagRest.counts = cts
         // Solo ventas de los últimos 5 años (ventana compartida del núcleo).
         const _cutoffStr = cutoffVentasStr()
         // Solo comparables del MISMO tipo real que la propiedad tasada.
@@ -467,7 +475,7 @@ export async function POST(request) {
               similitud: calcularSimilitud({ m2_construido: v.superficie_construccion }, m2Construido, m2Terreno),
             }
           })
-          .filter(c => c.uf_m2 && c.uf_m2 >= 20 && c.uf_m2 <= 400)
+          .filter(c => c.uf_m2 && c.uf_m2 >= UFM2_MIN && c.uf_m2 <= UFM2_MAX)
           .sort((a, b) => (a.distancia_m != null && b.distancia_m != null) ? (a.distancia_m - b.distancia_m) : 0)
           .slice(0, 12)
       }
@@ -893,7 +901,7 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
       parsed.historial_propiedad = historialPropiedad
       parsed.ofertas_venta = ofertasVenta
       parsed.ofertas_arriendo = ofertasArriendo
-      parsed._diag = { ...(diag || {}), n_comparables: comparablesReales.length, n_suelo: sueloInfo ? sueloInfo.n : 0, metodo: valorDet ? (valorDet.metodo || 'mediana sector') : 'SIN valor determinístico (estimación referencial del LLM)' }
+      parsed._diag = { ...(diag || {}), rest: diagRest, n_comparables: comparablesReales.length, n_suelo: sueloInfo ? sueloInfo.n : 0, metodo: valorDet ? (valorDet.metodo || 'mediana sector') : 'SIN valor determinístico (estimación referencial del LLM)' }
       const _valorRef = parsed.valor_uf || null
       parsed.arriendo = arriendoMediana ? {
         uf_mes: arriendoMediana,
