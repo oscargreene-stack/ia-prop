@@ -7,7 +7,7 @@
 //  4. Claude SOLO narra: análisis, factores, plan regulador y recomendación,
 //     coherentes con el valor determinístico (no recalcula valor)
 
-import { normativaEnPunto } from '../../lib/prc.js'
+import { normativaEnPunto, zonaLocalEnPunto } from '../../lib/prc.js'
 // Fórmula compartida con /api/zona (Isidora): núcleo único de valorización.
 import {
   COSTO_CONSTRUCCION_TIERS, elegirTierConstruccion, estadoConstruccion,
@@ -232,10 +232,11 @@ export async function POST(request) {
   let arriendoN = 0
   let sueloInfo = null
   let ufm2SectorList = []
+  let diag = null
   const tipoObjetivo = TIPO_OBJETIVO[String(tipo || '').toLowerCase()] || null
   try {
     if (punto && DATAINM_TOKEN) {
-      const polys = [poligono(punto.lat, punto.lng, 800), poligono(punto.lat, punto.lng, 1600)]
+      const polys = [poligono(punto.lat, punto.lng, 800), poligono(punto.lat, punto.lng, 1600), poligono(punto.lat, punto.lng, 3200)]
       let ventas = []
       for (const poly of polys) {
         let acc = []
@@ -385,8 +386,32 @@ export async function POST(request) {
       if (s12.length >= 3 && s24.length >= 3) plusvalia12m = Math.round((mediana(s12) / mediana(s24) - 1) * 1000) / 10
 
       // ── Valor de SUELO del sector (solo casas) — núcleo compartido ──
+      // FILTRO REGULATORIO: si la comuna tiene zonas PRC cargadas, el suelo se
+      // calcula SOLO con ventas de la MISMA zona (misma normativa) que la
+      // propiedad. Si esa zona tiene <3 referencias, se usa el sector completo.
       if (tipoObjetivo === 'casa') {
-        const { pts: sueloPts, fuente: fuenteSuelo } = puntosSuelo(ventas, base)
+        let sueloPts = [], fuenteSuelo = '', notaZona = ''
+        try {
+          let bu = ''
+          try { bu = new URL(request.url).origin } catch (e) {}
+          if (!bu && process.env.VERCEL_URL) bu = 'https://' + process.env.VERCEL_URL
+          const zonaPRC = comuna ? await zonaLocalEnPunto(punto.lng, punto.lat, comuna, bu) : null
+          if (zonaPRC) {
+            const mismaZona = []
+            for (const v of ventas) {
+              const t = clasificaTipo(v)
+              if (t !== 'terreno' && t !== 'casa') continue
+              const zv = await zonaLocalEnPunto(parseFloat(v.lng), parseFloat(v.lat), comuna, bu)
+              if (zv && String(zv) === String(zonaPRC)) mismaZona.push(v)
+            }
+            const rz = puntosSuelo(mismaZona, mismaZona.filter(v => base.includes(v)))
+            if (rz.pts.length >= 3) { sueloPts = rz.pts; fuenteSuelo = rz.fuente; notaZona = ', misma zona PRC ' + zonaPRC }
+          }
+        } catch (e) {}
+        if (sueloPts.length < 3) {
+          const rg = puntosSuelo(ventas, base)
+          sueloPts = rg.pts; fuenteSuelo = rg.fuente
+        }
         const general = resumenSuelo(sueloPts, fuenteSuelo)
         if (general) {
           const tramos = sueloPorTramo(sueloPts)
@@ -395,11 +420,13 @@ export async function POST(request) {
           sueloInfo = {
             uf_m2: usar.uf_m2_mediana,
             n: delTramo ? delTramo.n : general.n_comparables,
-            fuente: fuenteSuelo === 'ventas_terreno' ? 'ventas reales de sitios' : 'residual sobre ventas de casas',
+            fuente: (fuenteSuelo === 'ventas_terreno' ? 'ventas reales de sitios' : 'residual sobre ventas de casas') + notaZona,
             tramo: delTramo ? delTramo.rango : 'todos los tamaños de sitio',
           }
         }
       }
+
+      diag = { n_ventas_sector: ventas.length, n_mismo_tipo: base.length, n_comparables: comparablesReales.length, n_suelo: sueloInfo ? sueloInfo.n : 0 }
     }
   } catch (e) {
     console.error('Error comparables (polígono):', e.message)
@@ -467,38 +494,60 @@ export async function POST(request) {
     }
   }
 
-  // ── 1c. Arriendo de referencia del sector (ofertas de portales) ────────────
+  // ── 1c. Ofertas REALES del sector (portales): venta y arriendo ─────────────
+  // Listas para el informe + medianas de referencia. CLP→UF con UF_CLP.
+  const UF_CLP = 40408
+  async function fetchOfertas(tx) {
+    if (!punto || !DATAINM_TOKEN || !tipoObjetivo || !['departamento', 'casa', 'oficina'].includes(tipoObjetivo)) return []
+    const polyArr = poligono(punto.lat, punto.lng, 1200)
+    let raw = []
+    for (let page = 1; page <= 2; page++) {
+      const r = await fetch('https://datainmobiliaria.cl/api/v1/busqueda_poligono', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + DATAINM_TOKEN },
+        body: JSON.stringify({ fuente: 'oferta', polygon: polyArr, page, property_type: [tipoObjetivo], transaction_type: tx, active_publications: 'true' }),
+      })
+      if (!r.ok) break
+      const j = await r.json()
+      raw = raw.concat(Array.isArray(j.resultados) ? j.resultados : [])
+      if (!j.has_more || raw.length >= 100) break
+    }
+    return raw
+  }
+  const enUF = (v) => {
+    const pr = parseFloat(v.price)
+    if (!(pr > 0)) return null
+    const mon = String(v.moneda || '').toUpperCase()
+    if (mon.includes('CLP') || mon.includes('PESO')) return pr / UF_CLP
+    return pr
+  }
+  let ofertasVenta = [], ofertasArriendo = [], ofertaVentaMediana = null
   try {
-    if (punto && DATAINM_TOKEN && ['departamento', 'casa', 'oficina'].includes(tipoObjetivo || '')) {
-      const polyArr = poligono(punto.lat, punto.lng, 1200)
-      let raw = []
-      for (let page = 1; page <= 2; page++) {
-        const r = await fetch('https://datainmobiliaria.cl/api/v1/busqueda_poligono', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + DATAINM_TOKEN },
-          body: JSON.stringify({ fuente: 'oferta', polygon: polyArr, page, property_type: [tipoObjetivo], transaction_type: 'arriendo', active_publications: 'true' }),
-        })
-        if (!r.ok) break
-        const j = await r.json()
-        raw = raw.concat(Array.isArray(j.resultados) ? j.resultados : [])
-        if (!j.has_more || raw.length >= 100) break
-      }
-      const UF_CLP = 40408
-      const vals = raw.map(v => {
-        let precio = parseFloat(v.price)
-        if (!(precio > 0)) return null
-        const mon = String(v.moneda || '').toUpperCase()
-        if (mon.includes('CLP') || mon === 'PESO' || precio > 3000) precio = precio / UF_CLP // publicado en pesos
-        const m2a = parseFloat(v.superficie_util)
-        if (m2Construido && m2a > 0 && (m2a < m2Construido * 0.6 || m2a > m2Construido * 1.5)) return null
-        if (precio < 3 || precio > 400) return null // UF/mes fuera de rango razonable
-        return precio
-      }).filter(x => x != null)
-      if (vals.length >= 3) {
-        const st = [...vals].sort((a, b) => a - b); const m = Math.floor(st.length / 2)
-        arriendoMediana = Math.round((st.length % 2 ? st[m] : (st[m - 1] + st[m]) / 2) * 10) / 10
-        arriendoN = vals.length
-      }
+    const lista = (await fetchOfertas('venta')).map(v => {
+      let uf = enUF(v); if (uf == null) return null
+      if (uf > 200000) uf = uf / UF_CLP // vino en pesos sin moneda declarada
+      const m2o = parseFloat(v.superficie_util) > 0 ? Math.round(parseFloat(v.superficie_util)) : null
+      if (m2o && m2Construido && !enBandaM2(m2o, m2Construido)) return null
+      if (uf < 500 || uf > 200000) return null
+      return { dir: String(v.direccion || v.titulo || '').replace(/\s+/g, ' ').trim() || null, m2: m2o, uf: Math.round(uf), uf_m2: m2o ? Math.round(uf / m2o) : null, fecha: String(v.fecha_publicacion || '').slice(0, 10) || null, url: v.url || null }
+    }).filter(Boolean).sort((a, b) => ((a.fecha || '') < (b.fecha || '') ? 1 : -1))
+    ofertasVenta = lista.slice(0, 12)
+    const medV = mediana(lista.map(o => o.uf).filter(x => x > 0))
+    if (lista.length >= 3 && medV) ofertaVentaMediana = Math.round(medV)
+  } catch (e) { console.error('Ofertas venta tasar:', e.message) }
+  try {
+    const lista = (await fetchOfertas('arriendo')).map(v => {
+      let pm = enUF(v); if (pm == null) return null
+      if (pm > 3000) pm = pm / UF_CLP // arriendo publicado en pesos sin moneda
+      const m2o = parseFloat(v.superficie_util) > 0 ? Math.round(parseFloat(v.superficie_util)) : null
+      if (m2o && m2Construido && !enBandaM2(m2o, m2Construido)) return null
+      if (pm < 3 || pm > 400) return null
+      return { dir: String(v.direccion || v.titulo || '').replace(/\s+/g, ' ').trim() || null, m2: m2o, uf_mes: Math.round(pm * 10) / 10, fecha: String(v.fecha_publicacion || '').slice(0, 10) || null, url: v.url || null }
+    }).filter(Boolean).sort((a, b) => ((a.fecha || '') < (b.fecha || '') ? 1 : -1))
+    ofertasArriendo = lista.slice(0, 12)
+    if (lista.length >= 3) {
+      arriendoMediana = Math.round(mediana(lista.map(o => o.uf_mes)) * 10) / 10
+      arriendoN = lista.length
     }
   } catch (e) { console.error('Arriendo tasar:', e.message) }
 
@@ -583,10 +632,11 @@ export async function POST(request) {
     : ''
 
   // Datos reales del sector para que la narración los use (no los invente)
-  const sectorTexto = (plusvalia12m != null || arriendoMediana)
+  const sectorTexto = (plusvalia12m != null || arriendoMediana || ofertaVentaMediana)
     ? '\n\nDATOS REALES DEL SECTOR (úsalos en tu análisis):'
       + (plusvalia12m != null ? '\n- Plusvalía del sector últimos 12 meses (mediana UF/m²): ' + plusvalia12m + '%' : '')
       + (arriendoMediana ? '\n- Arriendo de referencia para esta tipología: ' + arriendoMediana + ' UF/mes (' + arriendoN + ' ofertas vigentes del sector)' : '')
+      + (ofertaVentaMediana ? '\n- Mediana de OFERTAS de venta activas de tipología similar en el sector: ' + ofertaVentaMediana + ' UF (los precios de oferta suelen estar 5-10% sobre el cierre)' : '')
     : ''
 
   // ── 3. Armar prompt: el LLM SOLO narra ─────────────────────────────────────
@@ -601,7 +651,7 @@ VALOR DETERMINÍSTICO (AUTORITATIVO):
 - Cuando se te entregue un "VALOR FINAL" y un "DESGLOSE" calculados por el sistema, son DEFINITIVOS.
 - COPIA exactamente valor_uf, precio_m2, confianza y desglose tal como se te entregan. NO los recalcules ni los modifiques.
 - Tu trabajo es NARRAR: análisis, factores positivos/negativos, plan regulador y recomendación de precio, todo COHERENTE con ese valor final. La prosa NO puede contradecir el número (no menciones un valor distinto al entregado).
-- Si NO se te entrega un valor determinístico (no hubo comparables), recién ahí estima tú con tus rangos de referencia por comuna y confianza Media.
+- Si NO se te entrega un valor determinístico (no hubo datos suficientes del sector): entrega valor_uf y precio_m2 con tus rangos de referencia por comuna, SIEMPRE con confianza "Baja", y el desglose debe contener UNA SOLA línea: { "concepto": "Estimación referencial (sin ventas suficientes en el sector)", "calculo": "rango de mercado de la comuna", "valor_uf": <el valor> }. PROHIBIDO inventar líneas de valor de terreno, UF/m² de suelo, factores de depreciación, ajustes de ubicación o descuentos: esos números SOLO pueden venir del sistema.
 
 PLAN REGULADOR:
 - Si se te entrega una "NORMATIVA OFICIAL DEL PLAN REGULADOR", úsala EXACTAMENTE (zona, nombre, uso de suelo, predial mínimo). NO inventes una zona distinta.
@@ -828,6 +878,9 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
       parsed.sector = { composicion: sectorComposicion, indice_uf_m2: indiceSector, plusvalia_12m_pct: plusvalia12m }
       parsed.ventas_conjunto = ventasConjunto
       parsed.historial_propiedad = historialPropiedad
+      parsed.ofertas_venta = ofertasVenta
+      parsed.ofertas_arriendo = ofertasArriendo
+      parsed._diag = diag ? { ...diag, metodo: valorDet ? (valorDet.metodo || 'mediana sector') : 'SIN valor determinístico (estimación referencial del LLM)' } : null
       const _valorRef = parsed.valor_uf || null
       parsed.arriendo = arriendoMediana ? {
         uf_mes: arriendoMediana,
@@ -852,6 +905,8 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
         sector: { composicion: sectorComposicion, indice_uf_m2: indiceSector, plusvalia_12m_pct: plusvalia12m },
         ventas_conjunto: ventasConjunto,
         historial_propiedad: historialPropiedad,
+        ofertas_venta: ofertasVenta,
+        ofertas_arriendo: ofertasArriendo,
         arriendo: arriendoMediana ? { uf_mes: arriendoMediana, n_ofertas: arriendoN, rentabilidad_pct: null, retorno_anos: null } : null,
         ajustes: ajustesExtra,
         desglose: valorDet?.desglose ?? [], factores_positivos: [], factores_negativos: [], plan_regulador: null

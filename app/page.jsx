@@ -1949,9 +1949,39 @@ function InformePrint({ data, onClose }) {
           </div>
         )}
 
+        {r.ofertas_venta?.length > 0 && (
+          <div style={S.sec}>
+            <div style={S.h2}>9 · Ofertas de venta activas en el sector</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead><tr><th style={S.th}>Dirección / aviso</th><th style={S.th}>Publicado</th><th style={S.th}>m²</th><th style={{ ...S.th, textAlign: 'right' }}>UF/m²</th><th style={{ ...S.th, textAlign: 'right' }}>Precio</th></tr></thead>
+              <tbody>
+                {r.ofertas_venta.map((o, i) => (
+                  <tr key={i}><td style={S.td}>{o.dir || 'Aviso'}</td><td style={S.td}>{o.fecha || '—'}</td><td style={S.td}>{o.m2 || '—'}</td><td style={S.tdr}>{o.uf_m2 || '—'}</td><td style={S.tdr}>{fmtUF(o.uf)}</td></tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ fontSize: 10, color: '#999', marginTop: 4 }}>Fuente: portales inmobiliarios (publicaciones vigentes). Los precios de oferta suelen estar 5–10% sobre el valor de cierre.</div>
+          </div>
+        )}
+
+        {r.ofertas_arriendo?.length > 0 && (
+          <div style={S.sec}>
+            <div style={S.h2}>10 · Ofertas de arriendo activas en el sector</div>
+            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+              <thead><tr><th style={S.th}>Dirección / aviso</th><th style={S.th}>Publicado</th><th style={S.th}>m²</th><th style={{ ...S.th, textAlign: 'right' }}>UF/mes</th></tr></thead>
+              <tbody>
+                {r.ofertas_arriendo.map((o, i) => (
+                  <tr key={i}><td style={S.td}>{o.dir || 'Aviso'}</td><td style={S.td}>{o.fecha || '—'}</td><td style={S.td}>{o.m2 || '—'}</td><td style={S.tdr}>{o.uf_mes}</td></tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ fontSize: 10, color: '#999', marginTop: 4 }}>Fuente: portales inmobiliarios (publicaciones vigentes de tipología similar).</div>
+          </div>
+        )}
+
         {r.sector && (r.sector.composicion || r.sector.indice_uf_m2 || r.sector.plusvalia_12m_pct != null) && (
           <div style={S.sec}>
-            <div style={S.h2}>9 · Indicadores del sector</div>
+            <div style={S.h2}>11 · Indicadores del sector</div>
             {r.sector.plusvalia_12m_pct != null && <div style={{ fontSize: 12, marginBottom: 6 }}>Plusvalía últimos 12 meses (mediana UF/m², mismo tipo): <b>{r.sector.plusvalia_12m_pct > 0 ? '+' : ''}{r.sector.plusvalia_12m_pct}%</b></div>}
             {r.sector.composicion && <div style={{ fontSize: 12, marginBottom: 6 }}>Composición del sector: {r.sector.composicion.map((c) => c.tipo + ' ' + c.pct + '%').join(' · ')}</div>}
             {r.sector.indice_uf_m2?.length >= 2 && (
@@ -1968,7 +1998,7 @@ function InformePrint({ data, onClose }) {
 
         {r.potencial_desarrollo?.aplica && (
           <div style={S.sec}>
-            <div style={S.h2}>10 · Potencial de desarrollo del terreno</div>
+            <div style={S.h2}>12 · Potencial de desarrollo del terreno</div>
             <div style={{ fontSize: 12, lineHeight: 1.5 }}>{r.potencial_desarrollo.descripcion}</div>
             {r.potencial_desarrollo.advertencia && <div style={{ fontSize: 10, color: '#999', marginTop: 4 }}>⚠️ {r.potencial_desarrollo.advertencia}</div>}
           </div>
