@@ -103,6 +103,17 @@ export async function POST(request) {
     const _cutoffStr = cutoffVentasStr()
     ventas = ventas.filter((v) => esVentaReciente(v, _cutoffStr))
 
+    // Debug temprano: visible incluso si termina en pocos_comparables
+    if (dbg) {
+      dbg.n_ventas_crudas = ventas.length
+      const counts0 = {}
+      ventas.forEach((v) => { const t = clasificaTipo(v); counts0[t] = (counts0[t] || 0) + 1 })
+      dbg.counts_por_tipo = counts0
+      dbg.campos = ventas[0] ? Object.keys(ventas[0]) : []
+      dbg.muestra_clasificacion = ventas.slice(0, 10).map((v) => ({ dest: v.cod_destino, copro: v.copropiedad, terr: v.superficie_total_terreno, constr: v.superficie_construccion, unit: v.unit, tipo: clasificaTipo(v) }))
+      dbg.muestra_raw = ventas.slice(0, 2)
+    }
+
     // ── Comparables del tipo objetivo (mercado, UF/m² construido) ────────────────
     let filtradas = ventas.filter((v) => {
       if (clasificaTipo(v) !== objetivo) return false
