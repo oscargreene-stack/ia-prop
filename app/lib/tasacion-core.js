@@ -112,18 +112,38 @@ export function percentil(arr, p) {
 export const r1 = (x) => (x == null ? null : Math.round(x * 10) / 10) // 1 decimal
 
 // ── Clasificación de una venta del CBR por su TIPO REAL ─────────────────────
-// El cod_destino 'H' mezcla casas y departamentos: se clasifica por copropiedad
-// ('t' = unidad en edificio) y superficie de terreno. Nunca se mezclan tipos.
+// Robusto a los formatos de la fuente: copropiedad puede venir como boolean
+// (true/false), 't'/'f', 'true', '1'; el destino como letra ('H') o palabra
+// ('HABITACIONAL'); el terreno con distintos nombres de campo.
+
+// ¿La unidad está en copropiedad (edificio/condominio)?
+export function esCopropiedad(v) {
+  const c = v && v.copropiedad
+  if (c === true) return true
+  if (c === false || c == null) return false
+  const t = String(c).trim().toLowerCase()
+  return t === 't' || t === 'true' || t === '1' || t === 's' || t === 'si' || t === 'sí' || t === 'verdadero'
+}
+
+// Superficie de terreno de la venta, tolerante al nombre del campo.
+export function terrenoDe(v) {
+  return parseFloat(v?.superficie_total_terreno ?? v?.superficie_terreno ?? v?.terreno ?? 0) || 0
+}
+
 export function clasificaTipo(v) {
-  const dest = String(v.cod_destino || '').toUpperCase()
+  const dest = String(v.cod_destino || '').trim().toUpperCase()
+  const d0 = dest.charAt(0) // 'H'/'HABITACIONAL' → H; 'O'/'OFICINA' → O; 'C'/'COMERCIO' → C
   const constr = parseFloat(v.superficie_construccion || 0) || 0
-  const terreno = parseFloat(v.superficie_total_terreno || 0) || 0
-  // Sitio / terreno sin construcción (valor de suelo puro)
+  const terreno = terrenoDe(v)
+  // Sitio eriazo (destino W) o terreno sin construcción: valor de suelo puro
+  if (d0 === 'W') return 'terreno'
   if (constr <= 5 && terreno > 0) return 'terreno'
-  if (dest === 'O') return 'oficina'
-  if (dest === 'C') return 'comercial'
-  if (dest && dest !== 'H') return 'otro'
-  if (String(v.copropiedad || '').toLowerCase() === 't') return 'departamento'
+  if (d0 === 'O') return 'oficina'
+  if (d0 === 'C') return 'comercial'
+  if (d0 && d0 !== 'H') return 'otro'
+  // Copropiedad (unidad en edificio) => departamento, aunque el registro traiga
+  // terreno (el del lote del edificio). Evita mezclar casas y departamentos.
+  if (esCopropiedad(v)) return 'departamento'
   return terreno > 0 ? 'casa' : 'departamento'
 }
 
@@ -173,7 +193,7 @@ export function puntosSuelo(ventas, casas) {
   const sitios = (ventas || []).filter((v) => clasificaTipo(v) === 'terreno' && String(v.unit || '').toUpperCase() === 'UF')
   const deSitios = sitios
     .map((v) => {
-      const t = parseFloat(v.superficie_total_terreno), uf = parseFloat(v.price)
+      const t = terrenoDe(v), uf = parseFloat(v.price)
       if (!(t > 0) || !(uf > 0)) return null
       const r = uf / t
       if (r < 0.3 || r > 250) return null
@@ -182,7 +202,7 @@ export function puntosSuelo(ventas, casas) {
     .filter((x) => x != null)
   const residual = (casas || [])
     .map((v) => {
-      const t = parseFloat(v.superficie_total_terreno), c = parseFloat(v.superficie_construccion), uf = parseFloat(v.price)
+      const t = terrenoDe(v), c = parseFloat(v.superficie_construccion), uf = parseFloat(v.price)
       if (!(t > 0) || !(c > 0) || !(uf > 0)) return null
       const land = (uf - COSTO_CONSTR_RESIDUAL * c) / t
       if (land < 0.3 || land > 250) return null

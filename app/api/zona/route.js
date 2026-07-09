@@ -223,6 +223,9 @@ export async function POST(request) {
     if (dbg) {
       const counts = {}
       ventas.forEach((v) => { const t = clasificaTipo(v); counts[t] = (counts[t] || 0) + 1 })
+      // Muestra cruda: para ver los NOMBRES DE CAMPO reales que entrega la API
+      dbg.muestra_raw = ventas.slice(0, 2)
+      dbg.muestra_clasificacion = ventas.slice(0, 8).map((v) => ({ dest: v.cod_destino, copro: v.copropiedad, terr: v.superficie_total_terreno, constr: v.superficie_construccion, tipo: clasificaTipo(v) }))
       dbg.paginas = paginasUsadas
       dbg.objetivo = objetivo
       dbg.counts_por_tipo = counts
