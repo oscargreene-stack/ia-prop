@@ -278,6 +278,7 @@ export function valorAditivoCasa({ sueloUfM2, m2Terreno, costoUfM2, m2Construido
 export async function buscarVentasPoligono({ token, polys, objetivo, apiBase = 'https://datainmobiliaria.cl/api/v1' }) {
   const delTipo = (arr) => arr.filter((v) => !objetivo || clasificaTipo(v) === objetivo).length
   let paginas = 0
+  let bloqueado = false // 402/403 del proveedor (plan expirado / sin permiso)
   const fetchPoly = async (poly, conFiltro) => {
     let acc = []
     for (let page = 1; page <= 3; page++) {
@@ -289,6 +290,7 @@ export async function buscarVentasPoligono({ token, polys, objetivo, apiBase = '
         body: JSON.stringify(body),
       })
       paginas++
+      if (r.status === 402 || r.status === 403) bloqueado = true
       if (!r.ok) break
       const j = await r.json()
       acc = acc.concat(Array.isArray(j.resultados) ? j.resultados : [])
@@ -310,7 +312,7 @@ export async function buscarVentasPoligono({ token, polys, objetivo, apiBase = '
       if (delTipo(ventas) >= 12) break
     }
   }
-  return { ventas, paginas }
+  return { ventas, paginas, bloqueado }
 }
 
 // Confianza según número de referencias (mismos umbrales para ambos agentes).

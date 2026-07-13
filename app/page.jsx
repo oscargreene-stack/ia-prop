@@ -622,11 +622,15 @@ function ChatVendedor({ onBack }) {
         return
       }
 
-      // No encontrado -> pedir m2
+      // No encontrado -> pedir m2 (distinguiendo servicio caído de no-encontrado)
       if (!resultados.length) {
         const newData = { ...d, siiData:{ direccion:`${d.direccion}${d.depto ? ' '+d.depto : ''}, ${d.comuna}` } }
         setData(newData)
-        await addAgent(`No encontré esta propiedad en el catastro con esa dirección. Para una tasación precisa necesito los metros cuadrados reales.\n\n¿Cuántos **m² construidos** tiene la propiedad? (ej: 180)`, 400)
+        if (json._modo === 'servicio_no_disponible') {
+          await addAgent(`⚠️ ${json.mensaje || 'El servicio de datos está temporalmente no disponible.'}\n\nSi prefieres continuar ahora: ¿cuántos **m² construidos** tiene la propiedad? (ej: 180)`, 400)
+        } else {
+          await addAgent(`No encontré esta propiedad en el catastro con esa dirección. Para una tasación precisa necesito los metros cuadrados reales.\n\n¿Cuántos **m² construidos** tiene la propiedad? (ej: 180)`, 400)
+        }
         setInputMode('text')
         setStage('ingresar_m2_construido')
         return
@@ -972,9 +976,18 @@ function ChatVendedor({ onBack }) {
   }
 
   const handleSearchForm = async () => {
-    const busqueda = inputVal.trim()
+    let busqueda = inputVal.trim()
     if (!busqueda || !comunaForm) return
-    const conDepto = deptoVal.trim()
+    let conDepto = deptoVal.trim()
+    // Tolerancia: si el usuario escribió la unidad DENTRO de la dirección
+    // ("Luis Carrera 2376 Depto 202, Vitacura"), separarla — el catastro
+    // busca por calle y número; la unidad y la comuna van aparte.
+    busqueda = busqueda.split(',')[0].trim()
+    const mU = busqueda.match(/\b(?:depto\.?|dpto\.?|dept\.?|dp|departamento|of\.?|oficina|casa|cs|local|lc)\s*(?:n[°º]?|#|\.|-)?\s*([a-z]?\d+[a-z]?)\s*$/i)
+    if (mU) {
+      if (!conDepto) conDepto = mU[1]
+      busqueda = busqueda.slice(0, mU.index).trim()
+    }
     const label = data.tipo === 'oficina' ? 'Of.' : data.tipo === 'departamento' ? 'Depto' : ''
     const resumen = conDepto ? `${busqueda} ${label} ${conDepto}, ${comunaForm}` : `${busqueda}, ${comunaForm}`
     addUser(resumen)

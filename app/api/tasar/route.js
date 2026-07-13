@@ -233,12 +233,15 @@ export async function POST(request) {
   let sueloInfo = null
   let ufm2SectorList = []
   let diag = null
+  let proveedorBloqueado = false // 402/403 de DataInmobiliaria (plan expirado)
   const tipoObjetivo = TIPO_OBJETIVO[String(tipo || '').toLowerCase()] || null
   try {
     if (punto && DATAINM_TOKEN) {
       const polys = [poligono(punto.lat, punto.lng, 800), poligono(punto.lat, punto.lng, 1600), poligono(punto.lat, punto.lng, 3200)]
       // Búsqueda compartida del núcleo (doble pasada: sin filtro + property_type)
-      const { ventas } = await buscarVentasPoligono({ token: DATAINM_TOKEN, polys, objetivo: tipoObjetivo })
+      const busq = await buscarVentasPoligono({ token: DATAINM_TOKEN, polys, objetivo: tipoObjetivo })
+      const ventas = busq.ventas
+      if (busq.bloqueado) proveedorBloqueado = true
 
       // Corte de 5 años, sanidad UF/m² y banda de superficie: núcleo compartido
       // (idénticos a los de /api/zona / Isidora).
@@ -439,6 +442,7 @@ export async function POST(request) {
       const restUrl = 'https://datainmobiliaria.cl/api/v1/propiedades/detalle?' + qs
       const restRes = await fetch(restUrl, { headers: { Authorization: 'Bearer ' + DATAINM_TOKEN } })
       diagRest = { status: restRes.status }
+      if (restRes.status === 402 || restRes.status === 403) proveedorBloqueado = true
       if (restRes.ok) {
         const data = await restRes.json()
         const ventas = Array.isArray(data.detalle_ventas_recientes) ? data.detalle_ventas_recientes : []
@@ -525,6 +529,14 @@ export async function POST(request) {
         tramo: delTramo ? delTramo.rango : 'todos los tamaños de sitio',
       }
     }
+  }
+
+  // Proveedor de datos bloqueado (plan expirado) y sin ningún dato: error claro,
+  // NO seguir a la estimación del LLM (daría un número inventado sin respaldo).
+  if (proveedorBloqueado && comparablesReales.length === 0 && !sueloInfo) {
+    return Response.json({
+      error: 'El servicio de datos de mercado no está disponible en este momento (plan del proveedor de datos). Intenta nuevamente en unos minutos',
+    }, { status: 503 })
   }
 
   // ── 1c. Ofertas REALES del sector (portales): venta y arriendo ─────────────

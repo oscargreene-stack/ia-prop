@@ -80,6 +80,13 @@ export async function POST(request) {
     const busq = await buscarVentasPoligono({ token: DATAINM_TOKEN, polys, objetivo })
     let ventas = busq.ventas
     const paginasUsadas = busq.paginas
+    if (busq.bloqueado && !ventas.length) {
+      return Response.json({
+        _modo: 'servicio_no_disponible',
+        mensaje: 'El servicio de datos de mercado no está disponible en este momento. Intenta nuevamente en unos minutos.',
+        ...(dbg ? { _debug: dbg } : {}),
+      })
+    }
 
     // Solo ventas de los últimos 5 años (ventana compartida del núcleo).
     const _cutoffStr = cutoffVentasStr()

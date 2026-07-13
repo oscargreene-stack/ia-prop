@@ -72,10 +72,16 @@ export async function POST(request) {
     return Response.json({ candidatos: [], total: 0, mensaje: 'Ingresa una dirección.', _modo: 'sin_input' })
   }
 
+  // Limpieza defensiva: quitar unidad ("Depto 202", "Of 501") y texto tras la
+  // coma (comuna repetida) — ensucian el geocoding y el match del catastro.
+  const dirLimpia = (direccion.split(',')[0] || '')
+    .replace(/\b(?:depto\.?|dpto\.?|dept\.?|dp|departamento|of\.?|oficina|casa|cs|local|lc)\s*(?:n[°º]?|#|\.|-)?\s*[a-z]?\d+[a-z]?\s*$/i, '')
+    .trim() || direccion
+
   // 1) Coordenadas: del frontend si vienen, si no geocodificamos
   let punto = (isFinite(latIn) && isFinite(lngIn)) ? { lat: latIn, lng: lngIn } : null
   if (!punto) {
-    try { punto = await geocode(direccion, comuna, dbg) }
+    try { punto = await geocode(dirLimpia, comuna, dbg) }
     catch (e) { if (dbg) dbg.geocodeErr = String((e && e.message) || e) }
   }
   if (!punto) {
@@ -86,7 +92,7 @@ export async function POST(request) {
   // 2) Búsqueda por polígono (catastro)
   let resultados = []
   try {
-    const polygon = polygonAround(punto.lat, punto.lng, 70)
+    const polygon = polygonAround(punto.lat, punto.lng, 120)
     const res = await fetch(`${API_BASE}/busqueda_poligono`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json', 'Accept': 'application/json' },
@@ -95,13 +101,21 @@ export async function POST(request) {
     const txt = await res.text()
     let j = null; try { j = JSON.parse(txt) } catch (e) {}
     if (dbg) dbg.poligono = { status: res.status, total: (j && (j.resultados || j.data) || []).length, sample: txt.slice(0, 400) }
+    // Plan del proveedor expirado / sin permiso: avisar claro, no "no encontré"
+    if (res.status === 402 || res.status === 403) {
+      return Response.json({
+        candidatos: [], total: 0, _modo: 'servicio_no_disponible',
+        mensaje: 'El servicio de datos está temporalmente no disponible. Intenta en unos minutos, o continúa ingresando los m² a mano.',
+        ...(dbg ? { _debug: dbg } : {}),
+      })
+    }
     resultados = (j && (j.resultados || j.data)) || []
   } catch (e) {
     if (dbg) dbg.poligonoErr = String((e && e.message) || e)
   }
 
   // 3) Mapear -> candidatos, ordenar por cercanía, priorizar coincidencia de número
-  const numero = (norm(direccion).match(/(\d{2,6})/) || [])[1] || ''
+  const numero = (norm(dirLimpia).match(/(\d{2,6})/) || [])[1] || ''
   let cands = resultados.map(r => {
     const lat = parseFloat(r.lat), lng = parseFloat(r.lng)
     return {
