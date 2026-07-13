@@ -444,7 +444,7 @@ export async function POST(request) {
         radio: '2000', superficie_min: String(m2Min), superficie_max: String(m2Max), cod_destino: cd,
       }).toString()
       const restUrl = 'https://datainmobiliaria.cl/api/v1/propiedades/detalle?' + qs
-      const restRes = await fetch(restUrl, { headers: { Authorization: 'Bearer ' + DATAINM_TOKEN } })
+      const restRes = await fetch(restUrl, { headers: { Authorization: 'Bearer ' + DATAINM_TOKEN }, signal: AbortSignal.timeout(20000) })
       diagRest = { status: restRes.status }
       if (restRes.status === 402 || restRes.status === 403) proveedorBloqueado = true
       if (restRes.ok) {
@@ -616,6 +616,7 @@ export async function POST(request) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + DATAINM_TOKEN },
         body: JSON.stringify({ fuente: 'oferta', polygon: polyArr, page, property_type: [tipoObjetivo], transaction_type: tx, active_publications: 'true' }),
+        signal: AbortSignal.timeout(15000),
       })
       if (!r.ok) break
       const j = await r.json()

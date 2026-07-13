@@ -284,11 +284,15 @@ export async function buscarVentasPoligono({ token, polys, objetivo, apiBase = '
     for (let page = 1; page <= 3; page++) {
       const body = { fuente: 'ventas', polygon: poly, page }
       if (conFiltro && objetivo) body.property_type = [objetivo]
-      const r = await fetch(apiBase + '/busqueda_poligono', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-        body: JSON.stringify(body),
-      })
+      let r
+      try {
+        r = await fetch(apiBase + '/busqueda_poligono', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(15000), // proveedor colgado: cortar y seguir
+        })
+      } catch (e) { break }
       paginas++
       if (r.status === 402 || r.status === 403) bloqueado = true
       if (!r.ok) break
@@ -306,11 +310,10 @@ export async function buscarVentasPoligono({ token, polys, objetivo, apiBase = '
   if (objetivo && delTipo(ventas) < 12) {
     const key = (v) => [v.rol, v.date_inscripcion || v.fecha, v.price].join('|')
     const vistos = new Set(ventas.map(key))
-    for (const poly of polys) {
-      const extra = await fetchPoly(poly, true)
-      for (const v of extra) { const k = key(v); if (!vistos.has(k)) { vistos.add(k); ventas.push(v) } }
-      if (delTipo(ventas) >= 12) break
-    }
+    // Solo el polígono MÁS GRANDE (cubre a los menores): la segunda pasada no
+    // puede costar otros 9 requests — el presupuesto de tiempo es de 60 s.
+    const extra = await fetchPoly(polys[polys.length - 1], true)
+    for (const v of extra) { const k = key(v); if (!vistos.has(k)) { vistos.add(k); ventas.push(v) } }
   }
   return { ventas, paginas, bloqueado }
 }

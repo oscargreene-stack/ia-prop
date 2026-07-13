@@ -148,6 +148,7 @@ export async function POST(request) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + DATAINM_TOKEN },
           body: JSON.stringify({ fuente: 'catastro', polygon: poligono(punto.lat, punto.lng, 200) }),
+          signal: AbortSignal.timeout(15000),
         })
         if (catRes.ok) {
           const catJ = await catRes.json()
@@ -161,7 +162,7 @@ export async function POST(request) {
               cod_com: String(ancla.cod_com), cod_mz: String(ancla.cod_mz ?? ''), cod_pr: String(ancla.cod_pr ?? ''),
               radio: '2000', superficie_min: String(m2Min), superficie_max: String(m2Max), cod_destino: 'H',
             }).toString()
-            const detRes = await fetch(`${API_BASE}/propiedades/detalle?` + qs, { headers: { Authorization: 'Bearer ' + DATAINM_TOKEN } })
+            const detRes = await fetch(`${API_BASE}/propiedades/detalle?` + qs, { headers: { Authorization: 'Bearer ' + DATAINM_TOKEN }, signal: AbortSignal.timeout(15000) })
             if (detRes.ok) {
               const det = await detRes.json()
               const recientes = Array.isArray(det.detalle_ventas_recientes) ? det.detalle_ventas_recientes : []

@@ -97,6 +97,7 @@ export async function POST(request) {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify({ fuente: 'catastro', polygon }),
+      signal: AbortSignal.timeout(15000),
     })
     const txt = await res.text()
     let j = null; try { j = JSON.parse(txt) } catch (e) {}
