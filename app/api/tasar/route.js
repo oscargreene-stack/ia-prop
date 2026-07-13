@@ -234,6 +234,8 @@ export async function POST(request) {
   let ufm2SectorList = []
   let diag = null
   let proveedorBloqueado = false // 402/403 de DataInmobiliaria (plan expirado)
+  let valorEstacionamientoUf = null // mediana de ventas reales de estacionamientos del edificio
+  let valorBodegaUf = null          // ídem bodegas
   const tipoObjetivo = TIPO_OBJETIVO[String(tipo || '').toLowerCase()] || null
   try {
     if (punto && DATAINM_TOKEN) {
@@ -418,10 +420,12 @@ export async function POST(request) {
     console.error('Error comparables (polígono):', e.message)
   }
 
-  // ── 1b. Respaldo: método anterior (REST por ROL) si el polígono no alcanzó ──
+  // ── 1b. FUENTE PRINCIPAL (estilo DataInmobiliaria): detalle por ROL ─────────
+  // El mismo servicio que alimenta el reporte "Detalle de Propiedad" de
+  // datainmobiliaria.cl: ventas recientes por radio desde el ROL (tabla
+  // "Mercado"), historial del ROL, ventas del mismo edificio y evolución UF/m².
   let diagRest = null
-  if (comparablesReales.length < 3) {
-    ventasMapa = []
+  {
     try {
     const codCom = siiData?.cod_comuna
       || (rol ? parseInt(String(rol).split('-')[0], 10) : null)
@@ -462,6 +466,10 @@ export async function POST(request) {
           .filter(v => parseFloat(v.superficie_construccion) > 0 && parseFloat(v.price) > 0 && (v.unit === 'UF' || !v.unit))
           .filter(v => !tipoObjetivo || clasificaTipo(v) === tipoObjetivo)
           .filter(v => esVentaReciente(v, _cutoffStr))
+        diagRest.n_del_tipo = filtradosRest.length
+        // Prioridad sobre el polígono cuando hay suficientes: son las ventas MÁS
+        // CERCANAS al ROL (las mismas de la tabla "Mercado" de DataInmobiliaria).
+        if (filtradosRest.length >= 3 || comparablesReales.length === 0) {
         // Estos rows traen latitud/longitud: alimentan también el mapa y el cuadro
         ventasMapa = filtradosRest.map(v => {
           const la = parseFloat(v.latitud), ln = parseFloat(v.longitud), uf = Math.round(parseFloat(v.price))
@@ -478,6 +486,8 @@ export async function POST(request) {
             rol: [v.cod_com, v.cod_mz, v.cod_pr].filter(x => x != null).join('-') || null,
           }
         }).filter(Boolean).slice(0, 150)
+        // El universo comparable completo para la mediana (como DataInmobiliaria)
+        ufm2SectorList = filtradosRest.map(v => parseFloat(v.price) / parseFloat(v.superficie_construccion)).filter(x => x > 0)
         comparablesReales = filtradosRest
           .map(v => {
             const m2 = Math.round(parseFloat(v.superficie_construccion))
@@ -499,6 +509,61 @@ export async function POST(request) {
           .filter(c => c.uf_m2 && c.uf_m2 >= UFM2_MIN && c.uf_m2 <= UFM2_MAX)
           .sort((a, b) => (a.distancia_m != null && b.distancia_m != null) ? (a.distancia_m - b.distancia_m) : 0)
           .slice(0, 12)
+        } // fin prioridad comparables del detalle
+
+        // ── Extras del detalle (los mismos datos del reporte de DataInmobiliaria) ──
+        const filaRest = (v) => {
+          const m2f = Math.round(parseFloat(v.superficie_construccion)) || null
+          const uff = Math.round(parseFloat(v.price))
+          return {
+            direccion: String(v.direccion_sii || '').replace(/\s+/g, ' ').trim() || null,
+            rol: [v.cod_com, v.cod_mz, v.cod_pr].filter(x => x != null).join('-') || null,
+            fecha: String(v.fecha || '').slice(0, 10),
+            m2: m2f, uf: uff, uf_m2: m2f && uff ? Math.round((uff / m2f) * 10) / 10 : null,
+          }
+        }
+        // Ventas históricas de ESTA propiedad (ROL exacto)
+        const obs = Array.isArray(data.ventas_propiedad_observada) ? data.ventas_propiedad_observada : []
+        if (obs.length) {
+          historialPropiedad = obs
+            .filter(v => parseFloat(v.price) > 0 && (v.unit === 'UF' || !v.unit))
+            .map(filaRest)
+            .sort((a, b) => (a.fecha < b.fecha ? 1 : -1))
+            .slice(0, 8)
+        }
+        // Ventas del MISMO edificio/copropiedad: habitacionales para el cuadro,
+        // estacionamientos y bodegas para valorizarlos con ventas reales.
+        const copro = Array.isArray(data.ventas_otras_copropiedades) ? data.ventas_otras_copropiedades : []
+        if (copro.length) {
+          const validas = copro.filter(v => parseFloat(v.price) > 0 && (v.unit === 'UF' || !v.unit))
+          const habit = validas.filter(v => {
+            const tp = clasificaTipo(v)
+            return (tp === 'casa' || tp === 'departamento') && parseFloat(v.superficie_construccion) > 20
+          })
+          if (habit.length) {
+            ventasConjunto = habit.map(filaRest).sort((a, b) => (a.fecha < b.fecha ? 1 : -1)).slice(0, 16)
+          }
+          const preciosDe = (cond) => validas.filter(cond).map(v => parseFloat(v.price)).filter(x => x >= 50 && x <= 3000)
+          const dirDe = (v) => ' ' + String(v.direccion_sii || '').toUpperCase() + ' '
+          const pEst = preciosDe(v => String(v.cod_destino || '').toUpperCase().startsWith('Z') && !/ BD | BOD /.test(dirDe(v)))
+          const pBod = preciosDe(v => / BD | BOD /.test(dirDe(v)))
+          if (pEst.length >= 2) valorEstacionamientoUf = Math.round(mediana(pEst))
+          if (pBod.length >= 2) valorBodegaUf = Math.round(mediana(pBod))
+        }
+        // Evolución UF/m² del sector (serie mensual del reporte) + plusvalía 12m
+        const merc = Array.isArray(data.detalle_mercado) ? data.detalle_mercado : []
+        if (merc.length >= 4) {
+          const serieM = merc
+            .filter(x => parseFloat(x.promedio_precio_m2_3m) > 0)
+            .map(x => ({ trimestre: String(x.mes || '').slice(0, 7), uf_m2: Math.round(parseFloat(x.promedio_precio_m2_3m) * 10) / 10, n: parseInt(x.recuento_3m) || 0 }))
+          if (serieM.length >= 4) {
+            indiceSector = serieM.slice(-8)
+            const ult = serieM[serieM.length - 1]
+            const hace12 = serieM[Math.max(0, serieM.length - 13)]
+            if (ult && hace12 && hace12.uf_m2 > 0) plusvalia12m = Math.round((ult.uf_m2 / hace12.uf_m2 - 1) * 1000) / 10
+          }
+        }
+        diagRest.extras = { historial: historialPropiedad.length, conjunto: ventasConjunto.length, mercado_meses: merc.length, estacionamiento_uf: valorEstacionamientoUf, bodega_uf: valorBodegaUf }
       }
     }
     } catch (e) {
@@ -650,6 +715,28 @@ export async function POST(request) {
         confianza: confianzaPorN(ufm2List.length),
         desglose,
       }
+    }
+  }
+
+  // Estacionamientos y bodegas con ventas REALES del mismo edificio (estilo
+  // DataInmobiliaria/Propiteq: cada unidad se suma con su valor de mercado).
+  if (valorDet && (valorEstacionamientoUf || valorBodegaUf)) {
+    const nEst = parseInt(answers?.estacionamientos) || 0
+    const nBod = parseInt(answers?.bodegas) || 0
+    let extraUf = 0
+    if (nEst > 0 && valorEstacionamientoUf) {
+      const v = nEst * valorEstacionamientoUf
+      extraUf += v
+      valorDet.desglose.push({ concepto: nEst > 1 ? 'Estacionamientos' : 'Estacionamiento', calculo: nEst + ' × ' + valorEstacionamientoUf + ' UF (mediana de ventas reales del edificio)', valor_uf: v })
+    }
+    if (nBod > 0 && valorBodegaUf) {
+      const v = nBod * valorBodegaUf
+      extraUf += v
+      valorDet.desglose.push({ concepto: nBod > 1 ? 'Bodegas' : 'Bodega', calculo: nBod + ' × ' + valorBodegaUf + ' UF (mediana de ventas reales del edificio)', valor_uf: v })
+    }
+    if (extraUf > 0) {
+      valorDet.valor_uf += extraUf
+      if (m2Construido) valorDet.precio_m2 = Math.round((valorDet.valor_uf / m2Construido) * 10) / 10
     }
   }
 

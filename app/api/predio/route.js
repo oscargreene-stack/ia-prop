@@ -130,6 +130,8 @@ export async function POST(request) {
       es_copropiedad: !!r.copropiedad,
       terreno_origen: 'sii',
       avaluo_total_clp: toNum(r.avaluo_fiscal_clp),
+      contribuciones_clp: toNum(r.contribuciones_clp ?? r.contribuciones_trimestrales),
+      material: r.material_predominante || r.material || null,
       _dist: distM(punto, lat, lng),
     }
   }).filter(c => c.m2_construido && c.m2_construido > 0)

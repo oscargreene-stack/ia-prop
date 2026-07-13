@@ -605,6 +605,10 @@ function ChatVendedor({ onBack }) {
         terreno_origen: c.terreno_origen,
         ano_construccion: c.ano_construccion,
         anio_construccion: c.ano_construccion,
+        avaluo_total_clp: c.avaluo_total_clp,
+        avaluo_fiscal_uf: c.avaluo_total_clp ? Math.round(c.avaluo_total_clp / 40408) : null,
+        contribuciones_clp: c.contribuciones_clp,
+        material: c.material,
       }))
 
       // Multiples resultados -> selector
@@ -744,7 +748,10 @@ function ChatVendedor({ onBack }) {
             
             {d.m2_terreno && <div className="sii-bubble-item"><div className="sii-bubble-label">M² terreno</div><div className="sii-bubble-val">{d.m2_terreno} m²</div></div>}
             {(d.anio_construccion || d.ano_construccion) && <div className="sii-bubble-item"><div className="sii-bubble-label">Año const.</div><div className="sii-bubble-val">{(d.anio_construccion || d.ano_construccion)}</div></div>}
-            {d.avaluo_fiscal_uf && <div className="sii-bubble-item"><div className="sii-bubble-label">Avalúo fiscal</div><div className="sii-bubble-val">{Math.round(d.avaluo_fiscal_uf).toLocaleString('es-CL')} UF</div></div>}
+            {d.avaluo_total_clp && <div className="sii-bubble-item"><div className="sii-bubble-label">Avalúo fiscal</div><div className="sii-bubble-val">{'$' + Number(d.avaluo_total_clp).toLocaleString('es-CL')}</div></div>}
+            {!d.avaluo_total_clp && d.avaluo_fiscal_uf && <div className="sii-bubble-item"><div className="sii-bubble-label">Avalúo fiscal</div><div className="sii-bubble-val">{Math.round(d.avaluo_fiscal_uf).toLocaleString('es-CL')} UF</div></div>}
+            {d.contribuciones_clp && <div className="sii-bubble-item"><div className="sii-bubble-label">Contribuciones trim.</div><div className="sii-bubble-val">{'$' + Number(d.contribuciones_clp).toLocaleString('es-CL')}</div></div>}
+            {d.material && <div className="sii-bubble-item"><div className="sii-bubble-label">Material</div><div className="sii-bubble-val">{d.material}</div></div>}
           </div>
         </div>
       )
@@ -1863,6 +1870,8 @@ function InformePrint({ data, onClose }) {
               ['M² terreno', sii.m2_terreno ? sii.m2_terreno + ' m²' : '—'],
               ['Año construcción', sii.anio_construccion || '—'],
               ['Avalúo fiscal', sii.avaluo_total_clp ? '$' + Number(sii.avaluo_total_clp).toLocaleString('es-CL') : '—'],
+              ['Contribuciones trim.', sii.contribuciones_clp ? '$' + Number(sii.contribuciones_clp).toLocaleString('es-CL') : '—'],
+              ['Material', sii.material || '—'],
               ['Destino SII', sii.destino || 'Habitacional'],
             ].map(([k, v], i) => (
               <div key={i} style={{ fontSize: 12, padding: '3px 0', borderBottom: '1px solid #eee' }}><span style={{ color: '#777' }}>{k}: </span><b>{v}</b></div>
