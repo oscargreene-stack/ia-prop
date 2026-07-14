@@ -14,7 +14,7 @@ import {
   poligono, distanciaM, mediana, percentil,
   clasificaTipo, TIPO_OBJETIVO, cutoffVentasStr, esVentaReciente, enBandaM2,
   UFM2_MIN, UFM2_MAX, puntosSuelo, resumenSuelo, sueloPorTramo, sueloDeTramo,
-  valorAditivoCasa, confianzaPorN, buscarVentasPoligono, COSTO_CONSTR_RESIDUAL, BANDA_M2,
+  valorAditivoCasa, confianzaPorN, buscarVentasPoligono, COSTO_CONSTR_RESIDUAL, BANDA_M2, terrenoDe,
 } from '../../lib/tasacion-core.js'
 
 export const maxDuration = 60
@@ -496,6 +496,9 @@ export async function POST(request) {
             const uf = Math.round(parseFloat(v.price))
             return {
               direccion: (v.direccion_sii || 'Sin direccion').toString().trim(),
+              rol: [v.cod_com, v.cod_mz, v.cod_pr].filter(x => x != null).join('-') || null,
+              lat: parseFloat(v.latitud) || null,
+              lng: parseFloat(v.longitud) || null,
               tipo: tipoObjetivo || tipo,
               m2: m2,
               m2_terreno: (parseFloat(v.superficie_total_terreno) > 0) ? Math.round(parseFloat(v.superficie_total_terreno)) : null,
@@ -571,6 +574,41 @@ export async function POST(request) {
     } catch (e) {
       console.error('Error fetching comparables (REST):', e.message)
     }
+  }
+
+  // ── 1b-ter. TERRENO de cada comparable de casa, desde el CATASTRO ──────────
+  // Las ventas del detalle no traen m² de terreno; el catastro sí (es lo que
+  // muestra el mapa de DataInmobiliaria en cada predio). Una consulta chica
+  // alrededor de cada comparable y cruce por ROL. Habilita además el suelo
+  // residual real y la columna m² terreno del informe.
+  if (tipoObjetivo === 'casa' && comparablesReales.length >= 1 && DATAINM_TOKEN) {
+    try {
+      const objetivos = comparablesReales.filter(c => c.lat && c.lng && c.rol && !c.m2_terreno).slice(0, 10)
+      const lotes = await Promise.allSettled(objetivos.map(async (c) => {
+        const r = await fetch('https://datainmobiliaria.cl/api/v1/busqueda_poligono', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + DATAINM_TOKEN },
+          body: JSON.stringify({ fuente: 'catastro', polygon: poligono(c.lat, c.lng, 40) }),
+          signal: AbortSignal.timeout(10000),
+        })
+        if (!r.ok) return null
+        const j = await r.json()
+        const rows = j.resultados || j.data || []
+        const propio = rows.find(x => [x.cod_com, x.cod_mz, x.cod_pr].filter(y => y != null).join('-') === c.rol)
+        return propio ? { c, row: propio } : null
+      }))
+      const porRol = {}
+      for (const l of lotes) {
+        if (l.status === 'fulfilled' && l.value) {
+          const { c, row } = l.value
+          const terr = terrenoDe(row)
+          if (terr > 0) { c.m2_terreno = Math.round(terr); porRol[c.rol] = c.m2_terreno }
+          if (!c.ano_construccion && row.ano_construccion) c.ano_construccion = String(row.ano_construccion)
+        }
+      }
+      for (const v of ventasMapa) { if (v.rol && porRol[v.rol] && !v.m2_terreno) v.m2_terreno = porRol[v.rol] }
+      if (diagRest) diagRest.terrenos_enriquecidos = Object.keys(porRol).length
+    } catch (e) { console.error('Enriquecer terrenos catastro:', e.message) }
   }
 
   // ── 1b-bis. Suelo residual desde los comparables REST (casas sin polígono) ──

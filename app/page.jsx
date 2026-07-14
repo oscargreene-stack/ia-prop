@@ -610,6 +610,7 @@ function ChatVendedor({ onBack }) {
         avaluo_fiscal_uf: c.avaluo_total_clp ? Math.round(c.avaluo_total_clp / 40408) : null,
         contribuciones_clp: c.contribuciones_clp,
         material: c.material,
+        propietario: c.propietario,
       }))
 
       // Multiples resultados -> selector
@@ -754,6 +755,7 @@ function ChatVendedor({ onBack }) {
             {!d.avaluo_total_clp && d.avaluo_fiscal_uf && <div className="sii-bubble-item"><div className="sii-bubble-label">Avalúo fiscal</div><div className="sii-bubble-val">{Math.round(d.avaluo_fiscal_uf).toLocaleString('es-CL')} UF</div></div>}
             {d.contribuciones_clp && <div className="sii-bubble-item"><div className="sii-bubble-label">Contribuciones trim.</div><div className="sii-bubble-val">{'$' + Number(d.contribuciones_clp).toLocaleString('es-CL')}</div></div>}
             {d.material && <div className="sii-bubble-item"><div className="sii-bubble-label">Material</div><div className="sii-bubble-val">{d.material}</div></div>}
+            {d.propietario && <div className="sii-bubble-item"><div className="sii-bubble-label">Propietario</div><div className="sii-bubble-val">{d.propietario}</div></div>}
           </div>
         </div>
       )
@@ -2246,7 +2248,7 @@ function VentasMapa({ ventas, titulo, centro }) {
             <div key={i} onClick={() => setSel(v)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '9px 12px', borderBottom: i < ventas.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none', cursor: 'pointer' }}>
               <div style={{ overflow: 'hidden' }}>
                 <div style={{ fontSize: 13, color: '#e8e8e8', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{v.dir || 'Propiedad'}</div>
-                <div style={{ fontSize: 11, color: '#9a9a9a' }}>{[v.m2 ? v.m2 + ' m²' : null, v.fecha || null].filter(Boolean).join(' · ')}</div>
+                <div style={{ fontSize: 11, color: '#9a9a9a' }}>{[v.m2 ? v.m2 + ' m² const.' : null, v.m2_terreno ? v.m2_terreno + ' m² terreno' : null, v.fecha || null].filter(Boolean).join(' · ')}</div>
               </div>
               <div style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                 <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--gold-light)' }}>{v.uf ? v.uf.toLocaleString('es-CL') + ' UF' : ''}</div>

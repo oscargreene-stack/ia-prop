@@ -97,7 +97,7 @@ export async function POST(request) {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify({ fuente: 'catastro', polygon }),
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(30000), // proveedor degradado: tolerar respuestas lentas del catastro
     })
     const txt = await res.text()
     let j = null; try { j = JSON.parse(txt) } catch (e) {}
@@ -133,6 +133,7 @@ export async function POST(request) {
       avaluo_total_clp: toNum(r.avaluo_fiscal_clp),
       contribuciones_clp: toNum(r.contribuciones_clp ?? r.contribuciones_trimestrales),
       material: r.material_predominante || r.material || null,
+      propietario: r.propietario || null,
       _dist: distM(punto, lat, lng),
     }
   }).filter(c => c.m2_construido && c.m2_construido > 0)
