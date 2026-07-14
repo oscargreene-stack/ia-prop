@@ -238,6 +238,7 @@ function ChatVendedor({ onBack }) {
   const [placesResult, setPlacesResult] = useState(null) // {calle, numero, comunaNorm, fullAddress}
   const [comunaForm, setComunaForm] = useState('')
   const [ventasTasacion, setVentasTasacion] = useState(null)
+  const [puntoTasacion, setPuntoTasacion] = useState(null)
   const [informe, setInforme] = useState(null)
   const [ofertasTasacion, setOfertasTasacion] = useState(null)
   const [vistaTas, setVistaTas] = useState('ventas')
@@ -704,6 +705,7 @@ function ChatVendedor({ onBack }) {
         const m2Built = parseFloat(finalData.siiData?.m2_construido || finalData.siiData?.m2_util || m2Util) || null
         setTasBody({ tipo: finalData.tipo, m2_objetivo: m2Built, direccion: finalData.direccion, comuna: finalData.comuna || '' })
         setVentasTasacion(Array.isArray(resultado.ventas_mapa) && resultado.ventas_mapa.length ? resultado.ventas_mapa : null)
+        setPuntoTasacion(resultado.punto || null)
       } catch (e) {}
       const expectativaUF = parseExpectativaUF(finalData.precio_idea)
       const { mensajes } = valorizacionValentina({
@@ -1043,7 +1045,7 @@ function ChatVendedor({ onBack }) {
           </div>
         )}
         {vistaTas === 'ventas'
-          ? <VentasMapa ventas={ventasTasacion} titulo="Ventas comparables que respaldan la tasación" />
+          ? <VentasMapa ventas={ventasTasacion} titulo="Ventas comparables que respaldan la tasación" centro={puntoTasacion} />
           : ofTasLoading
             ? <div style={{ marginTop: 14, color: '#8a8a8a', fontSize: 14 }}>Buscando ofertas vigentes en el sector…</div>
             : <OfertasMapa ofertas={ofertasTasacion} />}
@@ -1736,6 +1738,10 @@ function OfertasMapa({ ofertas }) {
         const clearMk = () => { mkRef.current.forEach((m) => m.setMap(null)); mkRef.current = [] }
         const render = () => {
           clearMk()
+          // Pin azul: la propiedad tasada
+          if (centro) {
+            mkRef.current.push(new g.Marker({ position: centro, map, zIndex: 999, title: 'Tu propiedad', icon: { path: g.SymbolPath.CIRCLE, scale: 9, fillColor: '#2563eb', fillOpacity: 1, strokeColor: '#ffffff', strokeWeight: 3 } }))
+          }
           const zoom = map.getZoom() || 13
           const cell = 80 / Math.pow(2, zoom)
           const groups = {}
@@ -2129,7 +2135,7 @@ function PuntosInteres({ punto }) {
   )
 }
 
-function VentasMapa({ ventas, titulo }) {
+function VentasMapa({ ventas, titulo, centro }) {
   const mapRef = useRef(null)
   const mkRef = useRef([])
   const iwRef = useRef(null)
@@ -2145,8 +2151,13 @@ function VentasMapa({ ventas, titulo }) {
         if (!mapRef.current) { if (n > 0) setTimeout(() => tryInit(n - 1), 150); return }
         const map = new g.Map(mapRef.current, { mapTypeControl: false, streetViewControl: false, fullscreenControl: false, clickableIcons: false })
         iwRef.current = new g.InfoWindow()
+        // Encuadre: la propiedad y sus ventas CERCANAS (≤1,2 km). Las lejanas
+        // no abren el zoom: se ven navegando (como el reporte de DataInmobiliaria).
+        const dKmMapa = (a, b) => { const rad = Math.PI / 180, R = 6371; const dLa = (b.lat - a.lat) * rad, dLn = (b.lng - a.lng) * rad; const h = Math.sin(dLa / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLn / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)) }
         const bounds = new g.LatLngBounds()
-        ventas.forEach((v) => bounds.extend({ lat: v.lat, lng: v.lng }))
+        const cercanas = centro ? ventas.filter((v) => dKmMapa(centro, v) <= 1.2) : ventas
+        ;(cercanas.length >= 3 ? cercanas : ventas).forEach((v) => bounds.extend({ lat: v.lat, lng: v.lng }))
+        if (centro) bounds.extend(centro)
         map.fitBounds(bounds, 40)
         const fmtK = (uf) => {
           if (uf < 1000) return String(uf)
@@ -2177,6 +2188,10 @@ function VentasMapa({ ventas, titulo }) {
         }
         const render = () => {
           clearMk()
+          // Pin azul: la propiedad tasada
+          if (centro) {
+            mkRef.current.push(new g.Marker({ position: centro, map, zIndex: 999, title: 'Tu propiedad', icon: { path: g.SymbolPath.CIRCLE, scale: 9, fillColor: '#2563eb', fillOpacity: 1, strokeColor: '#ffffff', strokeWeight: 3 } }))
+          }
           const zoom = map.getZoom() || 13
           const cell = 80 / Math.pow(2, zoom)
           const groups = {}

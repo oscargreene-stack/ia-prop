@@ -436,37 +436,39 @@ export async function POST(request) {
       const ccom = rolParts[0] || String(codCom)
       const cmz = rolParts[1] || ''
       const cpr = rolParts[2] || ''
-      const m2Min = Math.round(m2Construido * BANDA_M2.min)
-      const m2Max = Math.round(m2Construido * BANDA_M2.max)
       const cd = (tipo === 'oficina') ? 'O' : 'H'
-      const qs = new URLSearchParams({
-        cod_com: String(ccom), cod_mz: String(cmz), cod_pr: String(cpr),
-        radio: '2000', superficie_min: String(m2Min), superficie_max: String(m2Max), cod_destino: cd,
-      }).toString()
-      const restUrl = 'https://datainmobiliaria.cl/api/v1/propiedades/detalle?' + qs
-      const restRes = await fetch(restUrl, { headers: { Authorization: 'Bearer ' + DATAINM_TOKEN }, signal: AbortSignal.timeout(20000) })
-      diagRest = { status: restRes.status }
-      if (restRes.status === 402 || restRes.status === 403) proveedorBloqueado = true
-      if (restRes.ok) {
-        const data = await restRes.json()
-        const ventas = Array.isArray(data.detalle_ventas_recientes) ? data.detalle_ventas_recientes : []
-        const filtro = Array.isArray(data.comparables_filtro) ? data.comparables_filtro : []
-        const fuente = filtro.length > 0 ? filtro : ventas
-        diagRest.n_ventas = ventas.length
-        diagRest.n_filtro = filtro.length
-        diagRest.muestra = fuente.slice(0, 2)
-        const cts = {}
-        fuente.forEach(v => { const tp = clasificaTipo(v); cts[tp] = (cts[tp] || 0) + 1 })
-        diagRest.counts = cts
-        // Solo ventas de los últimos 5 años (ventana compartida del núcleo).
-        const _cutoffStr = cutoffVentasStr()
-        // Solo comparables del MISMO tipo real que la propiedad tasada.
-        const tipoObjetivo = TIPO_OBJETIVO[String(tipo || '').toLowerCase()] || null
-        const filtradosRest = fuente
+      const _cutoffStr = cutoffVentasStr()
+      // RADIO CORTO primero (las cuadras cercanas, como la tabla "Mercado" del
+      // reporte de DataInmobiliaria) y banda de superficie AJUSTADA (0.7–1.4×):
+      // una casa de 35.000 UF no debe compararse con casas chicas de 6.000 UF.
+      // Solo si no alcanzan los comparables del tipo se amplía radio y banda.
+      let data = null, filtradosRest = []
+      for (const intento of [{ radio: '800', bmin: 0.7, bmax: 1.4 }, { radio: '2000', bmin: BANDA_M2.min, bmax: BANDA_M2.max }]) {
+        const qs = new URLSearchParams({
+          cod_com: String(ccom), cod_mz: String(cmz), cod_pr: String(cpr),
+          radio: intento.radio,
+          superficie_min: String(Math.round(m2Construido * intento.bmin)),
+          superficie_max: String(Math.round(m2Construido * intento.bmax)),
+          cod_destino: cd,
+        }).toString()
+        const restRes = await fetch('https://datainmobiliaria.cl/api/v1/propiedades/detalle?' + qs, { headers: { Authorization: 'Bearer ' + DATAINM_TOKEN }, signal: AbortSignal.timeout(20000) })
+        diagRest = { status: restRes.status, radio: intento.radio, banda: intento.bmin + '-' + intento.bmax }
+        if (restRes.status === 402 || restRes.status === 403) { proveedorBloqueado = true; break }
+        if (!restRes.ok) break
+        data = await restRes.json()
+        const ventasR = Array.isArray(data.detalle_ventas_recientes) ? data.detalle_ventas_recientes : []
+        const filtroR = Array.isArray(data.comparables_filtro) ? data.comparables_filtro : []
+        const fuente = filtroR.length > 0 ? filtroR : ventasR
+        diagRest.n_ventas = ventasR.length
+        diagRest.n_filtro = filtroR.length
+        filtradosRest = fuente
           .filter(v => parseFloat(v.superficie_construccion) > 0 && parseFloat(v.price) > 0 && (v.unit === 'UF' || !v.unit))
           .filter(v => !tipoObjetivo || clasificaTipo(v) === tipoObjetivo)
           .filter(v => esVentaReciente(v, _cutoffStr))
         diagRest.n_del_tipo = filtradosRest.length
+        if (filtradosRest.length >= 5) break
+      }
+      if (data) {
         // Prioridad sobre el polígono cuando hay suficientes: son las ventas MÁS
         // CERCANAS al ROL (las mismas de la tabla "Mercado" de DataInmobiliaria).
         if (filtradosRest.length >= 3 || comparablesReales.length === 0) {

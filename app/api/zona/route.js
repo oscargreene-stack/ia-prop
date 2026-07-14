@@ -156,26 +156,30 @@ export async function POST(request) {
           // Para casas: un predio con terreno propio; para otros tipos, del mismo tipo
           const ancla = predios.find((r) => objetivo === 'casa' ? (terrenoDe(r) > 0 && clasificaTipo(r) === 'casa') : clasificaTipo(r) === objetivo) || predios[0]
           if (ancla && ancla.cod_com != null) {
-            const m2Min = m2obj > 0 ? Math.round(m2obj * 0.4) : 20
-            const m2Max = m2obj > 0 ? Math.round(m2obj * 2.2) : 100000
-            const qs = new URLSearchParams({
-              cod_com: String(ancla.cod_com), cod_mz: String(ancla.cod_mz ?? ''), cod_pr: String(ancla.cod_pr ?? ''),
-              radio: '2000', superficie_min: String(m2Min), superficie_max: String(m2Max), cod_destino: 'H',
-            }).toString()
-            const detRes = await fetch(`${API_BASE}/propiedades/detalle?` + qs, { headers: { Authorization: 'Bearer ' + DATAINM_TOKEN }, signal: AbortSignal.timeout(15000) })
-            if (detRes.ok) {
+            // Radio corto y banda ajustada primero; ampliar solo si faltan
+            let filt2 = []
+            for (const it of [{ radio: '800', bmin: 0.7, bmax: 1.4 }, { radio: '2000', bmin: 0.4, bmax: 2.2 }]) {
+              const m2Min = m2obj > 0 ? Math.round(m2obj * it.bmin) : 20
+              const m2Max = m2obj > 0 ? Math.round(m2obj * it.bmax) : 100000
+              const qs = new URLSearchParams({
+                cod_com: String(ancla.cod_com), cod_mz: String(ancla.cod_mz ?? ''), cod_pr: String(ancla.cod_pr ?? ''),
+                radio: it.radio, superficie_min: String(m2Min), superficie_max: String(m2Max), cod_destino: 'H',
+              }).toString()
+              const detRes = await fetch(`${API_BASE}/propiedades/detalle?` + qs, { headers: { Authorization: 'Bearer ' + DATAINM_TOKEN }, signal: AbortSignal.timeout(15000) })
+              if (!detRes.ok) break
               const det = await detRes.json()
               const recientes = Array.isArray(det.detalle_ventas_recientes) ? det.detalle_ventas_recientes : []
-              const filt2 = recientes
+              filt2 = recientes
                 .filter((v) => parseFloat(v.superficie_construccion) > 0 && parseFloat(v.price) > 0 && (v.unit === 'UF' || !v.unit))
                 .filter((v) => clasificaTipo(v) === objetivo)
                 .filter((v) => esVentaReciente(v, _cutoffStr))
                 .filter((v) => { const ufm2 = parseFloat(v.price) / parseFloat(v.superficie_construccion); return ufm2 >= UFM2_MIN && ufm2 <= UFM2_MAX })
-              if (dbg) dbg.respaldo_detalle = { ancla: [ancla.cod_com, ancla.cod_mz, ancla.cod_pr].join('-'), n_recientes: recientes.length, n_del_tipo: filt2.length }
-              if (filt2.length >= 3) {
-                filtradas = filt2
-                ufm2List = filt2.map((v) => parseFloat(v.price) / parseFloat(v.superficie_construccion))
-              }
+              if (dbg) dbg.respaldo_detalle = { ancla: [ancla.cod_com, ancla.cod_mz, ancla.cod_pr].join('-'), radio: it.radio, n_recientes: recientes.length, n_del_tipo: filt2.length }
+              if (filt2.length >= 5) break
+            }
+            if (filt2.length >= 3) {
+              filtradas = filt2
+              ufm2List = filt2.map((v) => parseFloat(v.price) / parseFloat(v.superficie_construccion))
             }
           }
         }
