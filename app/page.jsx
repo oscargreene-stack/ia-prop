@@ -1817,12 +1817,13 @@ function InformePrint({ data, onClose }) {
     tdr: { fontSize: 11, color: '#1a1a1a', borderBottom: '1px solid #eee', padding: '3px 6px', textAlign: 'right', whiteSpace: 'nowrap' },
   }
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.65)', overflow: 'auto', padding: '20px 10px' }}>
+    <div id="informe-overlay" style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.65)', overflow: 'auto', padding: '20px 10px' }}>
       <style>{`
         @media print {
           body * { visibility: hidden !important; }
+          #informe-overlay { position: absolute !important; inset: auto !important; top: 0 !important; left: 0 !important; width: 100% !important; height: auto !important; overflow: visible !important; padding: 0 !important; background: none !important; }
           #informe-print, #informe-print * { visibility: visible !important; }
-          #informe-print { position: absolute !important; left: 0 !important; top: 0 !important; width: 100% !important; margin: 0 !important; box-shadow: none !important; border-radius: 0 !important; }
+          #informe-print { position: static !important; width: 100% !important; max-width: none !important; margin: 0 !important; box-shadow: none !important; border-radius: 0 !important; }
           .no-print { display: none !important; }
         }
       `}</style>
