@@ -3,6 +3,8 @@ import { useState, useEffect, useRef } from 'react'
 import { valorizacionValentina, parseExpectativaUF } from './lib/valentina-valorizacion'
 
 const fmtUF = (n) => n ? `${Number(n).toLocaleString('es-CL', {minimumFractionDigits:0,maximumFractionDigits:0})} UF` : '—'
+// ROL para mostrar: sin el código de comuna (el SII lo escribe manzana-predio)
+const rolCorto = (r) => { const p = String(r || '').split('-'); return p.length >= 3 ? p.slice(1).join('-') : (r || '') }
 
 // ─── Tipos de propiedad ─────────────────────────────────────────────────────
 // v2 — agente comprador activo──
@@ -619,7 +621,7 @@ function ChatVendedor({ onBack }) {
         setInputMode('options')
         setOptions(resultados.map((r, i) => ({
           id: String(i),
-          label: [r.direccion, r.destino, r.m2_construido && `${r.m2_construido} m²`, r.rol && `ROL ${r.rol}`].filter(Boolean).join(' · '),
+          label: [r.direccion, r.destino, r.m2_construido && `${r.m2_construido} m²`, r.rol && `ROL ${rolCorto(r.rol)}`].filter(Boolean).join(' · '),
           icon: '🏠',
           _sii: r,
         })))
@@ -706,7 +708,7 @@ function ChatVendedor({ onBack }) {
         const m2Built = parseFloat(finalData.siiData?.m2_construido || finalData.siiData?.m2_util || m2Util) || null
         setTasBody({ tipo: finalData.tipo, m2_objetivo: m2Built, direccion: finalData.direccion, comuna: finalData.comuna || '' })
         setVentasTasacion(Array.isArray(resultado.ventas_mapa) && resultado.ventas_mapa.length ? resultado.ventas_mapa : null)
-        setPuntoTasacion(resultado.punto || null)
+        setPuntoTasacion(resultado.punto ? { ...resultado.punto, valor: valorFinal } : null)
       } catch (e) {}
       const expectativaUF = parseExpectativaUF(finalData.precio_idea)
       const { mensajes } = valorizacionValentina({
@@ -745,7 +747,7 @@ function ChatVendedor({ onBack }) {
           <div className="sii-bubble-tag">Datos SII · Verificados</div>
           <div className="sii-bubble-addr">{d.direccion}</div>
           <div className="sii-bubble-grid">
-            {d.rol && <div className="sii-bubble-item"><div className="sii-bubble-label">ROL</div><div className="sii-bubble-val rol">{d.rol}</div></div>}
+            {d.rol && <div className="sii-bubble-item"><div className="sii-bubble-label">ROL</div><div className="sii-bubble-val rol">{rolCorto(d.rol)}</div></div>}
             {d.destino && <div className="sii-bubble-item"><div className="sii-bubble-label">Destino</div><div className="sii-bubble-val">{d.destino}</div></div>}
             {d.m2_construido && <div className="sii-bubble-item"><div className="sii-bubble-label">M² construidos</div><div className="sii-bubble-val green">{d.m2_construido} m²</div></div>}
             
@@ -773,7 +775,7 @@ function ChatVendedor({ onBack }) {
           <div className="tasacion-rango">Rango estimado: {fmtUF(rangoMin)} — {fmtUF(rangoMax)}</div>
           <div className={`conf-badge ${cc}`}>Confianza {resultado.confianza}</div>
           {content.siiData?.rol && (
-            <div className="tasacion-rol">ROL SII: {content.siiData.rol}</div>
+            <div className="tasacion-rol">ROL SII: {rolCorto(content.siiData.rol)}</div>
           )}
 
           {/* Desglose detallado */}
@@ -1723,7 +1725,7 @@ function OfertasMapa({ ofertas }) {
       const tryInit = (n) => {
         if (cancel) return
         if (!mapRef.current) { if (n > 0) setTimeout(() => tryInit(n - 1), 150); return }
-        const map = new g.Map(mapRef.current, { mapTypeControl: false, streetViewControl: false, fullscreenControl: false, clickableIcons: false })
+        const map = new g.Map(mapRef.current, { mapTypeId: 'hybrid', tilt: 0, mapTypeControl: false, streetViewControl: false, fullscreenControl: false, clickableIcons: false })
         const bounds = new g.LatLngBounds()
         ofertas.forEach((o) => bounds.extend({ lat: o.lat, lng: o.lng }))
         map.fitBounds(bounds, 40)
@@ -1740,9 +1742,10 @@ function OfertasMapa({ ofertas }) {
         const clearMk = () => { mkRef.current.forEach((m) => m.setMap(null)); mkRef.current = [] }
         const render = () => {
           clearMk()
-          // Pin azul: la propiedad tasada
+          // Pastilla VERDE: la propiedad tasada con su valor (estilo Propiteq)
           if (centro) {
-            mkRef.current.push(new g.Marker({ position: centro, map, zIndex: 999, title: 'Tu propiedad', icon: { path: g.SymbolPath.CIRCLE, scale: 9, fillColor: '#2563eb', fillOpacity: 1, strokeColor: '#ffffff', strokeWeight: 3 } }))
+            const txtC = centro.valor ? fmtK(centro.valor) + ' UF' : 'Tu propiedad'
+            mkRef.current.push(new g.Marker({ position: { lat: centro.lat, lng: centro.lng }, map, zIndex: 999, title: 'Tu propiedad', icon: pillIcon(txtC, '#1e8e3e') }))
           }
           const zoom = map.getZoom() || 13
           const cell = 80 / Math.pow(2, zoom)
@@ -1837,7 +1840,7 @@ function InformePrint({ data, onClose }) {
           <div>
             <div style={{ fontSize: 22, fontWeight: 800 }}>Informe de Tasación</div>
             <div style={{ fontSize: 13, color: '#555', marginTop: 4 }}>{dirTxt}</div>
-            {sii.rol && <div style={{ fontSize: 12, color: '#777' }}>ROL SII: {sii.rol}</div>}
+            {sii.rol && <div style={{ fontSize: 12, color: '#777' }}>ROL SII: {rolCorto(sii.rol)}</div>}
           </div>
           <div style={{ textAlign: 'right' }}>
             <div style={{ fontSize: 15, fontWeight: 800, color: '#8a6d2f' }}>IA Prop · Valentina</div>
@@ -2152,7 +2155,7 @@ function VentasMapa({ ventas, titulo, centro }) {
       const tryInit = (n) => {
         if (cancel) return
         if (!mapRef.current) { if (n > 0) setTimeout(() => tryInit(n - 1), 150); return }
-        const map = new g.Map(mapRef.current, { mapTypeControl: false, streetViewControl: false, fullscreenControl: false, clickableIcons: false })
+        const map = new g.Map(mapRef.current, { mapTypeId: 'hybrid', tilt: 0, mapTypeControl: false, streetViewControl: false, fullscreenControl: false, clickableIcons: false })
         iwRef.current = new g.InfoWindow()
         // Encuadre: la propiedad y sus ventas CERCANAS (≤1,2 km). Las lejanas
         // no abren el zoom: se ven navegando (como el reporte de DataInmobiliaria).
@@ -2167,9 +2170,9 @@ function VentasMapa({ ventas, titulo, centro }) {
           const k = Math.round(uf / 100) / 10
           return (Number.isInteger(k) ? k.toFixed(0) : k.toFixed(1)).replace('.', ',') + 'K'
         }
-        const pillIcon = (txt) => {
+        const pillIcon = (txt, color = '#c0392b') => {
           const w = Math.ceil(18 + txt.length * 7)
-          const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="22"><rect rx="11" ry="11" width="${w}" height="22" fill="#c0392b"/><text x="${w / 2}" y="15" font-family="Arial,sans-serif" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle">${txt}</text></svg>`
+          const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="22"><rect rx="11" ry="11" width="${w}" height="22" fill="${color}" stroke="#ffffff" stroke-width="1.5"/><text x="${w / 2}" y="15" font-family="Arial,sans-serif" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle">${txt}</text></svg>`
           return { url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg), anchor: new g.Point(Math.round(w / 2), 11) }
         }
         const clusterIcon = (count) => {
@@ -2191,9 +2194,10 @@ function VentasMapa({ ventas, titulo, centro }) {
         }
         const render = () => {
           clearMk()
-          // Pin azul: la propiedad tasada
+          // Pastilla VERDE: la propiedad tasada con su valor (estilo Propiteq)
           if (centro) {
-            mkRef.current.push(new g.Marker({ position: centro, map, zIndex: 999, title: 'Tu propiedad', icon: { path: g.SymbolPath.CIRCLE, scale: 9, fillColor: '#2563eb', fillOpacity: 1, strokeColor: '#ffffff', strokeWeight: 3 } }))
+            const txtC = centro.valor ? fmtK(centro.valor) + ' UF' : 'Tu propiedad'
+            mkRef.current.push(new g.Marker({ position: { lat: centro.lat, lng: centro.lng }, map, zIndex: 999, title: 'Tu propiedad', icon: pillIcon(txtC, '#1e8e3e') }))
           }
           const zoom = map.getZoom() || 13
           const cell = 80 / Math.pow(2, zoom)
@@ -2213,7 +2217,10 @@ function VentasMapa({ ventas, titulo, centro }) {
               let la = 0, ln = 0
               arr.forEach((v) => { la += v.lat; ln += v.lng })
               const c = { lat: la / arr.length, lng: ln / arr.length }
-              const mk = new g.Marker({ position: c, map, icon: clusterIcon(arr.length) })
+              // Pastilla con la MEDIANA del grupo ×N: el valor se ve SIEMPRE,
+              // a cualquier zoom (estilo Propiteq), nunca un círculo mudo.
+              const medGrupo = med(arr.map((v) => v.uf).filter((x) => x > 0))
+              const mk = new g.Marker({ position: c, map, icon: pillIcon(fmtK(medGrupo) + ' UF ×' + arr.length) })
               mk.addListener('click', () => {
                 iwRef.current.setContent(clusterHtml(arr))
                 iwRef.current.setPosition(c)

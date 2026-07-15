@@ -30,7 +30,7 @@ import {
   poligono, centroide, mediana, percentil, r1,
   clasificaTipo, TIPO_OBJETIVO, cutoffVentasStr, esVentaReciente, enBandaM2,
   UFM2_MIN, UFM2_MAX, puntosSuelo, resumenSuelo, sueloPorTramo, sueloDeTramo,
-  confianzaPorN, buscarVentasPoligono, terrenoDe,
+  confianzaPorN, buscarVentasPoligono, terrenoDe, sinOutliers,
 } from '../../lib/tasacion-core.js'
 
 async function geocode(texto) {
@@ -135,6 +135,8 @@ export async function POST(request) {
       }
     }
 
+    // Sin outliers de precio (regla compartida del núcleo)
+    filtradas = sinOutliers(filtradas, (v) => parseFloat(v.price))
     let ufm2List = filtradas.map((v) => parseFloat(v.price) / parseFloat(v.superficie_construccion))
 
     // ── Respaldo estilo Valentina: detalle por ROL ancla ─────────────────────
@@ -177,6 +179,7 @@ export async function POST(request) {
               if (dbg) dbg.respaldo_detalle = { ancla: [ancla.cod_com, ancla.cod_mz, ancla.cod_pr].join('-'), radio: it.radio, n_recientes: recientes.length, n_del_tipo: filt2.length }
               if (filt2.length >= 5) break
             }
+            filt2 = sinOutliers(filt2, (v) => parseFloat(v.price))
             if (filt2.length >= 3) {
               filtradas = filt2
               ufm2List = filt2.map((v) => parseFloat(v.price) / parseFloat(v.superficie_construccion))

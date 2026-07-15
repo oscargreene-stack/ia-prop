@@ -318,6 +318,20 @@ export async function buscarVentasPoligono({ token, polys, objetivo, apiBase = '
   return { ventas, paginas, bloqueado }
 }
 
+// ── Filtro de OUTLIERS (regla de tasador) ───────────────────────────────────
+// Una venta a menos de la mitad o a casi el doble de la mediana del grupo NO es
+// comparable (herencias, ventas entre relacionados, datos mal cargados): solo
+// confunde. Se filtra únicamente si hay muestra suficiente (≥6) y se conserva
+// un mínimo de 5 comparables.
+export function sinOutliers(items, valorDe, { min = 0.5, max = 1.75, minimo = 5 } = {}) {
+  const vals = (items || []).map(valorDe).filter((x) => x > 0)
+  if (vals.length < 6) return items
+  const med = mediana(vals)
+  if (!(med > 0)) return items
+  const filtrados = items.filter((it) => { const v = valorDe(it); return v >= med * min && v <= med * max })
+  return filtrados.length >= minimo ? filtrados : items
+}
+
 // Confianza según número de referencias (mismos umbrales para ambos agentes).
 export function confianzaPorN(n) {
   return n >= 8 ? 'Alta' : n >= 4 ? 'Media' : 'Baja'

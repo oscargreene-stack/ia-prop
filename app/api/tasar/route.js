@@ -14,7 +14,7 @@ import {
   poligono, distanciaM, mediana, percentil,
   clasificaTipo, TIPO_OBJETIVO, cutoffVentasStr, esVentaReciente, enBandaM2,
   UFM2_MIN, UFM2_MAX, puntosSuelo, resumenSuelo, sueloPorTramo, sueloDeTramo,
-  valorAditivoCasa, confianzaPorN, buscarVentasPoligono, COSTO_CONSTR_RESIDUAL, BANDA_M2, terrenoDe,
+  valorAditivoCasa, confianzaPorN, buscarVentasPoligono, COSTO_CONSTR_RESIDUAL, BANDA_M2, terrenoDe, sinOutliers,
 } from '../../lib/tasacion-core.js'
 
 export const maxDuration = 60
@@ -465,6 +465,9 @@ export async function POST(request) {
           .filter(v => parseFloat(v.superficie_construccion) > 0 && parseFloat(v.price) > 0 && (v.unit === 'UF' || !v.unit))
           .filter(v => !tipoObjetivo || clasificaTipo(v) === tipoObjetivo)
           .filter(v => esVentaReciente(v, _cutoffStr))
+        diagRest.n_antes_outliers = filtradosRest.length
+        // Sin outliers: ventas a <50% o >190% de la mediana solo confunden
+        filtradosRest = sinOutliers(filtradosRest, v => parseFloat(v.price))
         diagRest.n_del_tipo = filtradosRest.length
         if (filtradosRest.length >= 5) break
       }
