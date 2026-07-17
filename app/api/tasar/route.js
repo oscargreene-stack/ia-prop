@@ -804,7 +804,7 @@ export async function POST(request) {
     if (!baseUrl && process.env.VERCEL_URL) baseUrl = `https://${process.env.VERCEL_URL}`
     if (punto) prcZona = await normativaEnPunto(punto.lng, punto.lat, comuna, baseUrl)
   } catch (e) { console.error('PRC tasar:', e.message) }
-  const esSubMinimo = !!(prcZona && prcZona.predial_min && m2Terreno && m2Terreno < prcZona.predial_min)
+  const esSubMinimo = !!(prcZona && ((prcZona.predial_min && m2Terreno && m2Terreno < prcZona.predial_min) || prcZona.no_subdivisible))
   const notaPredial = esSubMinimo
     ? `\nNOTA OBLIGATORIA: el terreno (${m2Terreno} m²) es menor al predial mínimo (${prcZona.predial_min} m²), pero el predio YA está subdividido e inscrito: SÍ puede demolerse y construirse una vivienda nueva. Menciona solo que no es apto para proyecto inmobiliario (subdividir o más de una vivienda). NO digas que no se puede demoler o reconstruir.`
     : ''
@@ -1004,7 +1004,9 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
         // Predio menor al predial mínimo: el mínimo rige para NUEVAS subdivisiones.
         // Un predio ya inscrito mantiene sus derechos (demoler y reponer UNA vivienda);
         // solo queda inhabilitado para proyecto inmobiliario. Texto fijo, sin dramatismo.
-        const obsBase = `Superficie predial mínima ~${prcZona.predial_min} m² · fuente: Plan Regulador${prcZona.fuente === 'ordenanza' ? ' (Ordenanza)' : ''}.`
+        const obsBase = prcZona.no_subdivisible
+          ? `Zona no subdivisible (${prcZona.nombre || prcZona.zona}) · fuente: Plan Regulador.`
+          : `Superficie predial mínima ~${prcZona.predial_min} m² · fuente: Plan Regulador${prcZona.fuente === 'ordenanza' ? ' (Ordenanza)' : ''}.`
         parsed.plan_regulador = {
           ...(parsed.plan_regulador || {}),
           zona: prcZona.zona,

@@ -1,6 +1,6 @@
 {
   "_descripcion": "Normativa de planes reguladores por comuna. Llave de comuna en MAYÚSCULAS. 'por_edificacion' mapea el tipo de edificación (la parte 'EA…' del código de zona del GeoJSON, ej. EAb1, EAm1p) a sus normas de la Ordenanza. 'zonas' permite además overrides por código de zona completo. Si una zona no aparece en ninguno, app/lib/prc.js deriva un predial aproximado por heurística (fuente='heuristica_codigo').",
-  "_actualizado": "2026-06",
+  "_actualizado": "2026-07",
   "LAS CONDES": {
     "_fuente": "Ordenanza PRC Las Condes (Texto Refundido MPRCLC-2020), Artículo 38, Tabla A) Base por zona de edificación. Valores oficiales (baja EAb, media EAm y alta EAa). Predial = superficie de subdivisión predial mínima base.",
     "por_edificacion": {
@@ -51,32 +51,32 @@
       },
       "EAa1": {
         "predial_min": 2500,
-        "constructibilidad": 1.0,
+        "constructibilidad": 1,
         "densidad_hab_ha": 20
       },
       "EAa2": {
         "predial_min": 2500,
-        "constructibilidad": 1.0,
+        "constructibilidad": 1,
         "densidad_hab_ha": 20
       },
       "EAa3": {
         "predial_min": 2500,
-        "constructibilidad": 1.0,
+        "constructibilidad": 1,
         "densidad_hab_ha": 20
       },
       "EAa4": {
         "predial_min": 2500,
-        "constructibilidad": 1.0,
+        "constructibilidad": 1,
         "densidad_hab_ha": 20
       },
       "EAa+cm": {
         "predial_min": 2500,
-        "constructibilidad": 1.0,
+        "constructibilidad": 1,
         "densidad_hab_ha": 20
       },
       "EAa+ca": {
         "predial_min": 2500,
-        "constructibilidad": 1.0,
+        "constructibilidad": 1,
         "densidad_hab_ha": 20
       }
     },
@@ -127,7 +127,7 @@
       },
       "ZHE-6": {
         "predial_min": 1800,
-        "constructibilidad": 2.0,
+        "constructibilidad": 2,
         "densidad_hab_ha": 200
       },
       "ZHP-3.1": {
@@ -219,12 +219,12 @@
       },
       "EAm3": {
         "predial_min": 1500,
-        "constructibilidad": 1.0,
+        "constructibilidad": 1,
         "densidad_hab_ha": 328
       },
       "EAm4": {
         "predial_min": 800,
-        "constructibilidad": 1.0,
+        "constructibilidad": 1,
         "densidad_hab_ha": 360
       },
       "EAm5": {
@@ -239,7 +239,7 @@
       },
       "EAa1": {
         "predial_min": 1500,
-        "constructibilidad": 2.0,
+        "constructibilidad": 2,
         "densidad_hab_ha": 612
       },
       "EAa2": {
@@ -255,7 +255,7 @@
     "zonas": {
       "Z-1": {
         "predial_min": 500,
-        "constructibilidad": 4.0
+        "constructibilidad": 4
       },
       "Z-1A": {
         "predial_min": 500,
@@ -327,15 +327,15 @@
       },
       "ZM-2": {
         "predial_min": 300,
-        "constructibilidad": 2.0
+        "constructibilidad": 2
       },
       "ZM-3": {
         "predial_min": 300,
-        "constructibilidad": 2.0
+        "constructibilidad": 2
       },
       "ZM-4": {
         "predial_min": 300,
-        "constructibilidad": 2.0
+        "constructibilidad": 2
       },
       "ZM-5": {
         "predial_min": 300,
@@ -349,7 +349,7 @@
       },
       "ZR-6": {
         "predial_min": 160,
-        "constructibilidad": 1.0
+        "constructibilidad": 1
       },
       "ZR-7": {
         "predial_min": 300
@@ -399,7 +399,7 @@
     "zonas": {
       "R.1": {
         "predial_min": 200,
-        "constructibilidad": 1.0,
+        "constructibilidad": 1,
         "densidad_hab_ha": 196
       },
       "R.2": {
@@ -409,7 +409,7 @@
       },
       "R.3": {
         "predial_min": 160,
-        "constructibilidad": 1.0,
+        "constructibilidad": 1,
         "densidad_hab_ha": 200
       },
       "S.M.1": {
@@ -452,7 +452,7 @@
   },
   "LA REINA": {
     "_fuente": "Ordenanza PRC La Reina (Memoria y Ordenanza, PDF escaneado, OCR local con tesseract). Art. 24+ 'Usos de Suelo y Normas Específicas' por zona. Predial = 'Superficie Predial Mínima' columna LOTEOS (subdivisión predial mínima). Llaves = campo ZONA capa MINVU PRC_RM_Norte/10.",
-    "_cobertura_parcial": "Cargadas zonas base A-K y subzonas con misma función (NOM) que su zona madre. NO cargadas por incerteza: C-1/C-2/C-3 (la capa las rotula 'Equipamiento y Residencial Complementario', función distinta a Zona C; esta Ordenanza no las desglosa), O, R-6, ZEE (no figuran en esta Ordenanza, probable modificación posterior), J-2 (protección ecológica), L-1/L-2 (equipamiento metrop.), M-1..M-5/PC-*/PV-* (áreas verdes y polos de equipamiento). Valores OCR (eng); verificar B=7000 y los altos.",
+    "_cobertura_parcial": "Zonas base A-K desde la Ordenanza (Res. N°65, D.O. 22/11/2001). O, C-1/C-2/C-3, ZEE y R-6 aclaradas por respuesta de Transparencia (Ley 20.285, jul-2026): denominaciones oficiales de la capa MINVU sin contraparte directa en la Ordenanza; sin predial numérico salvo R-6 = Área Resguardo Aeródromo NO SUBDIVISIBLE. Pendientes: J-2, L-1/L-2, M-1..M-5, PC-*/PV-* (áreas verdes/polos). Valores OCR (eng); verificar B=7000 y los altos.",
     "zonas": {
       "A": {
         "predial_min": 300
@@ -498,6 +498,25 @@
       },
       "K": {
         "predial_min": 200
+      },
+      "O": {
+        "nombre": "Zona Preferentemente Residencial"
+      },
+      "C-1": {
+        "nombre": "Zona de Equipamiento y Residencial Complementario"
+      },
+      "C-2": {
+        "nombre": "Zona de Equipamiento y Residencial Complementario"
+      },
+      "C-3": {
+        "nombre": "Zona de Equipamiento y Residencial Complementario"
+      },
+      "ZEE": {
+        "nombre": "Zona Especial de Equipamiento"
+      },
+      "R-6": {
+        "nombre": "Área Resguardo Aeródromo",
+        "no_subdivisible": true
       }
     }
   },
@@ -816,6 +835,12 @@
     "_fuente": "Enmienda Ordenanza PRC El Bosque 2025 (EPRC25), texto refundido D.O. N°44.360 del 27-ene-2026, linea \"Superficie predial minima\" col. Otros usos (vivienda). Codigos = campo ZONA REAL capa MINVU PRC_RM_Sur/2 (verificado via geoide 25-jun-2026).",
     "_nota": "Mapeo Ordenanza->capa: ZONA C=300; H/HC=160; R/RC=160; ZONA 1-2-3 = codigos 1/1C/2/2C/3AMIR/3AMIRC/3AR/3ARC=210; Lo Moreno Z-A = LM/LMC=200; ZONA 4 = 4AI=1500 (industrial). El sufijo C = variante edificacion continua (mismo predial). NO cargadas: \"a\"/\"f\" (areas de riesgo/area verde) y variantes \"3AMIR/ a\",\"3AR/ a\" (overlay alto riesgo: Art. no permite nuevas subdivisiones).",
     "zonas": {
+      "1": {
+        "predial_min": 210
+      },
+      "2": {
+        "predial_min": 210
+      },
       "C": {
         "predial_min": 300
       },
@@ -831,13 +856,7 @@
       "RC": {
         "predial_min": 160
       },
-      "1": {
-        "predial_min": 210
-      },
       "1C": {
-        "predial_min": 210
-      },
-      "2": {
         "predial_min": 210
       },
       "2C": {

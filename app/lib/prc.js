@@ -219,12 +219,13 @@ export async function normativaEnPunto(lng, lat, comuna, baseUrl = '') {
 
   return {
     zona,
-    nombre,
+    nombre: nombre || (oficial && oficial.nombre) || null,
     densidad,
     predial_min,
     constructibilidad: oficial ? (oficial.constructibilidad ?? null) : null,
     altura: oficial ? (oficial.altura ?? null) : null,
     uso: oficial ? (oficial.uso ?? null) : null,
+    no_subdivisible: !!(oficial && oficial.no_subdivisible), // ej. La Reina R-6 (Resguardo Aeródromo)
     fuente,
     clase: densidad,                 // compat page.jsx
     predial_min_aprox: predial_min,  // compat page.jsx
