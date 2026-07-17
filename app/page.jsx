@@ -1633,7 +1633,7 @@ function FichaPropiedad({ venta, onClose }) {
     fcLoadGmaps().then(() => {
       const g = window.google && window.google.maps
       if (cancel || !g || !satRef.current) return
-      const m = new g.Map(satRef.current, { center: { lat: venta.lat, lng: venta.lng }, zoom: 19, mapTypeId: 'satellite', mapTypeControl: false, streetViewControl: false, fullscreenControl: false })
+      const m = new g.Map(satRef.current, { center: { lat: venta.lat, lng: venta.lng }, zoom: 19, mapTypeId: 'satellite', gestureHandling: 'cooperative', mapTypeControl: false, streetViewControl: false, fullscreenControl: false })
       new g.Marker({ position: { lat: venta.lat, lng: venta.lng }, map: m })
     })
     return () => { cancel = true }
@@ -1725,7 +1725,7 @@ function OfertasMapa({ ofertas }) {
       const tryInit = (n) => {
         if (cancel) return
         if (!mapRef.current) { if (n > 0) setTimeout(() => tryInit(n - 1), 150); return }
-        const map = new g.Map(mapRef.current, { mapTypeId: 'hybrid', tilt: 0, mapTypeControl: false, streetViewControl: false, fullscreenControl: false, clickableIcons: false })
+        const map = new g.Map(mapRef.current, { mapTypeId: 'hybrid', tilt: 0, gestureHandling: 'cooperative', mapTypeControl: false, streetViewControl: false, fullscreenControl: false, clickableIcons: false })
         const bounds = new g.LatLngBounds()
         ofertas.forEach((o) => bounds.extend({ lat: o.lat, lng: o.lng }))
         map.fitBounds(bounds, 40)
@@ -1783,7 +1783,7 @@ function OfertasMapa({ ofertas }) {
         <div style={{ fontWeight: 700, color: 'var(--gold-light)', marginBottom: 8 }}>🏷️ Ofertas en venta en el sector ({ofertas.length})</div>
         <div ref={mapRef} style={{ width: '100%', height: 360, borderRadius: 12, border: '1px solid rgba(255,255,255,0.12)', overflow: 'hidden' }} />
         <div style={{ fontSize: 12, color: '#9a9a9a', marginTop: 6 }}>Avisos vigentes en portales. Tocá un pin azul o una fila para ver la foto y el enlace al aviso.</div>
-        <div style={{ marginTop: 10, maxHeight: 280, overflow: 'auto', borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)' }}>
+        <div style={{ marginTop: 10, maxHeight: 280, overflow: 'auto', overscrollBehavior: 'contain', borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)' }}>
           {ofertas.map((o, i) => (
             <div key={i} onClick={() => setSel(o)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '9px 12px', borderBottom: i < ofertas.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none', cursor: 'pointer' }}>
               <div style={{ overflow: 'hidden' }}>
@@ -2155,7 +2155,7 @@ function VentasMapa({ ventas, titulo, centro }) {
       const tryInit = (n) => {
         if (cancel) return
         if (!mapRef.current) { if (n > 0) setTimeout(() => tryInit(n - 1), 150); return }
-        const map = new g.Map(mapRef.current, { mapTypeId: 'hybrid', tilt: 0, mapTypeControl: false, streetViewControl: false, fullscreenControl: false, clickableIcons: false })
+        const map = new g.Map(mapRef.current, { mapTypeId: 'hybrid', tilt: 0, gestureHandling: 'cooperative', mapTypeControl: false, streetViewControl: false, fullscreenControl: false, clickableIcons: false })
         iwRef.current = new g.InfoWindow()
         // Encuadre: la propiedad y sus ventas CERCANAS (≤1,2 km). Las lejanas
         // no abren el zoom: se ven navegando (como el reporte de DataInmobiliaria).
@@ -2251,7 +2251,7 @@ function VentasMapa({ ventas, titulo, centro }) {
         <div style={{ fontWeight: 700, color: 'var(--gold-light)', marginBottom: 8 }}>🗺️ {titulo} ({ventas.length})</div>
         <div ref={mapRef} style={{ width: '100%', height: 360, borderRadius: 12, border: '1px solid rgba(255,255,255,0.12)', overflow: 'hidden' }} />
         <div style={{ fontSize: 12, color: '#9a9a9a', marginTop: 6 }}>Tocá una pastilla en el mapa, o una fila de la lista de abajo, para ver la ficha de la propiedad.</div>
-        <div style={{ marginTop: 10, maxHeight: 280, overflow: 'auto', borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)' }}>
+        <div style={{ marginTop: 10, maxHeight: 280, overflow: 'auto', overscrollBehavior: 'contain', borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)' }}>
           {ventas.map((v, i) => (
             <div key={i} onClick={() => setSel(v)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '9px 12px', borderBottom: i < ventas.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none', cursor: 'pointer' }}>
               <div style={{ overflow: 'hidden' }}>
