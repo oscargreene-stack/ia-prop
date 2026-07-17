@@ -14,7 +14,7 @@ import {
   poligono, distanciaM, mediana, percentil,
   clasificaTipo, TIPO_OBJETIVO, cutoffVentasStr, esVentaReciente, enBandaM2,
   UFM2_MIN, UFM2_MAX, puntosSuelo, resumenSuelo, sueloPorTramo, sueloDeTramo,
-  valorAditivoCasa, confianzaPorN, buscarVentasPoligono, COSTO_CONSTR_RESIDUAL, BANDA_M2, terrenoDe, sinOutliers,
+  valorAditivoCasa, confianzaPorN, buscarVentasPoligono, COSTO_CONSTR_RESIDUAL, BANDA_M2, terrenoDe, sinOutliers, DOTACION_TIPICA_DEPTO,
 } from '../../lib/tasacion-core.js'
 
 export const maxDuration = 60
@@ -762,23 +762,39 @@ export async function POST(request) {
     }
   }
 
-  // Estacionamientos y bodegas con ventas REALES del mismo edificio (estilo
-  // DataInmobiliaria/Propiteq: cada unidad se suma con su valor de mercado).
-  if (valorDet && (valorEstacionamientoUf || valorBodegaUf)) {
-    const nEst = parseInt(answers?.estacionamientos) || 0
-    const nBod = parseInt(answers?.bodegas) || 0
+  // Estacionamientos y bodegas: los comparables del sector se vendieron CON su
+  // dotación típica (la mediana YA la incluye), así que tenerla NO suma. Solo se
+  // ajusta la DESVIACIÓN respecto de lo típico del segmento, valorizada con las
+  // ventas reales del edificio cuando existen (o un valor de referencia).
+  // La terraza corre la misma suerte: implícita en los comparables, sin línea aparte.
+  if (valorDet && tipoObjetivo === 'departamento') {
+    const { tier } = elegirTierConstruccion(comuna, null)
+    const tipica = DOTACION_TIPICA_DEPTO[tier] || DOTACION_TIPICA_DEPTO.estandar
+    const vEst = valorEstacionamientoUf || (tier === 'estandar' ? 200 : 300)
+    const vBod = valorBodegaUf || (tier === 'estandar' ? 50 : 80)
+    const fuenteVal = valorEstacionamientoUf || valorBodegaUf ? 'ventas reales del edificio' : 'valor de referencia'
+    const dEst = (parseInt(answers?.estacionamientos) || 0) - tipica.est
+    const dBod = (parseInt(answers?.bodegas) || 0) - tipica.bod
     let extraUf = 0
-    if (nEst > 0 && valorEstacionamientoUf) {
-      const v = nEst * valorEstacionamientoUf
+    if (dEst !== 0) {
+      const v = dEst * vEst
       extraUf += v
-      valorDet.desglose.push({ concepto: nEst > 1 ? 'Estacionamientos' : 'Estacionamiento', calculo: nEst + ' × ' + valorEstacionamientoUf + ' UF (mediana de ventas reales del edificio)', valor_uf: v })
+      valorDet.desglose.push({
+        concepto: dEst > 0 ? 'Estacionamientos sobre lo típico del sector' : 'Estacionamientos bajo lo típico del sector',
+        calculo: (dEst > 0 ? '+' : '') + dEst + ' vs dotación típica (' + tipica.est + ') × ' + vEst + ' UF (' + fuenteVal + ')',
+        valor_uf: v,
+      })
     }
-    if (nBod > 0 && valorBodegaUf) {
-      const v = nBod * valorBodegaUf
+    if (dBod !== 0) {
+      const v = dBod * vBod
       extraUf += v
-      valorDet.desglose.push({ concepto: nBod > 1 ? 'Bodegas' : 'Bodega', calculo: nBod + ' × ' + valorBodegaUf + ' UF (mediana de ventas reales del edificio)', valor_uf: v })
+      valorDet.desglose.push({
+        concepto: dBod > 0 ? 'Bodegas sobre lo típico del sector' : 'Sin bodega (típico del sector: ' + tipica.bod + ')',
+        calculo: (dBod > 0 ? '+' : '') + dBod + ' vs dotación típica (' + tipica.bod + ') × ' + vBod + ' UF (' + fuenteVal + ')',
+        valor_uf: v,
+      })
     }
-    if (extraUf > 0) {
+    if (extraUf !== 0) {
       valorDet.valor_uf += extraUf
       if (m2Construido) valorDet.precio_m2 = Math.round((valorDet.valor_uf / m2Construido) * 10) / 10
     }

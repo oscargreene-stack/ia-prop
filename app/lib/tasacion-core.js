@@ -318,6 +318,16 @@ export async function buscarVentasPoligono({ token, polys, objetivo, apiBase = '
   return { ventas, paginas, bloqueado }
 }
 
+// ── Dotación TÍPICA de un departamento por segmento de comuna ───────────────
+// Los comparables del sector se venden CON su dotación normal (estacionamientos,
+// bodega, terraza): la mediana ya la incluye. Por eso NO se suma por tenerla —
+// solo se ajusta la DESVIACIÓN respecto de lo típico del segmento.
+export const DOTACION_TIPICA_DEPTO = {
+  premium:  { est: 2, bod: 1 },
+  alta:     { est: 2, bod: 1 },
+  estandar: { est: 1, bod: 1 },
+}
+
 // ── Filtro de OUTLIERS (regla de tasador) ───────────────────────────────────
 // Una venta a menos de la mitad o a casi el doble de la mediana del grupo NO es
 // comparable (herencias, ventas entre relacionados, datos mal cargados): solo
