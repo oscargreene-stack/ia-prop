@@ -1055,7 +1055,7 @@ function ChatVendedor({ onBack }) {
           ? <VentasMapa ventas={ventasTasacion} titulo="Ventas comparables que respaldan la tasación" centro={puntoTasacion} />
           : ofTasLoading
             ? <div style={{ marginTop: 14, color: '#8a8a8a', fontSize: 14 }}>Buscando ofertas vigentes en el sector…</div>
-            : <OfertasMapa ofertas={ofertasTasacion} />}
+            : <OfertasMapa ofertas={ofertasTasacion} centro={puntoTasacion} />}
         <div ref={bottomRef}/>
       </div>
 
@@ -1711,10 +1711,13 @@ function FichaOferta({ oferta, onClose }) {
 }
 
 // Mapa de OFERTAS (avisos de portales) — pines azules + ficha con foto y link.
-function OfertasMapa({ ofertas }) {
+function OfertasMapa({ ofertas, centro }) {
   const mapRef = useRef(null)
   const mkRef = useRef([])
+  const mapObjRef = useRef(null)
+  const boundsRef = useRef(null)
   const [sel, setSel] = useState(null)
+  const [full, setFull] = useState(false)
   const fmtK = (n) => { if (!n) return ''; if (n < 1000) return String(n); const k = Math.round(n / 100) / 10; return (Number.isInteger(k) ? k.toFixed(0) : k.toFixed(1)).replace('.', ',') + 'K' }
   const label = (o) => { if (!o.precio) return 's/p'; if (o.moneda === 'UF' || !o.moneda) return fmtK(o.precio) + ' UF'; const m = o.precio; return m >= 1000000 ? '$' + (Math.round(m / 100000) / 10).toString().replace('.', ',') + 'M' : '$' + Math.round(m / 1000) + 'K' }
   const precioStr = (o) => (o.precio ? (o.moneda === 'UF' || !o.moneda ? Number(o.precio).toLocaleString('es-CL') + ' UF' : '$' + Number(o.precio).toLocaleString('es-CL')) : '')
@@ -1730,10 +1733,13 @@ function OfertasMapa({ ofertas }) {
         const map = new g.Map(mapRef.current, { mapTypeId: 'hybrid', tilt: 0, gestureHandling: 'cooperative', mapTypeControl: false, streetViewControl: false, fullscreenControl: false, clickableIcons: false })
         const bounds = new g.LatLngBounds()
         ofertas.forEach((o) => bounds.extend({ lat: o.lat, lng: o.lng }))
+        if (centro) bounds.extend({ lat: centro.lat, lng: centro.lng })
         map.fitBounds(bounds, 40)
-        const pillIcon = (txt) => {
+        mapObjRef.current = map
+        boundsRef.current = bounds
+        const pillIcon = (txt, color = '#2563eb') => {
           const w = Math.ceil(18 + txt.length * 7)
-          const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="22"><rect rx="11" ry="11" width="${w}" height="22" fill="#2563eb"/><text x="${w / 2}" y="15" font-family="Arial,sans-serif" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle">${txt}</text></svg>`
+          const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="22"><rect rx="11" ry="11" width="${w}" height="22" fill="${color}" stroke="#ffffff" stroke-width="1.5"/><text x="${w / 2}" y="15" font-family="Arial,sans-serif" font-size="11" font-weight="700" fill="#ffffff" text-anchor="middle">${txt}</text></svg>`
           return { url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg), anchor: new g.Point(Math.round(w / 2), 11) }
         }
         const clusterIcon = (count) => {
@@ -1777,13 +1783,34 @@ function OfertasMapa({ ofertas }) {
     })
     return () => { cancel = true }
   }, [ofertas])
+  // Pantalla completa (estilo Propiteq): redimensiona, re-encuadra y Esc para salir.
+  useEffect(() => {
+    const g = typeof window !== 'undefined' && window.google && window.google.maps
+    const map = mapObjRef.current
+    if (typeof document !== 'undefined') document.body.style.overflow = full ? 'hidden' : ''
+    if (!g || !map) return
+    map.setOptions({ gestureHandling: full ? 'greedy' : 'cooperative' })
+    const t = setTimeout(() => { g.event.trigger(map, 'resize'); if (boundsRef.current) map.fitBounds(boundsRef.current, full ? 60 : 40) }, 80)
+    const onKey = (e) => { if (e.key === 'Escape') setFull(false) }
+    window.addEventListener('keydown', onKey)
+    return () => { clearTimeout(t); window.removeEventListener('keydown', onKey); if (typeof document !== 'undefined') document.body.style.overflow = '' }
+  }, [full])
   if (!Array.isArray(ofertas)) return <div style={{ marginTop: 14, color: '#9a9a9a', fontSize: 14 }}>Buscando ofertas…</div>
   if (ofertas.length === 0) return <div style={{ marginTop: 14, color: '#9a9a9a', fontSize: 14 }}>No encontré ofertas vigentes en este sector.</div>
   return (
     <>
       <div style={{ marginTop: 14 }}>
         <div style={{ fontWeight: 700, color: 'var(--gold-light)', marginBottom: 8 }}>🏷️ Ofertas en venta en el sector ({ofertas.length})</div>
-        <div ref={mapRef} style={{ width: '100%', height: 360, borderRadius: 12, border: '1px solid rgba(255,255,255,0.12)', overflow: 'hidden' }} />
+        <div style={full ? { position: 'fixed', inset: 0, zIndex: 9000, background: '#101418', padding: 12, display: 'flex', flexDirection: 'column' } : { position: 'relative' }}>
+          {full && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 10 }}>
+              <div style={{ fontWeight: 700, color: 'var(--gold-light)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>🏷️ Ofertas en venta en el sector ({ofertas.length})</div>
+              <button onClick={() => setFull(false)} style={{ border: '1px solid rgba(255,255,255,0.25)', background: 'rgba(255,255,255,0.08)', color: '#fff', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 13, whiteSpace: 'nowrap' }}>✕ Cerrar</button>
+            </div>
+          )}
+          <div ref={mapRef} style={{ width: '100%', height: full ? 'auto' : 360, flex: full ? 1 : 'none', borderRadius: 12, border: '1px solid rgba(255,255,255,0.12)', overflow: 'hidden' }} />
+          {!full && <button onClick={() => setFull(true)} title="Ver a pantalla completa" style={{ position: 'absolute', top: 10, right: 10, border: 'none', background: 'rgba(0,0,0,0.6)', color: '#fff', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', fontSize: 13 }}>⛶ Ampliar</button>}
+        </div>
         <div style={{ fontSize: 12, color: '#9a9a9a', marginTop: 6 }}>Avisos vigentes en portales. Tocá un pin azul o una fila para ver la foto y el enlace al aviso.</div>
         <div style={{ marginTop: 10, maxHeight: 280, overflow: 'auto', overscrollBehavior: 'contain', borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)' }}>
           {ofertas.map((o, i) => (
@@ -1876,7 +1903,10 @@ function VentasMapa({ ventas, titulo, centro }) {
   const mapRef = useRef(null)
   const mkRef = useRef([])
   const iwRef = useRef(null)
+  const mapObjRef = useRef(null)
+  const boundsRef = useRef(null)
   const [sel, setSel] = useState(null)
+  const [full, setFull] = useState(false)
   useEffect(() => {
     if (!Array.isArray(ventas) || ventas.length === 0) return
     let cancel = false
@@ -1896,6 +1926,8 @@ function VentasMapa({ ventas, titulo, centro }) {
         ;(cercanas.length >= 3 ? cercanas : ventas).forEach((v) => bounds.extend({ lat: v.lat, lng: v.lng }))
         if (centro) bounds.extend(centro)
         map.fitBounds(bounds, 40)
+        mapObjRef.current = map
+        boundsRef.current = bounds
         const fmtK = (uf) => {
           if (uf < 1000) return String(uf)
           const k = Math.round(uf / 100) / 10
@@ -1975,13 +2007,34 @@ function VentasMapa({ ventas, titulo, centro }) {
     })
     return () => { cancel = true }
   }, [ventas])
+  // Pantalla completa (estilo Propiteq): redimensiona, re-encuadra y Esc para salir.
+  useEffect(() => {
+    const g = typeof window !== 'undefined' && window.google && window.google.maps
+    const map = mapObjRef.current
+    if (typeof document !== 'undefined') document.body.style.overflow = full ? 'hidden' : ''
+    if (!g || !map) return
+    map.setOptions({ gestureHandling: full ? 'greedy' : 'cooperative' })
+    const t = setTimeout(() => { g.event.trigger(map, 'resize'); if (boundsRef.current) map.fitBounds(boundsRef.current, full ? 60 : 40) }, 80)
+    const onKey = (e) => { if (e.key === 'Escape') setFull(false) }
+    window.addEventListener('keydown', onKey)
+    return () => { clearTimeout(t); window.removeEventListener('keydown', onKey); if (typeof document !== 'undefined') document.body.style.overflow = '' }
+  }, [full])
   if (!Array.isArray(ventas) || ventas.length === 0) return null
   return (
     <>
       <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(202,161,90,0.25)' }}>
         <div style={{ fontWeight: 700, color: 'var(--gold-light)', marginBottom: 8 }}>🗺️ {titulo} ({ventas.length})</div>
-        <div ref={mapRef} style={{ width: '100%', height: 360, borderRadius: 12, border: '1px solid rgba(255,255,255,0.12)', overflow: 'hidden' }} />
-        <div style={{ fontSize: 12, color: '#9a9a9a', marginTop: 6 }}>Tocá una pastilla en el mapa, o una fila de la lista de abajo, para ver la ficha de la propiedad.</div>
+        <div style={full ? { position: 'fixed', inset: 0, zIndex: 9000, background: '#101418', padding: 12, display: 'flex', flexDirection: 'column' } : { position: 'relative' }}>
+          {full && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, gap: 10 }}>
+              <div style={{ fontWeight: 700, color: 'var(--gold-light)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>🗺️ {titulo} ({ventas.length})</div>
+              <button onClick={() => setFull(false)} style={{ border: '1px solid rgba(255,255,255,0.25)', background: 'rgba(255,255,255,0.08)', color: '#fff', borderRadius: 8, padding: '6px 12px', cursor: 'pointer', fontSize: 13, whiteSpace: 'nowrap' }}>✕ Cerrar</button>
+            </div>
+          )}
+          <div ref={mapRef} style={{ width: '100%', height: full ? 'auto' : 360, flex: full ? 1 : 'none', borderRadius: 12, border: '1px solid rgba(255,255,255,0.12)', overflow: 'hidden' }} />
+          {!full && <button onClick={() => setFull(true)} title="Ver a pantalla completa" style={{ position: 'absolute', top: 10, right: 10, border: 'none', background: 'rgba(0,0,0,0.6)', color: '#fff', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', fontSize: 13 }}>⛶ Ampliar</button>}
+        </div>
+        <div style={{ fontSize: 12, color: '#9a9a9a', marginTop: 6 }}>Tocá una pastilla en el mapa, o una fila de la lista de abajo, para ver la ficha de la propiedad. Con ⛶ lo ves a pantalla completa.</div>
         <div style={{ marginTop: 10, maxHeight: 280, overflow: 'auto', overscrollBehavior: 'contain', borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)' }}>
           {ventas.map((v, i) => (
             <div key={i} onClick={() => setSel(v)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '9px 12px', borderBottom: i < ventas.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none', cursor: 'pointer' }}>
