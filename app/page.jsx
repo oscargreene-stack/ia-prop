@@ -1654,7 +1654,7 @@ function FichaPropiedad({ venta, onClose }) {
     ['Destino', destino],
     ['Avalúo fiscal', clpStr(venta.avaluo_clp)],
     ['Contribuciones', venta.contrib_clp ? clpStr(venta.contrib_clp) + ' /trim.' : '—'],
-    ['ROL', venta.rol || '—'],
+    ['ROL', venta.rol ? rolCorto(venta.rol) : '—'],
   ]
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
