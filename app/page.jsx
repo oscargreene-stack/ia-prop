@@ -583,7 +583,7 @@ function ChatVendedor({ onBack }) {
       const res = await fetch('/api/predio', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ direccion: d.direccion || '', comuna: d.comuna || '' }),
+        body: JSON.stringify({ direccion: d.direccion || '', comuna: d.comuna || '', depto: d.depto || '' }),
       })
       setMessages(m => m.filter(x => !(x.role==='agent' && x.content?.type==='loading')))
 
