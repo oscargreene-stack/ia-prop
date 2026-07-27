@@ -1921,10 +1921,25 @@ function VentasMapa({ ventas, titulo, centro }) {
         // no abren el zoom: se ven navegando (como el reporte de DataInmobiliaria).
         const dKmMapa = (a, b) => { const rad = Math.PI / 180, R = 6371; const dLa = (b.lat - a.lat) * rad, dLn = (b.lng - a.lng) * rad; const h = Math.sin(dLa / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLn / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)) }
         const bounds = new g.LatLngBounds()
-        const cercanas = centro ? ventas.filter((v) => dKmMapa(centro, v) <= 1.2) : ventas
-        ;(cercanas.length >= 3 ? cercanas : ventas).forEach((v) => bounds.extend({ lat: v.lat, lng: v.lng }))
+        // Encuadre INICIAL acotado (estilo Data Inmobiliaria, zoom ~17-18): la
+        // propiedad y las ventas a pocas cuadras (≤350 m; si hay pocas, 600 m).
+        // Las demás ventas siguen en el mapa y se ven navegando.
+        let cercanas = ventas
+        if (centro) {
+          const a350 = ventas.filter((v) => dKmMapa(centro, v) <= 0.35)
+          const a600 = ventas.filter((v) => dKmMapa(centro, v) <= 0.6)
+          cercanas = a350.length >= 3 ? a350 : (a600.length >= 3 ? a600 : ventas)
+        }
+        cercanas.forEach((v) => bounds.extend({ lat: v.lat, lng: v.lng }))
         if (centro) bounds.extend(centro)
         map.fitBounds(bounds, 40)
+        if (centro) {
+          g.event.addListenerOnce(map, 'idle', () => {
+            const z = map.getZoom() || 0
+            if (z > 18) map.setZoom(18)
+            else if (z < 16) map.setZoom(16)
+          })
+        }
         mapObjRef.current = map
         boundsRef.current = bounds
         const fmtK = (uf) => {
