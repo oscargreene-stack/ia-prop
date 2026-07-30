@@ -168,7 +168,7 @@ export async function POST(request) {
   }
   cands = cands.slice(0, 8).map(({ _dist, ...c }) => c)
 
-  const resp = { candidatos: cands, total: cands.length, _modo: 'real' }
+  const resp = { candidatos: cands, total: cands.length, _modo: 'real', punto }
   if (!cands.length) resp.mensaje = 'No encontré la propiedad. Ingresa los m2 a mano.'
   if (dbg) resp._debug = dbg
   return Response.json(resp)

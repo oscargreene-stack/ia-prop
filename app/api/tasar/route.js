@@ -934,6 +934,8 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
     answers?.remodelacion && answers.remodelacion !== 'ninguna'
       ? `Remodelación: ${answers.remodelacion}${answers.tiempo_remo ? ', hace '+answers.tiempo_remo : ''}`
       : 'Sin remodelación',
+    answers?.dormitorios ? `Dormitorios: ${answers.dormitorios}` : null,
+    answers?.banos ? `Baños: ${answers.banos}` : null,
     answers?.terraza_m2 > 0 ? `Terraza: ${answers.terraza_m2} m²` : null,
     answers?.estacionamientos > 0 ? `Estacionamientos: ${answers.estacionamientos}` : null,
     answers?.bodegas > 0 ? `Bodegas: ${answers.bodegas}` : null,

@@ -23,6 +23,12 @@ const COMUNAS_RM = ['Cerrillos','Cerro Navia','Conchalí','El Bosque','Estación
 // ─── Flujos por tipo ─────────────────────────────────────────────────────────
 const FLUJOS = {
   casa: [
+    { id:'dormitorios', msg:'¿Cuántos dormitorios tiene la casa?', tipo:'options', opts:[
+      {id:'1',label:'1',icon:'🛏️'},{id:'2',label:'2',icon:'🛏️'},{id:'3',label:'3',icon:'🛏️'},
+      {id:'4',label:'4',icon:'🛏️'},{id:'5+',label:'5 o más',icon:'🛏️'}]},
+    { id:'banos', msg:'¿Cuántos baños tiene?', tipo:'options', opts:[
+      {id:'1',label:'1',icon:'🚿'},{id:'2',label:'2',icon:'🚿'},{id:'3',label:'3',icon:'🚿'},
+      {id:'4',label:'4',icon:'🚿'},{id:'5+',label:'5 o más',icon:'🚿'}]},
     { id:'remodelacion', msg:'¿Tu casa tiene alguna remodelación?', tipo:'options', opts:[
       {id:'alta',label:'Sí — alta calidad',icon:'⭐'},{id:'media',label:'Sí — calidad media',icon:'✨'},
       {id:'baja',label:'Sí — terminaciones básicas',icon:'🔧'},{id:'ninguna',label:'No tiene',icon:'—'}]},
@@ -35,6 +41,12 @@ const FLUJOS = {
       {id:'ninguna',label:'Ninguna en especial',icon:'—'}]},
   ],
   departamento: [
+    { id:'dormitorios', msg:'¿Cuántos dormitorios tiene el departamento?', tipo:'options', opts:[
+      {id:'1',label:'1',icon:'🛏️'},{id:'2',label:'2',icon:'🛏️'},{id:'3',label:'3',icon:'🛏️'},
+      {id:'4',label:'4',icon:'🛏️'},{id:'5+',label:'5 o más',icon:'🛏️'}]},
+    { id:'banos', msg:'¿Cuántos baños tiene?', tipo:'options', opts:[
+      {id:'1',label:'1',icon:'🚿'},{id:'2',label:'2',icon:'🚿'},{id:'3',label:'3',icon:'🚿'},
+      {id:'4',label:'4',icon:'🚿'},{id:'5+',label:'5 o más',icon:'🚿'}]},
     { id:'piso', msg:'¿En qué piso está el departamento?', tipo:'options', opts:[
       {id:'1_4',label:'Piso 1 al 4',icon:'🔽'},{id:'5_10',label:'Piso 5 al 10',icon:'🏙️'},
       {id:'11_20',label:'Piso 11 al 20',icon:'🌆'},{id:'21+',label:'Piso 21 o más',icon:'🌇'}]},
@@ -248,6 +260,53 @@ function ChatVendedor({ onBack }) {
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
   const tasRef = useRef(null)
+  const histRef = useRef([])   // pila de snapshots para "volver atrás"
+  const sugRef = useRef(null)  // {dorms, banos, n} sugeridos desde avisos cercanos
+
+  // ── Volver atrás: guarda un snapshot ANTES de procesar cada respuesta ──────
+  const guardarPaso = () => {
+    const h = histRef.current
+    const top = h[h.length - 1]
+    if (top && top.stage === stage && top.messagesLen === messages.length) return // reintento de la misma pregunta
+    h.push({ messagesLen: messages.length, data, stage, flujoIdx, inputMode, options, multiSel, placeholder, deptoVal, comunaForm, searchTab })
+    if (h.length > 40) h.shift()
+  }
+  const volverAtras = () => {
+    const s = histRef.current.pop()
+    if (!s) return
+    setMessages(m => m.slice(0, s.messagesLen))
+    setData(s.data); setStage(s.stage); setFlujoIdx(s.flujoIdx)
+    setInputMode(s.inputMode); setOptions(s.options); setMultiSel(s.multiSel || [])
+    setPlaceholder(s.placeholder || ''); setDeptoVal(s.deptoVal || ''); setComunaForm(s.comunaForm || '')
+    setSearchTab(s.searchTab || 'direccion'); setInputVal(''); setTyping(false)
+    // limpiar restos de una tasación si se retrocede desde el resultado
+    setVentasTasacion(null); setOfertasTasacion(null); setPuntoTasacion(null); setVistaTas('ventas'); setTasBody(null)
+  }
+
+  // ── Dormitorios/baños sugeridos: avisos de portales a ≤150 m con superficie
+  // similar (±20%) y mismo tipo — se toma la MODA. Es una sugerencia (el
+  // usuario siempre confirma): el cruce no es por ROL exacto. ────────────────
+  const cargarSugerencia = (punto, m2, tipo) => {
+    if (!punto || !punto.lat || !['casa', 'departamento'].includes(tipo)) return
+    sugRef.current = null
+    const dLat = 200 / 111320, dLng = 200 / (111320 * Math.cos(punto.lat * Math.PI / 180))
+    const polygon = [
+      { lat: punto.lat + dLat, lng: punto.lng - dLng }, { lat: punto.lat + dLat, lng: punto.lng + dLng },
+      { lat: punto.lat - dLat, lng: punto.lng + dLng }, { lat: punto.lat - dLat, lng: punto.lng - dLng },
+    ]
+    fetch('/api/ofertas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ polygon, tipo, transaction_type: 'venta' }) })
+      .then(r => r.json())
+      .then(j => {
+        const m2n = parseFloat(m2) || 0
+        const dist = (a) => { const rad = Math.PI / 180, R = 6371000; const dLa = (a.lat - punto.lat) * rad, dLn = (a.lng - punto.lng) * rad; const h = Math.sin(dLa / 2) ** 2 + Math.cos(punto.lat * rad) * Math.cos(a.lat * rad) * Math.sin(dLn / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)) }
+        const match = (j.ofertas || []).filter(o => o.dorms > 0 && dist(o) <= 150 && (!m2n || (o.m2 > 0 && o.m2 >= m2n * 0.8 && o.m2 <= m2n * 1.2)))
+        if (!match.length) return
+        const moda = (arr) => { const c = {}; arr.forEach(x => { c[x] = (c[x] || 0) + 1 }); return +Object.keys(c).sort((a, b) => c[b] - c[a])[0] }
+        const ba = match.filter(o => o.banos > 0).map(o => o.banos)
+        sugRef.current = { dorms: moda(match.map(o => o.dorms)), banos: ba.length ? moda(ba) : null, n: match.length }
+      })
+      .catch(() => {})
+  }
 
   // Al llegar la TASACIÓN, posicionar el chat en la tarjeta del VALOR (inicio),
   // no al fondo: el informe es largo y el precio quedaba fuera de pantalla.
@@ -344,11 +403,24 @@ function ChatVendedor({ onBack }) {
 
     const paso = flujo[nextIdx]
     setFlujoIdx(nextIdx + 1)
-    await addAgent(paso.msg, 600)
+
+    // Sugerencia automática de dormitorios/baños (avisos cercanos del sector)
+    let msgPaso = paso.msg
+    let optsPaso = paso.opts
+    const sug = sugRef.current
+    if (sug && (paso.id === 'dormitorios' || paso.id === 'banos')) {
+      const val = paso.id === 'dormitorios' ? sug.dorms : sug.banos
+      if (val > 0) {
+        msgPaso = paso.msg + `\n\n✨ Según ${sug.n > 1 ? sug.n + ' avisos recientes' : 'un aviso reciente'} de propiedades similares del sector: **${val}**. Confírmalo o corrígelo.`
+        const idSug = val >= 5 ? '5+' : String(val)
+        optsPaso = paso.opts.map(o => o.id === idSug ? { ...o, label: o.label + ' ✨', icon: '✅' } : o)
+      }
+    }
+    await addAgent(msgPaso, 600)
 
     if (paso.tipo === 'options') {
       setInputMode('options')
-      setOptions(paso.opts)
+      setOptions(optsPaso)
       setStage(`flujo_${paso.id}`)
     } else if (paso.tipo === 'multi') {
       setInputMode('multi')
@@ -365,6 +437,7 @@ function ChatVendedor({ onBack }) {
   // Handler opciones
   const handleOption = async (opt) => {
     if (opt.disabled) return
+    guardarPaso()
     addUser(opt.label)
     setInputMode(null)
 
@@ -399,6 +472,8 @@ function ChatVendedor({ onBack }) {
 
       const newData = { ...data, siiData: sii }
       setData(newData)
+      // En paralelo: sugerencia de dormitorios/baños desde avisos cercanos
+      cargarSugerencia(data._punto, sii?.m2_construido, data.tipo)
       setMessages(m => [...m, { role:'agent', content:{ type:'sii', data:sii }}])
       await addAgent('¿Estos datos son correctos?', 400)
       setInputMode('options')
@@ -492,6 +567,7 @@ function ChatVendedor({ onBack }) {
 
   // Handler multiselect
   const handleMultiConfirm = async () => {
+    guardarPaso()
     const campo = stage.replace('flujo_', '')
     const labels = multiSel.map(s => options.find(o => o.id === s)?.label).filter(Boolean)
     addUser(labels.length ? labels.join(', ') : 'Ninguna en especial')
@@ -505,6 +581,7 @@ function ChatVendedor({ onBack }) {
   const handleSend = async () => {
     const val = inputVal.trim()
     if (!val) return
+    guardarPaso()
     setInputVal('')
     setInputMode(null)
 
@@ -624,7 +701,7 @@ function ChatVendedor({ onBack }) {
           icon: '🏠',
           _sii: r,
         })))
-        setData(prev => ({ ...prev, _candidatos: resultados, _pendingData: d }))
+        setData(prev => ({ ...prev, _candidatos: resultados, _pendingData: d, _punto: json.punto || null }))
         setStage('elegir_unidad')
         return
       }
@@ -645,8 +722,10 @@ function ChatVendedor({ onBack }) {
 
       // Un solo resultado
       const sii = resultados[0]
-      const newData = { ...d, siiData: sii }
+      const newData = { ...d, siiData: sii, _punto: json.punto || null }
       setData(newData)
+      // En paralelo: sugerencia de dormitorios/baños desde avisos cercanos
+      cargarSugerencia(json.punto, sii.m2_construido, d.tipo)
       setMessages(m => [...m, { role:'agent', content:{ type:'sii', data:sii }}])
       const terrenoTxt = sii.terreno_origen === 'bien_comun' ? ' (el terreno corresponde al bien común del edificio)' : ''
       await addAgent(`¿Estos datos son correctos?${terrenoTxt}`, 400)
@@ -688,7 +767,7 @@ function ChatVendedor({ onBack }) {
         body: JSON.stringify({
           siiData: finalData.siiData,
           form:{ direccion: finalData.direccion, depto:'', comuna: finalData.comuna || '' },
-          answers:{ remodelacion: finalData.remodelacion || 'ninguna', tiempo_remo: finalData.tiempo_remo || 'reciente', conservacion:'bueno', terraza_m2: parseInt(finalData.terraza_m2)||0, estacionamientos: parseInt(finalData.estacionamientos)||0, bodegas: parseInt(finalData.bodega)||0, m2_util: finalData.siiData?.m2_util || null },
+          answers:{ remodelacion: finalData.remodelacion || 'ninguna', tiempo_remo: finalData.tiempo_remo || 'reciente', conservacion:'bueno', terraza_m2: parseInt(finalData.terraza_m2)||0, estacionamientos: parseInt(finalData.estacionamientos)||0, bodegas: parseInt(finalData.bodega)||0, m2_util: finalData.siiData?.m2_util || null, dormitorios: finalData.dormitorios || null, banos: finalData.banos || null },
           extras: { ...finalData, tipo: finalData.tipo, piso: finalData.piso, orientacion: finalData.orientacion, jardin_m2: finalData.jardin_m2, precio_idea: finalData.precio_idea },
         })
       })
@@ -993,6 +1072,7 @@ function ChatVendedor({ onBack }) {
   const handleSearchForm = async () => {
     let busqueda = inputVal.trim()
     if (!busqueda || !comunaForm) return
+    guardarPaso()
     let conDepto = deptoVal.trim()
     // Tolerancia: si el usuario escribió la unidad DENTRO de la dirección
     // ("Luis Carrera 2376 Depto 202, Vitacura"), separarla — el catastro
@@ -1059,6 +1139,12 @@ function ChatVendedor({ onBack }) {
       </div>
 
       <div className="options-area">
+        {inputMode && stage !== 'tipo' && stage !== 'tasando' && histRef.current.length > 0 && (
+          <button onClick={volverAtras} title="Corrige tu respuesta anterior sin perder el avance"
+            style={{ background: 'none', border: '1px solid rgba(255,255,255,0.18)', color: '#9a9a9a', borderRadius: 16, padding: '4px 12px', fontSize: 12, cursor: 'pointer', marginBottom: 8, display: 'inline-block' }}>
+            ↩ Volver atrás para corregir
+          </button>
+        )}
         {inputMode === 'options' && (
           <>
             <div className="options-hint">Selecciona una opción</div>
