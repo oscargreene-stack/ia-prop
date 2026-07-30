@@ -333,7 +333,7 @@ export const DOTACION_TIPICA_DEPTO = {
 // comparable (herencias, ventas entre relacionados, datos mal cargados): solo
 // confunde. Se filtra únicamente si hay muestra suficiente (≥6) y se conserva
 // un mínimo de 5 comparables.
-export function sinOutliers(items, valorDe, { min = 0.5, max = 1.75, minimo = 5 } = {}) {
+export function sinOutliers(items, valorDe, { min = 0.6, max = 1.75, minimo = 5 } = {}) {
   const vals = (items || []).map(valorDe).filter((x) => x > 0)
   if (vals.length < 6) return items
   const med = mediana(vals)

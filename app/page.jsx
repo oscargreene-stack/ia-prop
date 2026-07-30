@@ -583,7 +583,7 @@ function ChatVendedor({ onBack }) {
       const res = await fetch('/api/predio', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ direccion: d.direccion || '', comuna: d.comuna || '' }),
+        body: JSON.stringify({ direccion: d.direccion || '', comuna: d.comuna || '', depto: d.depto || '' }),
       })
       setMessages(m => m.filter(x => !(x.role==='agent' && x.content?.type==='loading')))
 
@@ -748,9 +748,8 @@ function ChatVendedor({ onBack }) {
           <div className="sii-bubble-grid">
             {d.rol && <div className="sii-bubble-item"><div className="sii-bubble-label">ROL</div><div className="sii-bubble-val rol">{rolCorto(d.rol)}</div></div>}
             {d.destino && <div className="sii-bubble-item"><div className="sii-bubble-label">Destino</div><div className="sii-bubble-val">{d.destino}</div></div>}
-            {d.m2_construido && <div className="sii-bubble-item"><div className="sii-bubble-label">M² construidos</div><div className="sii-bubble-val green">{d.m2_construido} m²</div></div>}
-            
-            {d.m2_terreno && <div className="sii-bubble-item"><div className="sii-bubble-label">M² terreno</div><div className="sii-bubble-val">{d.m2_terreno} m²</div></div>}
+            {d.m2_construido > 0 && <div className="sii-bubble-item"><div className="sii-bubble-label">M² construidos</div><div className="sii-bubble-val green">{d.m2_construido} m²</div></div>}
+            {d.m2_terreno > 0 && <div className="sii-bubble-item"><div className="sii-bubble-label">M² terreno</div><div className="sii-bubble-val">{d.m2_terreno} m²</div></div>}
             {(d.anio_construccion || d.ano_construccion) && <div className="sii-bubble-item"><div className="sii-bubble-label">Año const.</div><div className="sii-bubble-val">{(d.anio_construccion || d.ano_construccion)}</div></div>}
             {d.avaluo_total_clp && <div className="sii-bubble-item"><div className="sii-bubble-label">Avalúo fiscal</div><div className="sii-bubble-val">{'$' + Number(d.avaluo_total_clp).toLocaleString('es-CL')}</div></div>}
             {!d.avaluo_total_clp && d.avaluo_fiscal_uf && <div className="sii-bubble-item"><div className="sii-bubble-label">Avalúo fiscal</div><div className="sii-bubble-val">{Math.round(d.avaluo_fiscal_uf).toLocaleString('es-CL')} UF</div></div>}
@@ -1654,7 +1653,7 @@ function FichaPropiedad({ venta, onClose }) {
     ['Destino', destino],
     ['Avalúo fiscal', clpStr(venta.avaluo_clp)],
     ['Contribuciones', venta.contrib_clp ? clpStr(venta.contrib_clp) + ' /trim.' : '—'],
-    ['ROL', venta.rol || '—'],
+    ['ROL', venta.rol ? rolCorto(venta.rol) : '—'],
   ]
   return (
     <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.65)', zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
@@ -1922,10 +1921,25 @@ function VentasMapa({ ventas, titulo, centro }) {
         // no abren el zoom: se ven navegando (como el reporte de DataInmobiliaria).
         const dKmMapa = (a, b) => { const rad = Math.PI / 180, R = 6371; const dLa = (b.lat - a.lat) * rad, dLn = (b.lng - a.lng) * rad; const h = Math.sin(dLa / 2) ** 2 + Math.cos(a.lat * rad) * Math.cos(b.lat * rad) * Math.sin(dLn / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)) }
         const bounds = new g.LatLngBounds()
-        const cercanas = centro ? ventas.filter((v) => dKmMapa(centro, v) <= 1.2) : ventas
-        ;(cercanas.length >= 3 ? cercanas : ventas).forEach((v) => bounds.extend({ lat: v.lat, lng: v.lng }))
+        // Encuadre INICIAL acotado (estilo Data Inmobiliaria, zoom ~17-18): la
+        // propiedad y las ventas a pocas cuadras (≤350 m; si hay pocas, 600 m).
+        // Las demás ventas siguen en el mapa y se ven navegando.
+        let cercanas = ventas
+        if (centro) {
+          const a350 = ventas.filter((v) => dKmMapa(centro, v) <= 0.35)
+          const a600 = ventas.filter((v) => dKmMapa(centro, v) <= 0.6)
+          cercanas = a350.length >= 3 ? a350 : (a600.length >= 3 ? a600 : ventas)
+        }
+        cercanas.forEach((v) => bounds.extend({ lat: v.lat, lng: v.lng }))
         if (centro) bounds.extend(centro)
         map.fitBounds(bounds, 40)
+        if (centro) {
+          g.event.addListenerOnce(map, 'idle', () => {
+            const z = map.getZoom() || 0
+            if (z > 18) map.setZoom(18)
+            else if (z < 16) map.setZoom(16)
+          })
+        }
         mapObjRef.current = map
         boundsRef.current = bounds
         const fmtK = (uf) => {

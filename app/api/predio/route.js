@@ -59,6 +59,7 @@ export async function POST(request) {
   try { body = await request.json() } catch (e) {}
   const direccion = body.direccion || ''
   const comuna = body.comuna || ''
+  const deptoIn = String(body.depto || '').trim()
   const latIn = parseFloat(body.lat)
   const lngIn = parseFloat(body.lng)
 
@@ -77,6 +78,9 @@ export async function POST(request) {
   const dirLimpia = (direccion.split(',')[0] || '')
     .replace(/\b(?:depto\.?|dpto\.?|dept\.?|dp|departamento|of\.?|oficina|casa|cs|local|lc)\s*(?:n[°º]?|#|\.|-)?\s*[a-z]?\d+[a-z]?\s*$/i, '')
     .trim() || direccion
+  // Unidad pedida ("403" de "Depto 403"): del campo depto del front, o del final de la dirección.
+  const unidad = deptoIn.replace(/^[a-z°º#.\s-]*/i, '').trim() ||
+    (((direccion.split(',')[0] || '').match(/\b(?:depto\.?|dpto\.?|dept\.?|dp|departamento|of\.?|oficina|local|lc)\s*(?:n[°º]?|#|\.|-)?\s*([a-z]?\d+[a-z]?)\s*$/i) || [])[1] || '')
 
   // 1) Coordenadas: del frontend si vienen, si no geocodificamos
   let punto = (isFinite(latIn) && isFinite(lngIn)) ? { lat: latIn, lng: lngIn } : null
@@ -93,24 +97,34 @@ export async function POST(request) {
   let resultados = []
   try {
     const polygon = polygonAround(punto.lat, punto.lng, 120)
-    const res = await fetch(`${API_BASE}/busqueda_poligono`, {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify({ fuente: 'catastro', polygon }),
-      signal: AbortSignal.timeout(30000), // proveedor degradado: tolerar respuestas lentas del catastro
-    })
-    const txt = await res.text()
-    let j = null; try { j = JSON.parse(txt) } catch (e) {}
-    if (dbg) dbg.poligono = { status: res.status, total: (j && (j.resultados || j.data) || []).length, sample: txt.slice(0, 400) }
-    // Plan del proveedor expirado / sin permiso: avisar claro, no "no encontré"
-    if (res.status === 402 || res.status === 403) {
-      return Response.json({
-        candidatos: [], total: 0, _modo: 'servicio_no_disponible',
-        mensaje: 'El servicio de datos está temporalmente no disponible. Intenta en unos minutos, o continúa ingresando los m² a mano.',
-        ...(dbg ? { _debug: dbg } : {}),
+    // El proveedor pagina (~300 filas): en zonas densas o edificios grandes una
+    // sola página deja unidades fuera (p.ej. DP 403 de Luis Carrera 2870).
+    for (let page = 1; page <= 4; page++) {
+      const res = await fetch(`${API_BASE}/busqueda_poligono`, {
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${TOKEN}`, 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ fuente: 'catastro', polygon, page }),
+        signal: AbortSignal.timeout(page === 1 ? 30000 : 15000), // proveedor degradado: tolerar respuestas lentas
       })
+      const txt = await res.text()
+      let j = null; try { j = JSON.parse(txt) } catch (e) {}
+      if (dbg && page === 1) dbg.poligono = { status: res.status, total: (j && (j.resultados || j.data) || []).length, sample: txt.slice(0, 400) }
+      // Plan del proveedor expirado / sin permiso: avisar claro, no "no encontré"
+      if (res.status === 402 || res.status === 403) {
+        return Response.json({
+          candidatos: [], total: 0, _modo: 'servicio_no_disponible',
+          mensaje: 'El servicio de datos está temporalmente no disponible. Intenta en unos minutos, o continúa ingresando los m² a mano.',
+          ...(dbg ? { _debug: dbg } : {}),
+        })
+      }
+      const filas = (j && (j.resultados || j.data)) || []
+      // Dedupe defensivo: si el proveedor ignora `page` devolvería lo mismo.
+      const vistos = new Set(resultados.map(r => String(r.rol || (r.cod_com + '-' + r.cod_mz + '-' + r.cod_pr))))
+      const nuevas = filas.filter(r => !vistos.has(String(r.rol || (r.cod_com + '-' + r.cod_mz + '-' + r.cod_pr))))
+      resultados = resultados.concat(nuevas)
+      if (filas.length < 300 || nuevas.length === 0) break
     }
-    resultados = (j && (j.resultados || j.data)) || []
+    if (dbg) dbg.paginas_total = resultados.length
   } catch (e) {
     if (dbg) dbg.poligonoErr = String((e && e.message) || e)
   }
@@ -144,6 +158,14 @@ export async function POST(request) {
     if (exactos.length) cands = exactos
   }
   cands.sort((a, b) => a._dist - b._dist)
+  // Si el usuario indicó la unidad (Depto/Of/Local N), esa va PRIMERO; si hay
+  // match exacto devolvemos solo esa (el flujo sigue directo, sin selector).
+  if (unidad) {
+    const reU = new RegExp('\\b(?:DP|DEPTO|DPTO|DEPT|D|OF|OFIC|OFICINA|LC|LOC|LOCAL|CS)\\.?\\s*0*' + unidad.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\b', 'i')
+    const uMatch = cands.filter(c => reU.test(c.direccion))
+    if (dbg) dbg.unidad = { pedida: unidad, matches: uMatch.length }
+    if (uMatch.length) cands = uMatch
+  }
   cands = cands.slice(0, 8).map(({ _dist, ...c }) => c)
 
   const resp = { candidatos: cands, total: cands.length, _modo: 'real' }
