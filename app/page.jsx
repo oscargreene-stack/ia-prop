@@ -260,6 +260,7 @@ function ChatVendedor({ onBack }) {
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
   const tasRef = useRef(null)
+  const mapSecRef = useRef(null) // sección del mapa/tabla de comparables (navegación rápida)
   const histRef = useRef([])   // pila de snapshots para "volver atrás"
   const sugRef = useRef(null)  // {dorms, banos, n} sugeridos desde avisos cercanos
   const sugPromiseRef = useRef(null) // promesa de la consulta de avisos en curso
@@ -1137,7 +1138,7 @@ function ChatVendedor({ onBack }) {
         )}
         {typing && <AgentBubble typing/>}
         {ventasTasacion && ventasTasacion.length > 0 && (
-          <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(202,161,90,0.25)', display: 'flex', gap: 8 }}>
+          <div ref={mapSecRef} style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(202,161,90,0.25)', display: 'flex', gap: 8 }}>
             <button onClick={() => setVistaTas('ventas')} style={{ padding: '6px 12px', borderRadius: 20, border: '1px solid ' + (vistaTas === 'ventas' ? 'var(--gold)' : 'rgba(255,255,255,0.18)'), background: vistaTas === 'ventas' ? 'var(--gold-dim)' : 'transparent', color: vistaTas === 'ventas' ? 'var(--gold-light)' : '#cfcfcf', cursor: 'pointer', fontSize: 13 }}>🏠 Ventas registradas</button>
             <button onClick={verOfertasTas} style={{ padding: '6px 12px', borderRadius: 20, border: '1px solid ' + (vistaTas === 'ofertas' ? 'var(--gold)' : 'rgba(255,255,255,0.18)'), background: vistaTas === 'ofertas' ? 'var(--gold-dim)' : 'transparent', color: vistaTas === 'ofertas' ? 'var(--gold-light)' : '#cfcfcf', cursor: 'pointer', fontSize: 13 }}>🏷️ Ofertas en venta</button>
           </div>
@@ -1149,6 +1150,22 @@ function ChatVendedor({ onBack }) {
             : <OfertasMapa ofertas={ofertasTasacion} centro={puntoTasacion} />}
         <div ref={bottomRef}/>
       </div>
+
+      {/* Navegación rápida tras la tasación: saltar entre el valor y los comparables */}
+      {ventasTasacion && ventasTasacion.length > 0 && (
+        <div style={{ position: 'fixed', right: 18, bottom: 120, zIndex: 5000, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <button onClick={() => tasRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            title="Subir a la tarjeta del valor"
+            style={{ background: 'rgba(18,18,18,0.92)', border: '1px solid var(--gold)', color: 'var(--gold-light)', borderRadius: 20, padding: '8px 14px', fontSize: 13, cursor: 'pointer', boxShadow: '0 4px 14px rgba(0,0,0,0.45)' }}>
+            ⬆ Valor
+          </button>
+          <button onClick={() => mapSecRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            title="Bajar al mapa y la tabla de comparables"
+            style={{ background: 'rgba(18,18,18,0.92)', border: '1px solid rgba(255,255,255,0.25)', color: '#e8e8e8', borderRadius: 20, padding: '8px 14px', fontSize: 13, cursor: 'pointer', boxShadow: '0 4px 14px rgba(0,0,0,0.45)' }}>
+            🗺️ Comparables
+          </button>
+        </div>
+      )}
 
       <div className="options-area">
         {inputMode && stage !== 'tipo' && stage !== 'tasando' && histRef.current.length > 0 && (
@@ -1909,7 +1926,7 @@ function OfertasMapa({ ofertas, centro }) {
           {!full && <button onClick={() => setFull(true)} title="Ver a pantalla completa" style={{ position: 'absolute', top: 10, right: 10, border: 'none', background: 'rgba(0,0,0,0.6)', color: '#fff', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', fontSize: 13 }}>⛶ Ampliar</button>}
         </div>
         <div style={{ fontSize: 12, color: '#9a9a9a', marginTop: 6 }}>Avisos vigentes en portales. Tocá un pin azul o una fila para ver la foto y el enlace al aviso.</div>
-        <div style={{ marginTop: 10, maxHeight: 280, overflow: 'auto', overscrollBehavior: 'contain', borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)' }}>
+        <div style={{ marginTop: 10, maxHeight: 280, overflow: 'auto', borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)' }}>
           {ofertas.map((o, i) => (
             <div key={i} onClick={() => setSel(o)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '9px 12px', borderBottom: i < ofertas.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none', cursor: 'pointer' }}>
               <div style={{ overflow: 'hidden' }}>
@@ -2147,7 +2164,7 @@ function VentasMapa({ ventas, titulo, centro }) {
           {!full && <button onClick={() => setFull(true)} title="Ver a pantalla completa" style={{ position: 'absolute', top: 10, right: 10, border: 'none', background: 'rgba(0,0,0,0.6)', color: '#fff', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', fontSize: 13 }}>⛶ Ampliar</button>}
         </div>
         <div style={{ fontSize: 12, color: '#9a9a9a', marginTop: 6 }}>Tocá una pastilla en el mapa, o una fila de la lista de abajo, para ver la ficha de la propiedad. Con ⛶ lo ves a pantalla completa.</div>
-        <div style={{ marginTop: 10, maxHeight: 280, overflow: 'auto', overscrollBehavior: 'contain', borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)' }}>
+        <div style={{ marginTop: 10, maxHeight: 280, overflow: 'auto', borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)' }}>
           {ventas.map((v, i) => (
             <div key={i} onClick={() => setSel(v)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '9px 12px', borderBottom: i < ventas.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none', cursor: 'pointer' }}>
               <div style={{ overflow: 'hidden' }}>
