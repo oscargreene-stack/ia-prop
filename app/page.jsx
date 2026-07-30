@@ -262,6 +262,7 @@ function ChatVendedor({ onBack }) {
   const tasRef = useRef(null)
   const histRef = useRef([])   // pila de snapshots para "volver atrás"
   const sugRef = useRef(null)  // {dorms, banos, n} sugeridos desde avisos cercanos
+  const sugPromiseRef = useRef(null) // promesa de la consulta de avisos en curso
 
   // ── Volver atrás: guarda un snapshot ANTES de procesar cada respuesta ──────
   const guardarPaso = () => {
@@ -294,7 +295,7 @@ function ChatVendedor({ onBack }) {
       { lat: punto.lat + dLat, lng: punto.lng - dLng }, { lat: punto.lat + dLat, lng: punto.lng + dLng },
       { lat: punto.lat - dLat, lng: punto.lng + dLng }, { lat: punto.lat - dLat, lng: punto.lng - dLng },
     ]
-    fetch('/api/ofertas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ polygon, tipo, transaction_type: 'venta' }) })
+    sugPromiseRef.current = fetch('/api/ofertas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ polygon, tipo, transaction_type: 'venta' }) })
       .then(r => r.json())
       .then(j => {
         const m2n = parseFloat(m2) || 0
@@ -385,6 +386,17 @@ function ChatVendedor({ onBack }) {
         const validos = valStr.split(',')
         const val = currentData[field]
         if (validos.includes(val)) { nextIdx++; continue } // saltar
+      }
+      // Dormitorios/baños: SOLO se preguntan si hay sugerencia automática de
+      // avisos del sector (no influyen en la fórmula del valor; sin dato
+      // automático la pregunta es pura fricción). Se espera brevemente a que
+      // termine la consulta de avisos antes de decidir saltar.
+      if (paso.id === 'dormitorios' || paso.id === 'banos') {
+        if (!sugRef.current && sugPromiseRef.current) {
+          await Promise.race([sugPromiseRef.current, new Promise(r => setTimeout(r, 2500))])
+        }
+        const sVal = paso.id === 'dormitorios' ? sugRef.current?.dorms : sugRef.current?.banos
+        if (!(sVal > 0)) { nextIdx++; continue } // sin sugerencia → no preguntar
       }
       break
     }
