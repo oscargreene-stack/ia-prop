@@ -1030,7 +1030,7 @@ function ChatVendedor({ onBack }) {
   return (
     <div className="chat-app">
       <div className="chat-header">
-        <a className="back-btn" href="https://greatdeal-platform.vercel.app" style={{display:'inline-flex',alignItems:'center',justifyContent:'center',textDecoration:'none'}}>←</a>
+        <a className="back-btn" href="https://c2cprops.com" style={{display:'inline-flex',alignItems:'center',justifyContent:'center',textDecoration:'none'}}>←</a>
         <div className="agent-avatar">🤵</div>
         <div>
           <div className="agent-name">Valentina · Agente Inmobiliaria</div>
@@ -2265,7 +2265,7 @@ function FormComprador({ onBack }) {
   return (
     <div style={{ maxWidth: 760, margin: '0 auto', padding: '24px 18px 60px' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20 }}>
-        <a className="back-btn" href="https://greatdeal-platform.vercel.app" style={{display:'inline-flex',alignItems:'center',justifyContent:'center',textDecoration:'none'}}>←</a>
+        <a className="back-btn" href="https://c2cprops.com" style={{display:'inline-flex',alignItems:'center',justifyContent:'center',textDecoration:'none'}}>←</a>
         <div>
           <div style={{ fontWeight: 700, fontSize: 18 }}>Isidora · Asesora de Compra</div>
           <div style={{ fontSize: 13, color: '#8a8a8a' }}>Contame qué buscás y te digo el precio real del sector</div>
