@@ -14,6 +14,15 @@ export const maxDuration = 30
 const API_BASE = 'https://datainmobiliaria.cl/api/v1'
 const TOKEN = process.env.DATAINMOBILIARIA_TOKEN
 const GKEY = process.env.NEXT_PUBLIC_GOOGLE_PLACES_KEY
+// CORS: este endpoint lo consumen también las apps del ecosistema C2C
+// (vender.c2cprops.com / c2cprops.com) directamente desde el navegador.
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+}
+const cjson = (obj) => new Response(JSON.stringify(obj), { headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } })
+export async function OPTIONS() { return new Response(null, { status: 204, headers: CORS_HEADERS }) }
 
 function norm(s) {
   return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().trim()
@@ -67,10 +76,10 @@ export async function POST(request) {
   const dbg = wantDebug ? {} : null
 
   if (!TOKEN) {
-    return Response.json({ candidatos: [], total: 0, mensaje: 'No encontré la propiedad. Ingresa los m2 a mano.', _modo: 'sin_token' })
+    return cjson({ candidatos: [], total: 0, mensaje: 'No encontré la propiedad. Ingresa los m2 a mano.', _modo: 'sin_token' })
   }
   if (!direccion && !(isFinite(latIn) && isFinite(lngIn))) {
-    return Response.json({ candidatos: [], total: 0, mensaje: 'Ingresa una dirección.', _modo: 'sin_input' })
+    return cjson({ candidatos: [], total: 0, mensaje: 'Ingresa una dirección.', _modo: 'sin_input' })
   }
 
   // Limpieza defensiva: quitar unidad ("Depto 202", "Of 501") y texto tras la
@@ -89,7 +98,7 @@ export async function POST(request) {
     catch (e) { if (dbg) dbg.geocodeErr = String((e && e.message) || e) }
   }
   if (!punto) {
-    return Response.json({ candidatos: [], total: 0, mensaje: 'No pude ubicar la dirección. Ingresa los m2 a mano.', _modo: 'sin_geocode', ...(dbg ? { _debug: dbg } : {}) })
+    return cjson({ candidatos: [], total: 0, mensaje: 'No pude ubicar la dirección. Ingresa los m2 a mano.', _modo: 'sin_geocode', ...(dbg ? { _debug: dbg } : {}) })
   }
   if (dbg) dbg.punto = punto
 
@@ -111,7 +120,7 @@ export async function POST(request) {
       if (dbg && page === 1) dbg.poligono = { status: res.status, total: (j && (j.resultados || j.data) || []).length, sample: txt.slice(0, 400) }
       // Plan del proveedor expirado / sin permiso: avisar claro, no "no encontré"
       if (res.status === 402 || res.status === 403) {
-        return Response.json({
+        return cjson({
           candidatos: [], total: 0, _modo: 'servicio_no_disponible',
           mensaje: 'El servicio de datos está temporalmente no disponible. Intenta en unos minutos, o continúa ingresando los m² a mano.',
           ...(dbg ? { _debug: dbg } : {}),
@@ -171,5 +180,5 @@ export async function POST(request) {
   const resp = { candidatos: cands, total: cands.length, _modo: 'real', punto }
   if (!cands.length) resp.mensaje = 'No encontré la propiedad. Ingresa los m2 a mano.'
   if (dbg) resp._debug = dbg
-  return Response.json(resp)
+  return cjson(resp)
 }
