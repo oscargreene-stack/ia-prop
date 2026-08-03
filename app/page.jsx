@@ -365,10 +365,10 @@ function ChatVendedor({ onBack }) {
   // Inicio
   useEffect(() => {
     const init = async () => {
-      await addAgent('¡Hola! ¿Cómo estás? Soy Valentina, tu agente inmobiliaria 👋\n\nEstoy aquí para ayudarte a vender tu propiedad al mejor precio posible.\n\n¿Qué tipo de propiedad quieres vender?', 800)
-      setInputMode('options')
-      setOptions(TIPOS)
-      setStage('tipo')
+      await addAgent('¡Hola! ¿Cómo estás? Soy Valentina, tu agente inmobiliaria 👋\n\nEstoy aquí para ayudarte a vender tu propiedad al mejor precio posible.\n\nPara partir, ingresa la **dirección** de tu propiedad (o su ROL SII) y buscaré automáticamente sus datos en el catastro:', 800)
+      setSearchTab('direccion')
+      setInputMode('search_form')
+      setStage('direccion')
     }
     init()
   }, [])
@@ -447,6 +447,49 @@ function ChatVendedor({ onBack }) {
     }
   }
 
+  // Tipo de propiedad inferido desde el catastro (dirección SII, copropiedad,
+  // superficies): evita preguntarlo cuando es evidente. null = no se pudo.
+  const inferirTipo = (sii) => {
+    const dir = ' ' + String(sii?.direccion || '').toUpperCase().replace(/\s+/g, ' ').trim() + ' '
+    if (/ (DP|DEPTO|DPTO|DEPT) /.test(dir) || / D \d/.test(dir)) return 'departamento'
+    if (/ (OF|OFIC|OFICINA) /.test(dir)) return 'oficina'
+    if (/ (LC|LOC|LOCAL) /.test(dir)) return 'comercial'
+    if (sii?.es_copropiedad) return 'departamento'
+    const m2c = parseFloat(sii?.m2_construido) || 0
+    const m2t = parseFloat(sii?.m2_terreno) || 0
+    if (m2c <= 5 && m2t > 0) return 'terreno'
+    if (m2c > 0) return 'casa'
+    return null
+  }
+
+  // Continuación común tras confirmar los datos SII (con el tipo ya conocido):
+  // pedir m² faltantes si corresponde y entrar al flujo de preguntas.
+  const continuarTrasSII = async (d) => {
+    cargarSugerencia(d._punto, d.siiData?.m2_construido, d.tipo)
+    const tipoActual = d.tipo
+    const terrenoSII = parseFloat(d.siiData?.m2_terreno) || 0
+    if (['casa', 'terreno', 'parcela'].includes(tipoActual)) {
+      // El terreno del SII ya se muestra y confirma en la ficha de arriba: no repreguntar.
+      if (terrenoSII > 0) {
+        const m2C = parseFloat(d.siiData?.m2_construido) || 0
+        if (!m2C && ['casa', 'departamento'].includes(tipoActual)) {
+          await addAgent('¿Cuántos **m² construidos** tiene la propiedad? (superficie total construida)', 400)
+          setInputMode('text'); setPlaceholder('Ej: 440')
+          setStage('ingresar_m2_construido')
+        } else {
+          await nextStep(d, 0)
+        }
+      } else {
+        await addAgent('¿Cuántos m² de terreno tiene la propiedad? (el SII no registra este dato para esta propiedad)', 500)
+        setInputMode('text')
+        setPlaceholder('Ej: 3982')
+        setStage('ingresar_terreno')
+      }
+    } else {
+      await nextStep(d, 0)
+    }
+  }
+
   // Handler opciones
   const handleOption = async (opt) => {
     if (opt.disabled) return
@@ -512,36 +555,39 @@ function ChatVendedor({ onBack }) {
 
     } else if (stage === 'confirmar_sii') {
       if (opt.id === 'si') {
-        await addAgent('Perfecto, datos confirmados ✓', 400)
-        // Para casas y terrenos, pedir confirmación de m² de terreno antes de continuar
-        const tipoActual = data.tipo
-        const terrenoSII = parseFloat(data.siiData?.m2_terreno) || 0
-        if (['casa', 'terreno', 'parcela'].includes(tipoActual)) {
-          // El terreno del SII ya se muestra y confirma en la ficha de arriba: no repreguntar.
-          if (terrenoSII > 0) {
-            const m2C = parseFloat(data.siiData?.m2_construido) || 0
-            if (!m2C && ['casa', 'departamento'].includes(tipoActual)) {
-              await addAgent('¿Cuántos **m² construidos** tiene la propiedad? (superficie total construida)', 400)
-              setInputMode('text'); setPlaceholder('Ej: 440')
-              setStage('ingresar_m2_construido')
-            } else {
-              await nextStep(data, 0)
-            }
+        let d = data
+        if (!d.tipo) {
+          // El tipo se infiere del catastro (dirección SII, copropiedad, superficies)
+          const t = inferirTipo(d.siiData)
+          if (t) {
+            d = { ...d, tipo: t }
+            setData(d)
+            const NOM = { casa: 'una casa', departamento: 'un departamento', oficina: 'una oficina', comercial: 'una propiedad comercial', terreno: 'un terreno' }
+            await addAgent(`Perfecto, datos confirmados ✓ — según el catastro, tu propiedad es **${(NOM[t] || t).replace(/^un[a]? /, '')}**.`, 400)
           } else {
-            await addAgent('¿Cuántos m² de terreno tiene la propiedad? (el SII no registra este dato para esta propiedad)', 500)
-            setInputMode('text')
-            setPlaceholder('Ej: 3982')
-            setStage('ingresar_terreno')
+            await addAgent('Perfecto, datos confirmados ✓\n\n¿Qué tipo de propiedad es?', 400)
+            setInputMode('options')
+            setOptions(TIPOS)
+            setStage('tipo_post_sii')
+            return
           }
         } else {
-          await nextStep(data, 0)
+          await addAgent('Perfecto, datos confirmados ✓', 400)
         }
+        await continuarTrasSII(d)
       } else {
-        await addAgent('Sin problema. Dame la dirección correcta:', 400)
-        setInputMode('text')
-        setPlaceholder('Escribe la dirección correcta…')
+        await addAgent('Sin problema. Ingresa la dirección correcta:', 400)
+        setSearchTab('direccion')
+        setInputVal(''); setDeptoVal('')
+        setInputMode('search_form')
         setStage('direccion')
       }
+
+    } else if (stage === 'tipo_post_sii') {
+      const newData = { ...data, tipo: opt.id }
+      setData(newData)
+      await addAgent('Perfecto ✓', 300)
+      await continuarTrasSII(newData)
 
     } else if (stage === 'precio_idea') {
       if (opt.id === 'tasar') {
@@ -1096,7 +1142,7 @@ function ChatVendedor({ onBack }) {
       if (!conDepto) conDepto = mU[1]
       busqueda = busqueda.slice(0, mU.index).trim()
     }
-    const label = data.tipo === 'oficina' ? 'Of.' : data.tipo === 'departamento' ? 'Depto' : ''
+    const label = data.tipo === 'oficina' ? 'Of.' : 'Depto'
     const resumen = conDepto ? `${busqueda} ${label} ${conDepto}, ${comunaForm}` : `${busqueda}, ${comunaForm}`
     addUser(resumen)
     setInputVal(''); setDeptoVal(''); setComunaForm(''); setInputMode(null)
@@ -1243,9 +1289,9 @@ function ChatVendedor({ onBack }) {
                       placeholder="Ej. Lo Fontecilla 267" autoFocus
                       onKeyDown={e => { if (e.key==='Enter') handleSearchForm() }} />
                   </div>
-                  {['departamento','oficina'].includes(data.tipo) && (
+                  {(!data.tipo || ['departamento','oficina'].includes(data.tipo)) && (
                     <div className="search-field unit">
-                      <div className="search-field-label">Nº {data.tipo==='oficina'?'Oficina':'Unidad'}</div>
+                      <div className="search-field-label">Nº {data.tipo==='oficina'?'Oficina':'Depto/Unidad'}</div>
                       <input value={deptoVal} onChange={e => setDeptoVal(e.target.value)}
                         placeholder="204 A (Opcional)"
                         onKeyDown={e => { if (e.key==='Enter') handleSearchForm() }} />
