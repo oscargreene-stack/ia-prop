@@ -365,6 +365,18 @@ function ChatVendedor({ onBack }) {
   // Inicio
   useEffect(() => {
     const init = async () => {
+      // Deep-link desde Publicar (vender.c2cprops.com): si la URL ya trae la
+      // dirección, tasamos de inmediato sin volver a preguntar nada.
+      let qp = null
+      try { qp = new URLSearchParams(window.location.search) } catch (e) {}
+      const dirQP = qp ? (qp.get('direccion') || '').trim() : ''
+      if (dirQP) {
+        const d = { direccion: dirQP, depto: (qp.get('depto') || '').trim(), comuna: (qp.get('comuna') || '').trim() }
+        await addAgent(`¡Hola! Soy Valentina 👋 Ya tengo los datos de tu propiedad:\n\n**${dirQP}${d.depto ? ' depto ' + d.depto : ''}${d.comuna ? ', ' + d.comuna : ''}**\n\nLa busco en el catastro y partimos con la tasación de inmediato.`, 700)
+        setData(d)
+        await fetchSII(d)
+        return
+      }
       await addAgent('¡Hola! ¿Cómo estás? Soy Valentina, tu agente inmobiliaria 👋\n\nEstoy aquí para ayudarte a vender tu propiedad al mejor precio posible.\n\nPara partir, ingresa la **dirección** de tu propiedad (o su ROL SII) y buscaré automáticamente sus datos en el catastro:', 800)
       setSearchTab('direccion')
       setInputMode('search_form')
