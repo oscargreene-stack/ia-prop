@@ -264,6 +264,7 @@ function ChatVendedor({ onBack }) {
   const histRef = useRef([])   // pila de snapshots para "volver atrás"
   const sugRef = useRef(null)  // {dorms, banos, n} sugeridos desde avisos cercanos
   const sugPromiseRef = useRef(null) // promesa de la consulta de avisos en curso
+  const pubRef = useRef(null)  // {precio, conPrecio} cuando se llega desde Publicar (vender.c2cprops.com)
 
   // ── Volver atrás: guarda un snapshot ANTES de procesar cada respuesta ──────
   const guardarPaso = () => {
@@ -628,12 +629,52 @@ function ChatVendedor({ onBack }) {
         setStage('ingresar_terreno')
       }
 
+    } else if (stage === 'resultado') {
+      if (opt.id === 'pub_precio' || opt.id === 'pub_otro') {
+        pubRef.current = { ...(pubRef.current || {}), conPrecio: opt.id === 'pub_precio' }
+        await addAgent(opt.id === 'pub_precio' ? '¡Excelente! Última pregunta y quedamos: ¿cómo prefieres que te contacten los interesados?' : 'Perfecto, el precio lo pones tú al publicar. Última pregunta: ¿cómo prefieres que te contacten los interesados?', 600)
+        setInputMode('options')
+        setOptions([
+          { id:'cm_whatsapp', label:'Por WhatsApp', icon:'💬' },
+          { id:'cm_telefono', label:'Por teléfono', icon:'📞' },
+          { id:'cm_email', label:'Por mail', icon:'✉️' },
+          { id:'cm_ejecutivo', label:'Que me asignen un ejecutivo C2C', icon:'🤝' },
+        ])
+        setStage('contacto_publicar')
+      } else {
+        await addAgent('Aquí abajo tienes el detalle completo: el informe, las ventas reales que respaldan el valor, las ofertas vigentes del sector y el informe en PDF. 👇', 500)
+        setInputMode('options')
+        setOptions(opcionesPublicar())
+      }
+
+    } else if (stage === 'contacto_publicar') {
+      const metodo = opt.id.replace('cm_', '')
+      const p = pubRef.current || {}
+      await addAgent('¡Listo! Te llevo de vuelta para que confirmes y tu propiedad quede publicada 🚀', 600)
+      const params = new URLSearchParams()
+      if (p.conPrecio && p.precio > 0) params.set('precio_uf', String(p.precio))
+      else params.set('volver', '1')
+      params.set('contacto', metodo)
+      setTimeout(() => { window.location.href = 'https://vender.c2cprops.com/?' + params.toString() }, 1100)
+
     } else if (stage.startsWith('flujo_')) {
       const campo = stage.replace('flujo_', '')
       const newData = { ...data, [campo]: opt.id }
       setData(newData)
       await nextStep(newData, flujoIdx)
     }
+  }
+
+  // Opciones del cierre cuando la tasación nació desde Publicar
+  const opcionesPublicar = () => {
+    const p = pubRef.current
+    const opts = []
+    if (p && p.precio > 0) {
+      opts.push({ id:'pub_precio', label:`Publicar con este precio (${p.precio.toLocaleString('es-CL')} UF)`, icon:'✅' })
+      opts.push({ id:'pub_otro', label:'Publicar con otro precio', icon:'💰' })
+    }
+    opts.push({ id:'detalle', label:'Quiero más detalle', icon:'🔍' })
+    return opts
   }
 
   // Handler multiselect
@@ -873,8 +914,18 @@ function ChatVendedor({ onBack }) {
       for (const msg of mensajes) {
         await addAgent(msg, 900)
       }
-      setInputMode('options')
-      setOptions([{id:'detalle',label:'Quiero más detalle',icon:'🔍'}])
+      // Si vino desde Publicar (vender.c2cprops.com): el cierre va AL FINAL del chat,
+      // como opciones guiadas — aceptar el precio, poner uno propio, o ver más detalle.
+      const origenPublicar = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('origen') === 'publicar'
+      if (origenPublicar && valorFinal > 0) {
+        pubRef.current = { precio: Math.round(valorFinal) }
+        await addAgent('¿Quieres publicar tu propiedad con este precio, o prefieres poner uno propio?', 700)
+        setInputMode('options')
+        setOptions(opcionesPublicar())
+      } else {
+        setInputMode('options')
+        setOptions([{id:'detalle',label:'Quiero más detalle',icon:'🔍'}])
+      }
       setStage('resultado')
     } catch(e) {
       setMessages(m => m.filter(x => !(x.role==='agent' && x.content?.type==='loading')))
@@ -1123,15 +1174,6 @@ function ChatVendedor({ onBack }) {
 
           {/* Puntos de interés cercanos */}
           {resultado.punto && <PuntosInteres punto={resultado.punto} />}
-
-          {/* Si vino desde Publicar (vender.c2cprops.com): cerrar el círculo — volver
-              con el precio tasado ya cargado para dejar la propiedad publicada */}
-          {typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('origen') === 'publicar' && content.valorFinal > 0 && (
-            <button
-              onClick={() => { window.location.href = 'https://vender.c2cprops.com/?precio_uf=' + Math.round(content.valorFinal) }}
-              style={{ marginTop: 14, width: '100%', padding: '13px 14px', borderRadius: 10, border: 'none', background: '#1e8e3e', color: '#fff', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}
-            >✓ Publicar mi propiedad con este precio ({Math.round(content.valorFinal).toLocaleString('es-CL')} UF)</button>
-          )}
 
           {/* Informe PDF */}
           <button
