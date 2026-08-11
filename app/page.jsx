@@ -1124,6 +1124,15 @@ function ChatVendedor({ onBack }) {
           {/* Puntos de interés cercanos */}
           {resultado.punto && <PuntosInteres punto={resultado.punto} />}
 
+          {/* Si vino desde Publicar (vender.c2cprops.com): cerrar el círculo — volver
+              con el precio tasado ya cargado para dejar la propiedad publicada */}
+          {typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('origen') === 'publicar' && content.valorFinal > 0 && (
+            <button
+              onClick={() => { window.location.href = 'https://vender.c2cprops.com/?precio_uf=' + Math.round(content.valorFinal) }}
+              style={{ marginTop: 14, width: '100%', padding: '13px 14px', borderRadius: 10, border: 'none', background: '#1e8e3e', color: '#fff', fontSize: 15, fontWeight: 700, cursor: 'pointer' }}
+            >✓ Publicar mi propiedad con este precio ({Math.round(content.valorFinal).toLocaleString('es-CL')} UF)</button>
+          )}
+
           {/* Informe PDF */}
           <button
             onClick={() => {
