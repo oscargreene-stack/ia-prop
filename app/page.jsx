@@ -373,6 +373,10 @@ function ChatVendedor({ onBack }) {
       const dirQP = qp ? (qp.get('direccion') || '').trim() : ''
       if (dirQP) {
         const d = { direccion: dirQP, depto: (qp.get('depto') || '').trim(), comuna: (qp.get('comuna') || '').trim() }
+        // Si el publicador ya preguntó dormitorios/baños, NO volver a preguntarlos
+        const dorQP = parseInt(qp.get('dorms')), banQP = parseInt(qp.get('banos'))
+        if (dorQP > 0) d.dormitorios = dorQP >= 5 ? '5+' : String(dorQP)
+        if (banQP > 0) d.banos = banQP >= 5 ? '5+' : String(banQP)
         await addAgent(`¡Hola! Soy Valentina 👋 Ya tengo los datos de tu propiedad:\n\n**${dirQP}${d.depto ? ' depto ' + d.depto : ''}${d.comuna ? ', ' + d.comuna : ''}**\n\nLa busco en el catastro y partimos con la tasación de inmediato.`, 700)
         setData(d)
         await fetchSII(d)
@@ -406,6 +410,9 @@ function ChatVendedor({ onBack }) {
       // automático la pregunta es pura fricción). Se espera brevemente a que
       // termine la consulta de avisos antes de decidir saltar.
       if (paso.id === 'dormitorios' || paso.id === 'banos') {
+        // Ya respondido (p.ej. viene del publicador de vender.c2cprops.com) → no repetir
+        const yaLoTiene = paso.id === 'dormitorios' ? currentData.dormitorios : currentData.banos
+        if (yaLoTiene) { nextIdx++; continue }
         if (!sugRef.current && sugPromiseRef.current) {
           await Promise.race([sugPromiseRef.current, new Promise(r => setTimeout(r, 2500))])
         }
