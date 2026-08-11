@@ -63,21 +63,40 @@ export async function POST(request) {
     const property_type = PROP_TYPE[String(tipo || '').toLowerCase()] || ['casa', 'departamento']
     const tx = transaction_type === 'arriendo' ? 'arriendo' : 'venta'
 
+    // La fuente 'oferta' del API v1 devuelve 404 desde fines de julio con los
+    // parámetros históricos. La web de DataInmobiliaria consulta con el MISMO
+    // fuente:'oferta' pero SIN active_publications (y con is_viewport). Probamos
+    // variantes en orden hasta que una responda, y registramos cuál funcionó.
+    const VARIANTES = [
+      { nombre: 'historica', extra: { property_type, transaction_type: tx, active_publications: 'true' } },
+      { nombre: 'como_web_di', extra: { property_type, transaction_type: tx, is_viewport: true } },
+      { nombre: 'sin_extras', extra: { property_type, transaction_type: tx } },
+      { nombre: 'minima', extra: {} },
+    ]
     let raw = []
     let paginas = 0
-    for (let page = 1; page <= 3; page++) {
-      const r = await fetch(`${API_BASE}/busqueda_poligono`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + DATAINM_TOKEN },
-        body: JSON.stringify({ fuente: 'oferta', polygon: poly, page, property_type, transaction_type: tx, active_publications: 'true' }),
-      })
-      paginas++
-      if (!r.ok) { if (dbg) dbg.http = r.status; break }
-      const j = await r.json()
-      const arr = Array.isArray(j.resultados) ? j.resultados : []
-      raw = raw.concat(arr)
-      if (!j.has_more || raw.length >= 200) break
+    let varianteOk = null
+    for (const v of VARIANTES) {
+      let ok = false
+      raw = []
+      for (let page = 1; page <= 3; page++) {
+        const r = await fetch(`${API_BASE}/busqueda_poligono`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + DATAINM_TOKEN },
+          body: JSON.stringify({ fuente: 'oferta', polygon: poly, page, ...v.extra }),
+        })
+        paginas++
+        if (!r.ok) { if (dbg) dbg[`http_${v.nombre}`] = r.status; break }
+        ok = true
+        const j = await r.json()
+        const arr = Array.isArray(j.resultados) ? j.resultados : []
+        raw = raw.concat(arr)
+        if (!j.has_more || raw.length >= 200) break
+      }
+      if (ok) { varianteOk = v.nombre; break }
     }
+    if (dbg) dbg.variante_ok = varianteOk
+    if (varianteOk && varianteOk !== 'historica') console.log(`[ofertas] La fuente oferta respondió con la variante '${varianteOk}' — actualizar los parámetros por defecto`)
 
     const ofertas = raw
       .map((v) => {
