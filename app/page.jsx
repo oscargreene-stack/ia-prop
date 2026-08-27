@@ -467,19 +467,28 @@ function ChatVendedor({ onBack }) {
     }
   }
 
-  // Tipo de propiedad inferido desde el catastro (dirección SII, copropiedad,
-  // superficies): evita preguntarlo cuando es evidente. null = no se pudo.
+  // Tipo de propiedad inferido desde el catastro: solo cuando la dirección SII
+  // trae un marcador explícito de unidad (DP/OF/LC). Ni la copropiedad ni las
+  // superficies alcanzan para decidir (una casa en condominio también figura
+  // como copropiedad), así que en esos casos devolvemos null y se pregunta.
   const inferirTipo = (sii) => {
     const dir = ' ' + String(sii?.direccion || '').toUpperCase().replace(/\s+/g, ' ').trim() + ' '
     if (/ (DP|DEPTO|DPTO|DEPT) /.test(dir) || / D \d/.test(dir)) return 'departamento'
     if (/ (OF|OFIC|OFICINA) /.test(dir)) return 'oficina'
     if (/ (LC|LOC|LOCAL) /.test(dir)) return 'comercial'
-    if (sii?.es_copropiedad) return 'departamento'
+    return null
+  }
+
+  // Pista para acompañar la pregunta del tipo: no decide por el usuario, solo
+  // le muestra lo que dice el catastro para que elija informado.
+  const pistaTipo = (sii) => {
     const m2c = parseFloat(sii?.m2_construido) || 0
     const m2t = parseFloat(sii?.m2_terreno) || 0
-    if (m2c <= 5 && m2t > 0) return 'terreno'
-    if (m2c > 0) return 'casa'
-    return null
+    if (m2c <= 0 && m2t <= 0) return ''
+    const partes = []
+    if (m2c > 0) partes.push(`**${m2c.toLocaleString('es-CL')} m² construidos**`)
+    if (m2t > 0) partes.push(`**${m2t.toLocaleString('es-CL')} m² de terreno**`)
+    return `\n\nSegún el catastro: ${partes.join(' y ')}.`
   }
 
   // Continuación común tras confirmar los datos SII (con el tipo ya conocido):
@@ -577,7 +586,7 @@ function ChatVendedor({ onBack }) {
       if (opt.id === 'si') {
         let d = data
         if (!d.tipo) {
-          // El tipo se infiere del catastro (dirección SII, copropiedad, superficies)
+          // Solo se infiere si la dirección SII trae marcador de unidad; si no, se pregunta.
           const t = inferirTipo(d.siiData)
           if (t) {
             d = { ...d, tipo: t }
@@ -585,7 +594,7 @@ function ChatVendedor({ onBack }) {
             const NOM = { casa: 'una casa', departamento: 'un departamento', oficina: 'una oficina', comercial: 'una propiedad comercial', terreno: 'un terreno' }
             await addAgent(`Perfecto, datos confirmados ✓ — según el catastro, tu propiedad es **${(NOM[t] || t).replace(/^un[a]? /, '')}**.`, 400)
           } else {
-            await addAgent('Perfecto, datos confirmados ✓\n\n¿Qué tipo de propiedad es?', 400)
+            await addAgent(`Perfecto, datos confirmados ✓\n\n¿Qué tipo de propiedad es?${pistaTipo(d.siiData)}`, 400)
             setInputMode('options')
             setOptions(TIPOS)
             setStage('tipo_post_sii')
