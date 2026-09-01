@@ -399,8 +399,18 @@ export const CONJUNTO = {
   //   casa  8  10.850 UF (2013-01) -> 12.000 UF (2014-10) = 6,1% anual
   // 5% es el techo: acota el índice sectorial sin negar la plusvalía real.
   apreciacionMaxAnual: 0.05,
-  mesesRecientes: 24,   // "reciente" para el percentil de estado y para el carry
-  minRecientes: 3,      // con 3 ventas recientes las antiguas no entran al percentil
+  mesesRecientes: 24,   // "reciente": cohortes de calibración y carry del techo
+  // Ventana de la MUESTRA con que se lee el percentil de estado. 8 años, la
+  // misma ventana de gemelas: un conjunto chico rota lento (27 casas venden ~1
+  // al año) y con 24 meses quedaban 3 ventas — de las que no se puede leer un
+  // percentil (el p32 cae entre la 1ª y la 2ª) y dejan la confianza en "Baja".
+  // Con 8 años la muestra es de 9 ventas y la confianza sube a "Alta".
+  // OJO: ampliar la ventana NO baja la tasación. Con la plusvalía calibrada del
+  // conjunto (3% anual) las ventas viejas se ajustan POR ENCIMA de las
+  // recientes — la de 2018 (85,4 UF/m²) llega a 107,7 — así que suman masa en
+  // el extremo alto. Quien controla el nivel es el ajuste por fecha, no la
+  // ventana. Bajar esto a 24 recupera el comportamiento anterior.
+  mesesPercentil: 96,
   anosMinCalibrar: 1.5, // separación mínima entre cohortes para leer una tasa
   minPorCohorte: 2,     // ventas mínimas a cada lado para calibrar con el conjunto
 }
@@ -637,20 +647,21 @@ export function rangoUnidadesIdenticas({ ventas, m2Objetivo, meses = CONJUNTO.me
 
 // Valor por comparación directa con las gemelas. null si no alcanzan.
 //
-// El percentil de ESTADO se lee sobre las ventas RECIENTES (últimos 24 meses):
-// son las que describen el mercado de hoy y el abanico de estados que se está
-// pagando hoy. Las antiguas ya cumplieron su papel calibrando la apreciación
-// del conjunto; volver a meterlas en el percentil las cuenta dos veces, y
-// además obliga a confiar en su valor ajustado. Solo entran a dar densidad
-// cuando hay menos de CONJUNTO.minRecientes ventas recientes.
+// El percentil de ESTADO se lee sobre la muestra de CONJUNTO.mesesPercentil
+// (8 años): en un conjunto chico las ventas de 24 meses se cuentan con los
+// dedos de una mano y de tres puntos no sale un percentil. Las ventas ya vienen
+// llevadas a hoy con la apreciación del propio conjunto, así que las antiguas
+// entran en moneda de hoy, no a su precio de entonces.
 export function valorComparativoDirecto({ ventas, m2Objetivo, serieIndice, hoy, meses, pctl = PCTL_BASE }) {
   if (!(m2Objetivo > 0)) return null
   const { ajustadas, descartadas, tasa_conjunto } = gemelasAjustadas({ ventas, m2Objetivo, serieIndice, hoy, meses })
   if (ajustadas.length < CONJUNTO.minVentas) return null
-  const corte = corteMeses(hoy, CONJUNTO.mesesRecientes)
-  const recientes = ajustadas.filter((g) => g.fecha >= corte)
-  const usaRecientes = recientes.length >= CONJUNTO.minRecientes
-  const pool = usaRecientes ? recientes : ajustadas
+  const mesesPctl = CONJUNTO.mesesPercentil
+  const corte = corteMeses(hoy, mesesPctl)
+  const enVentana = ajustadas.filter((g) => g.fecha >= corte)
+  // Si la ventana del percentil recorta la muestra por debajo del mínimo, se
+  // usan todas las gemelas: quedarse sin comparables es peor que estirar años.
+  const pool = enVentana.length >= CONJUNTO.minVentas ? enVentana : ajustadas
   const lista = pool.map((g) => g.uf_m2_ajustado)
   // Se redondea ANTES de multiplicar: el informe muestra "percentil 32 =
   // <uf_m2> UF/m² x <m²>" y ese producto tiene que dar el valor que se publica.
@@ -665,8 +676,8 @@ export function valorComparativoDirecto({ ventas, m2Objetivo, serieIndice, hoy, 
     percentil_usado: pctl,
     n: pool.length,
     n_total: ajustadas.length,
-    ventana_percentil_meses: usaRecientes ? CONJUNTO.mesesRecientes : (meses || CONJUNTO.mesesMax),
-    solo_recientes: usaRecientes,
+    ventana_percentil_meses: pool.length === ajustadas.length ? (meses || CONJUNTO.mesesMax) : mesesPctl,
+    muestra_recortada: pool.length !== ajustadas.length,
     tasa_conjunto: tasa_conjunto || null,
     n_descartadas: descartadas.length,
     ventas: pool,

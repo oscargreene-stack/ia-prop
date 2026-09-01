@@ -6,7 +6,7 @@
 import {
   valorComparativoDirecto, rangoUnidadesIdenticas, terrenoEsProrrateoBC,
   ventasGemelas, sinOutliersConjunto, factorFecha, percentilInterp,
-  valorAditivoCasa, tasaApreciacionConjunto, acotaFactor, anosEntre,
+  valorAditivoCasa, tasaApreciacionConjunto, acotaFactor, anosEntre, confianzaPorN,
   CONJUNTO, PCTL_BASE,
 } from '../app/lib/tasacion-core.js'
 
@@ -92,11 +92,11 @@ console.log('\n4) JERARQUIA DE METODOS — casa 21 de V. del Monasterio 2577')
   ok('sin remodelar queda bajo el maximo nominal de 18.400 UF por si solo',
     r.final < 18400, { final: r.final })
   // Encaje del ladder de estado dentro de las ventas reales del conjunto.
-  ok('sin remodelar cae en 16.000-17.500 UF', entre(r.final, 16000, 17500), { final: r.final })
+  ok('sin remodelar cae en 17.000-18.000 UF', entre(r.final, 17000, 18000), { final: r.final })
 }
 {
   const r = tasa({ remodelacion: 'media' })
-  ok('remodelacion media cae en 17.500-19.000 UF', entre(r.final, 17500, 19000), { final: r.final })
+  ok('remodelacion media cae en 18.000-19.000 UF', entre(r.final, 18000, 19000), { final: r.final })
 }
 {
   // Monotonía: más remodelación nunca puede valer menos.
@@ -240,23 +240,32 @@ console.log('\n8) REGLA DE COHERENCIA (TECHO NOMINAL)')
   ok('y el valor entonces no queda topado', !r.clamp && r.final === r.total, { final: r.final, total: r.total })
 }
 
-console.log('\n8c) PERCENTIL DE ESTADO SOBRE VENTAS RECIENTES')
+console.log('\n8c) MUESTRA DEL PERCENTIL DE ESTADO — 8 ANOS')
 {
   const c = valorComparativoDirecto({ ventas: VENTAS, m2Objetivo: M2, serieIndice: INDICE, hoy: HOY })
-  ok('el percentil se lee sobre los ultimos ' + CONJUNTO.mesesRecientes + ' meses',
-    c.solo_recientes && c.ventana_percentil_meses === CONJUNTO.mesesRecientes,
-    { n: c.n, ventana: c.ventana_percentil_meses })
-  ok('usa las 3 ventas recientes, no las ' + c.n_total + ' de la ventana larga',
-    c.n === 3 && c.n_total > c.n, { n: c.n, n_total: c.n_total })
-  ok('todas las del percentil son de los ultimos 24 meses',
-    c.ventas.every((g) => g.fecha >= '2024-09-01'), { fechas: c.ventas.map((g) => g.fecha) })
+  ok('la muestra del percentil es de ' + (CONJUNTO.mesesPercentil / 12) + ' anos',
+    CONJUNTO.mesesPercentil === 96 && c.ventana_percentil_meses === 96,
+    { ventana: c.ventana_percentil_meses })
+  ok('usa las 9 gemelas de la ventana, no solo las 3 recientes',
+    c.n === 9 && c.n === c.n_total && !c.muestra_recortada, { n: c.n, n_total: c.n_total })
+  ok('con 9 comparables la confianza es Alta, no Baja', confianzaPorN(c.n) === 'Alta', { n: c.n })
+  ok('entran ventas de mas de 24 meses atras',
+    c.ventas.some((g) => g.fecha < '2024-09-01'), { n: c.n })
+  // Ampliar la ventana NO baja la tasacion: con la plusvalia calibrada del
+  // conjunto las ventas viejas se ajustan POR ENCIMA de las recientes. Por eso
+  // quien controla el nivel es el ajuste por fecha, no la ventana.
+  const vieja = c.ventas.find((g) => g.fecha === '2018-09-11')
+  const reciente = c.ventas.find((g) => g.fecha === '2025-01-23')
+  ok('la venta de 2018 ajustada supera a la de 2025 (por eso la muestra larga sube el valor)',
+    vieja.uf_m2 < reciente.uf_m2 && vieja.uf_m2_ajustado > reciente.uf_m2_ajustado,
+    { v2018: [vieja.uf_m2, Math.round(vieja.uf_m2_ajustado * 10) / 10],
+      v2025: [reciente.uf_m2, Math.round(reciente.uf_m2_ajustado * 10) / 10] })
 }
 {
-  // Con menos de 3 recientes, las antiguas vuelven a sumar densidad.
-  const pocas = [VENTAS[0], ...VENTAS.slice(3)] // 1 reciente + antiguas
+  // La ventana del percentil nunca puede dejar la muestra bajo el minimo.
+  const pocas = [VENTAS[0], ...VENTAS.slice(3)]
   const c = valorComparativoDirecto({ ventas: pocas, m2Objetivo: M2, serieIndice: INDICE, hoy: HOY })
-  ok('con menos de ' + CONJUNTO.minRecientes + ' recientes entran las antiguas',
-    !c.solo_recientes && c.n === c.n_total, { n: c.n, n_total: c.n_total })
+  ok('con muestra corta se usan todas las gemelas', c.n === c.n_total, { n: c.n, n_total: c.n_total })
 }
 
 console.log('\n8b) DEDUPLICACION DEL POOL')

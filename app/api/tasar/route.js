@@ -765,9 +765,8 @@ export async function POST(request) {
     const desglose = [{
       concepto: 'Valor por comparación directa con unidades gemelas',
       calculo: `${comparativo.n} ventas del mismo conjunto`
-        + (comparativo.solo_recientes
-            ? ` de los últimos ${comparativo.ventana_percentil_meses} meses (de ${comparativo.n_total} gemelas encontradas)`
-            : '')
+        + ` de los últimos ${Math.round(comparativo.ventana_percentil_meses / 12)} años`
+        + (comparativo.muestra_recortada ? ` (de ${comparativo.n_total} gemelas encontradas)` : '')
         + ` entre ${comparativo.uf_m2_min} y ${comparativo.uf_m2_max} UF/m²`
         + fuenteAjuste
         + `; en estado base es el percentil ${comparativo.percentil_usado} = ${comparativo.uf_m2} UF/m² x ${m2Construido} m²`,
