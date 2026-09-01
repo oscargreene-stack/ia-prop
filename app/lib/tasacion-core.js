@@ -109,6 +109,19 @@ export function percentil(arr, p) {
   return s[idx]
 }
 
+// Percentil INTERPOLADO. `percentil` usa rango cercano, que con muestras chicas
+// salta escalones enteros (con 6 ventas, el p32 cae en el 3er valor = p40 real).
+// Para elegir dónde se ubica una unidad dentro del rango de sus gemelas hay que
+// interpolar, si no el estado declarado deja de mover el valor de forma pareja.
+export function percentilInterp(arr, p) {
+  if (!arr.length) return null
+  const s = [...arr].sort((a, b) => a - b)
+  if (s.length === 1) return s[0]
+  const pos = Math.min(s.length - 1, Math.max(0, (p / 100) * (s.length - 1)))
+  const lo = Math.floor(pos), hi = Math.ceil(pos)
+  return lo === hi ? s[lo] : s[lo] + (pos - lo) * (s[hi] - s[lo])
+}
+
 export const r1 = (x) => (x == null ? null : Math.round(x * 10) / 10) // 1 decimal
 
 // ── Clasificación de una venta del CBR por su TIPO REAL ─────────────────────
@@ -345,4 +358,167 @@ export function sinOutliers(items, valorDe, { min = 0.6, max = 1.75, minimo = 5 
 // Confianza según número de referencias (mismos umbrales para ambos agentes).
 export function confianzaPorN(n) {
   return n >= 8 ? 'Alta' : n >= 4 ? 'Media' : 'Baja'
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MÉTODO COMPARATIVO DIRECTO — unidades GEMELAS del mismo conjunto
+// ═══════════════════════════════════════════════════════════════════════════
+// Cuando la propiedad es una unidad de un conjunto de unidades idénticas (las
+// 27 casas iguales de un condominio, las plantas repetidas de un edificio), el
+// mercado ya la tasó: hay ventas reales de la misma tipología, en el mismo
+// lugar, con los mismos bienes comunes. Esas ventas MANDAN sobre cualquier
+// modelo. El aditivo (suelo × m² terreno + costo × m² construidos) queda solo
+// como respaldo, para cuando no hay gemelas suficientes.
+//
+// Caso que lo motivó: AV V DEL MONASTERIO 2577 casa 21 (ROL 15161-3669-481).
+// El aditivo daba 11.404 UF prorrateando 368 m² de terreno común a 14,5 UF/m²,
+// mientras 8 ventas CBR de casas gemelas del mismo condominio iban de 14.350 a
+// 18.400 UF. Ninguna venta real bajó de 14.350.
+
+export const CONJUNTO = {
+  // Ventana de comparables directos. 8 años y no 5-6 porque un conjunto chico
+  // rota lento: 27 casas venden ~1 al año, y con 6 años quedan 6 gemelas — muy
+  // poco para leer un percentil. El ajuste por fecha es el que hace utilizable
+  // una venta vieja; sin él habría que acortar la ventana.
+  mesesMax: 96,
+  tolM2: 0.10,          // misma tipología: ±10% de m² construidos
+  minVentas: 3,         // desde 3 gemelas manda el comparativo directo
+  outlierMin: 0.60,     // fuera: bajo el 60% de la mediana del conjunto
+  outlierMax: 1.40,     // fuera: sobre el 140% (relacionados, herencias, mal cargadas)
+  mesesCoherencia: 24,  // rango infranqueable: unidades idénticas de 24 meses
+  minCoherencia: 2,     // con UNA venta el rango es un punto: clavaría el valor
+  factorMin: 0.7,       // topes del ajuste por fecha: un índice ruidoso no puede
+  factorMax: 1.6,       // mover la tasación al doble
+}
+
+// Percentil del rango de gemelas que representa la unidad EN ESTADO BASE, sin
+// remodelar. Las gemelas se vendieron en estados distintos: la mediana del
+// rango incluye a las remodeladas, así que tomarla como base y encima sumar el
+// premio de remodelación contaría lo mismo dos veces. El estado declarado se
+// paga UNA sola vez, con la tarifa de AJUSTES_CONFIG.remodelacion (5/10/20
+// UF/m² para baja/media/alta), que es editable desde /admin.
+export const PCTL_BASE = 32
+
+const mesDe = (f) => String(f || '').slice(0, 7)
+
+// Factor para llevar un UF/m² desde su fecha hasta hoy con el índice del sector
+// (la serie de medianas trimestrales que ya calculamos). Sin serie utilizable
+// devuelve 1: mejor no ajustar que ajustar con ruido.
+export function factorFecha(fecha, serie, mesHoy) {
+  const pts = (serie || [])
+    .filter((p) => p && p.uf_m2 > 0 && p.trimestre)
+    .sort((a, b) => (a.trimestre < b.trimestre ? -1 : 1))
+  if (pts.length < 2) return 1
+  const hoy = mesHoy || pts[pts.length - 1].trimestre
+  // Nivel de hoy: el último punto de la serie (ya viene suavizado a 3 meses).
+  const nivelHoy = pts[pts.length - 1].uf_m2
+  const m = mesDe(fecha)
+  if (!m || m > hoy) return 1
+  // Último punto en o antes de la venta; si la venta es anterior a la serie se
+  // usa el punto más antiguo (subajusta, nunca inventa plusvalía).
+  let nivelEntonces = null
+  for (const p of pts) { if (p.trimestre <= m) nivelEntonces = p.uf_m2 }
+  if (nivelEntonces == null) nivelEntonces = pts[0].uf_m2
+  if (!(nivelEntonces > 0) || !(nivelHoy > 0)) return 1
+  return Math.min(CONJUNTO.factorMax, Math.max(CONJUNTO.factorMin, nivelHoy / nivelEntonces))
+}
+
+// Ventas de unidades GEMELAS: misma tipología (±10% de m² construidos) dentro
+// de la ventana y con UF/m² sano. Acepta filas del detalle ({fecha, m2, uf}) y
+// del CBR crudo ({date_inscripcion, superficie_construccion, price}).
+// Deduplica por (rol, fecha, precio): el pool se arma juntando dos listas del
+// detalle y una misma inscripción podría venir en las dos.
+export function ventasGemelas({ ventas, m2Objetivo, meses = CONJUNTO.mesesMax, hoy = null }) {
+  if (!(m2Objetivo > 0)) return []
+  const vistas = new Set()
+  const corte = new Date(hoy ? hoy + 'T00:00:00Z' : Date.now())
+  corte.setUTCMonth(corte.getUTCMonth() - meses)
+  const corteStr = corte.toISOString().slice(0, 10)
+  return (ventas || [])
+    .map((v) => {
+      const m2 = parseFloat(v.m2 ?? v.superficie_construccion)
+      const uf = parseFloat(v.uf ?? v.precio_uf ?? v.price)
+      const fecha = String(v.fecha || v.date_inscripcion || '').slice(0, 10)
+      if (!(m2 > 0) || !(uf > 0) || !fecha || fecha < corteStr) return null
+      if (Math.abs(m2 - m2Objetivo) / m2Objetivo > CONJUNTO.tolM2) return null
+      const ufM2 = uf / m2
+      if (ufM2 < UFM2_MIN || ufM2 > UFM2_MAX) return null
+      const clave = [v.rol ?? '', fecha, uf].join('|')
+      if (vistas.has(clave)) return null
+      vistas.add(clave)
+      return { ...v, m2, uf, fecha, uf_m2: ufM2 }
+    })
+    .filter(Boolean)
+}
+
+// Descarta las que no son de mercado: bajo el 60% o sobre el 140% de la mediana
+// del propio conjunto. Devuelve las descartadas para poder explicarlas.
+export function sinOutliersConjunto(gemelas) {
+  const vals = (gemelas || []).map((g) => g.uf_m2).filter((x) => x > 0)
+  if (vals.length < 3) return { limpias: gemelas || [], descartadas: [] }
+  const med = mediana(vals)
+  if (!(med > 0)) return { limpias: gemelas || [], descartadas: [] }
+  const lo = med * CONJUNTO.outlierMin, hi = med * CONJUNTO.outlierMax
+  const limpias = [], descartadas = []
+  for (const g of gemelas) (g.uf_m2 >= lo && g.uf_m2 <= hi ? limpias : descartadas).push(g)
+  return limpias.length >= CONJUNTO.minVentas ? { limpias, descartadas } : { limpias: gemelas, descartadas: [] }
+}
+
+// Gemelas con su UF/m² llevado a hoy por el índice del sector.
+export function gemelasAjustadas({ ventas, m2Objetivo, serieIndice, meses, hoy }) {
+  const { limpias, descartadas } = sinOutliersConjunto(ventasGemelas({ ventas, m2Objetivo, meses, hoy }))
+  const mesHoy = hoy ? mesDe(hoy) : null
+  return {
+    ajustadas: limpias.map((g) => {
+      const f = factorFecha(g.fecha, serieIndice, mesHoy)
+      return { ...g, factor_fecha: Math.round(f * 1000) / 1000, uf_m2_ajustado: g.uf_m2 * f }
+    }),
+    descartadas,
+  }
+}
+
+// Rango [min, max] en UF de unidades IDÉNTICAS de los últimos `meses`, ajustadas
+// por fecha. Es la regla de coherencia: el valor final no puede quedar fuera.
+export function rangoUnidadesIdenticas({ ventas, m2Objetivo, serieIndice, meses = CONJUNTO.mesesCoherencia, hoy }) {
+  const { ajustadas } = gemelasAjustadas({ ventas, m2Objetivo, serieIndice, meses, hoy })
+  const ufs = ajustadas.map((g) => g.uf_m2_ajustado * m2Objetivo).filter((x) => x > 0)
+  // Con una sola venta min === max: en vez de acotar, clavaría la tasación en
+  // ese precio y borraría remodelación y características. Mejor no acotar.
+  if (ufs.length < CONJUNTO.minCoherencia) return null
+  return { min_uf: Math.round(Math.min(...ufs)), max_uf: Math.round(Math.max(...ufs)), n: ufs.length, meses }
+}
+
+// Valor por comparación directa con las gemelas. null si no alcanzan.
+export function valorComparativoDirecto({ ventas, m2Objetivo, serieIndice, hoy, meses, pctl = PCTL_BASE }) {
+  if (!(m2Objetivo > 0)) return null
+  const { ajustadas, descartadas } = gemelasAjustadas({ ventas, m2Objetivo, serieIndice, hoy, meses })
+  if (ajustadas.length < CONJUNTO.minVentas) return null
+  const lista = ajustadas.map((g) => g.uf_m2_ajustado)
+  const ufM2 = percentilInterp(lista, pctl)
+  if (!(ufM2 > 0)) return null
+  return {
+    uf_m2: r1(ufM2),
+    uf_m2_mediana: r1(mediana(lista)),
+    uf_m2_min: r1(Math.min(...lista)),
+    uf_m2_max: r1(Math.max(...lista)),
+    valor_uf: Math.round(ufM2 * m2Objetivo),
+    percentil_usado: pctl,
+    n: ajustadas.length,
+    n_descartadas: descartadas.length,
+    ventas: ajustadas,
+    hubo_ajuste_fecha: ajustadas.some((g) => g.factor_fecha !== 1),
+  }
+}
+
+// ── ¿El terreno del rol es prorrateo del bien común? ────────────────────────
+// En un condominio acogido a copropiedad el rol de la unidad trae
+// superficie_total_terreno = 0, y el terreno que conoce el dueño es su
+// prorrateo del bien común. Ese suelo NO es vendible por separado y su valor ya
+// está dentro del precio de las unidades gemelas: pasarlo por el modelo aditivo
+// lo cuenta a precio de sitio eriazo y hunde la tasación.
+export function terrenoEsProrrateoBC(siiData) {
+  const origen = String(siiData?.terreno_origen || '').toLowerCase()
+  if (origen === 'bien_comun') return true
+  if (origen === 'sii') return false
+  return !!(siiData?.es_copropiedad ?? siiData?.copropiedad)
 }

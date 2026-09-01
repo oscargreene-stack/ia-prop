@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test": "node test/predio.test.mjs && node test/tasacion.test.mjs",
+    "caso:monasterio": "node test/monasterio-21.mjs"
   },
   "dependencies": {
     "next": "14.2.5",

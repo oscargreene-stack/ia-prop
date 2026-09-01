@@ -15,25 +15,11 @@ import {
   clasificaTipo, TIPO_OBJETIVO, cutoffVentasStr, esVentaReciente, enBandaM2,
   UFM2_MIN, UFM2_MAX, puntosSuelo, resumenSuelo, sueloPorTramo, sueloDeTramo,
   valorAditivoCasa, confianzaPorN, buscarVentasPoligono, COSTO_CONSTR_RESIDUAL, BANDA_M2, terrenoDe, sinOutliers, DOTACION_TIPICA_DEPTO,
+  valorComparativoDirecto, rangoUnidadesIdenticas, terrenoEsProrrateoBC,
 } from '../../lib/tasacion-core.js'
+import { COD_COMUNA, normalizaComuna } from '../../lib/comunas.js'
 
 export const maxDuration = 60
-
-const COD_COMUNA = {
-  'CERRILLOS':14166,'CERRO NAVIA':14156,'CONCHALI':14127,'EL BOSQUE':16165,'ESTACION CENTRAL':14157,
-  'HUECHURABA':14158,'INDEPENDENCIA':13167,'LA CISTERNA':16110,'LA FLORIDA':15128,'LA GRANJA':16131,
-  'LA PINTANA':16154,'LA REINA':15132,'LAS CONDES':15108,'LO BARNECHEA':15161,'LO ESPEJO':16164,
-  'LO PRADO':14155,'MACUL':15151,'MAIPU':14109,'NUNOA':15105,'PEDRO AGUIRRE CERDA':16162,
-  'PENALOLEN':15152,'PROVIDENCIA':15103,'PUDAHUEL':14111,'PUENTE ALTO':16301,'QUILICURA':14114,
-  'QUINTA NORMAL':14107,'RECOLETA':13159,'RENCA':14113,'SAN BERNARDO':16401,'SAN JOAQUIN':16163,
-  'SAN MIGUEL':16106,'SAN RAMON':16153,'SANTIAGO':13101,'VITACURA':15160,
-}
-
-function normalizaComuna(s) {
-  return String(s || '').trim().toUpperCase()
-    .replace(/Á/g,'A').replace(/É/g,'E').replace(/Í/g,'I').replace(/Ó/g,'O').replace(/Ú/g,'U')
-    .replace(/Ñ/g,'N')
-}
 
 // Geocodifica una dirección a {lat,lng} (mismo enfoque que /api/zona). Sirve para ubicar
 // la propiedad en su zona del Plan Regulador.
@@ -227,6 +213,7 @@ export async function POST(request) {
   let ventasConjunto = []
   let historialPropiedad = []
   let indiceSector = null
+  let serieMercado = null // serie completa (solo para ajustar por fecha)
   let plusvalia12m = null
   let arriendoMediana = null
   let arriendoN = 0
@@ -565,6 +552,10 @@ export async function POST(request) {
             .filter(x => parseFloat(x.promedio_precio_m2_3m) > 0)
             .map(x => ({ trimestre: String(x.mes || '').slice(0, 7), uf_m2: Math.round(parseFloat(x.promedio_precio_m2_3m) * 10) / 10, n: parseInt(x.recuento_3m) || 0 }))
           if (serieM.length >= 4) {
+            // La serie COMPLETA alimenta el ajuste por fecha del comparativo
+            // directo (las gemelas llegan hasta 8 años atrás); al informe siguen
+            // yendo solo los últimos 8 puntos.
+            serieMercado = serieM
             indiceSector = serieM.slice(-8)
             const ult = serieM[serieM.length - 1]
             const hace12 = serieM[Math.max(0, serieM.length - 13)]
@@ -716,10 +707,60 @@ export async function POST(request) {
   let valorDet = null      // { valor_uf, precio_m2, confianza, desglose[] }
   let precioM2Base = null  // precio por m² base (mediana CBR), para el jardín
 
-  // ── CASAS: modelo ADITIVO (suelo × m² terreno + construcción × m² construidos) ──
+  // ── JERARQUÍA DE MÉTODOS ──────────────────────────────────────────────────
+  // 1º COMPARATIVO DIRECTO: si hay ≥3 ventas de unidades GEMELAS del mismo
+  //    conjunto (misma tipología, ±10% de m², dentro de la ventana de
+  //    CONJUNTO.mesesMax), el mercado ya tasó esta propiedad y esas ventas mandan.
+  // 2º ADITIVO (suelo + construcción): solo si no hay gemelas suficientes, y
+  //    nunca con un terreno que es prorrateo del bien común.
+  // 3º Mediana UF/m² del sector.
+  // Gemelas del conjunto + ventas anteriores de ESTA misma unidad (mismo
+  // conjunto y misma tipología por definición). ventasGemelas deduplica.
+  const ventasDelConjunto = [...ventasConjunto, ...historialPropiedad]
+  const comparativo = m2Construido
+    ? valorComparativoDirecto({
+        ventas: ventasDelConjunto,
+        m2Objetivo: m2Construido,
+        serieIndice: serieMercado || indiceSector,
+      })
+    : null
+  // Rango infranqueable: unidades idénticas vendidas en los últimos 24 meses.
+  const rangoIdenticas = m2Construido
+    ? rangoUnidadesIdenticas({ ventas: ventasDelConjunto, m2Objetivo: m2Construido, serieIndice: serieMercado || indiceSector })
+    : null
+  // El suelo prorrateado del bien común no es vendible por separado y su valor
+  // ya está dentro del precio de las gemelas: con él, el aditivo hunde el valor
+  // (caso V. del Monasterio 2577: 11.404 UF contra ventas reales de 14.350+).
+  const terrenoProrrateado = terrenoEsProrrateoBC(siiData)
+
+  if (comparativo) {
+    const { finalUf, lineas } = aplicarAjustes({ baseUf: comparativo.valor_uf, tipo, extras, answers, cfg: ajustesCfg })
+    precioM2Base = comparativo.uf_m2
+    const desglose = [{
+      concepto: 'Valor por comparación directa con unidades gemelas',
+      calculo: `${comparativo.n} ventas del mismo conjunto entre ${comparativo.uf_m2_min} y ${comparativo.uf_m2_max} UF/m²`
+        + (comparativo.hubo_ajuste_fecha ? ' (ajustadas por fecha con el índice del sector)' : '')
+        + `; en estado base es el percentil ${comparativo.percentil_usado} = ${comparativo.uf_m2} UF/m² x ${m2Construido} m²`,
+      valor_uf: comparativo.valor_uf,
+    }]
+    if (comparativo.n_descartadas > 0) {
+      desglose.push({
+        concepto: 'Ventas descartadas del conjunto',
+        calculo: `${comparativo.n_descartadas} venta(s) fuera del 60–140% de la mediana del conjunto (no son de mercado: relacionados, herencias o datos mal cargados)`,
+        valor_uf: 0,
+      })
+    }
+    valorDet = {
+      valor_uf: finalUf,
+      precio_m2: Math.round(finalUf / m2Construido),
+      confianza: confianzaPorN(comparativo.n),
+      metodo: 'comparativo directo: ventas de unidades gemelas del mismo conjunto',
+      desglose: [...desglose, ...lineas],
+    }
+  // ── CASAS sin gemelas: modelo ADITIVO (suelo × m² terreno + construcción) ──
   // El UF/m² construido de otras casas arrastra el valor de SUS terrenos: aplicarlo
   // directo sobrevalora las casas con sitio chico y subvalora las de sitio grande.
-  if (tipoObjetivo === 'casa' && sueloInfo && m2Terreno > 0 && m2Construido) {
+  } else if (tipoObjetivo === 'casa' && sueloInfo && m2Terreno > 0 && m2Construido && !terrenoProrrateado) {
     const { tier } = elegirTierConstruccion(comuna, sueloInfo.uf_m2)
     const estado = estadoConstruccion(anio, answers?.remodelacion)
     const cfgCosto = COSTO_CONSTRUCCION_TIERS[tier][estado]
@@ -808,6 +849,34 @@ export async function POST(request) {
     m2Util: m2UtilCalc,
     precioM2: precioM2Base || 50,
   })
+
+  // ── REGLA DE COHERENCIA ───────────────────────────────────────────────────
+  // El valor final NUNCA queda fuera del rango de ventas de unidades idénticas
+  // de los últimos 24 meses ajustadas por fecha. Si un modelo cae fuera, ganan
+  // los comparables. Se aplica sobre el TOTAL que ve el usuario (el frontend
+  // suma remodelación + características + jardín sobre valor_uf), porque es ese
+  // número el que no puede contradecir a las ventas reales.
+  let coherencia = null // 'piso' | 'techo' cuando la regla movió el valor
+  if (valorDet && rangoIdenticas && m2Construido) {
+    const extrasUf = (ajustesExtra.ajRemo || 0) + (ajustesExtra.ajCar || 0) + (ajustesExtra.ajJardin || 0)
+    const totalAntes = valorDet.valor_uf + extrasUf
+    const { min_uf, max_uf, n, meses } = rangoIdenticas
+    const totalCorregido = Math.min(max_uf, Math.max(min_uf, totalAntes))
+    if (totalCorregido !== totalAntes) {
+      const delta = totalCorregido - totalAntes
+      const haciaArriba = delta > 0
+      valorDet.desglose.push({
+        concepto: haciaArriba ? 'Piso por ventas de unidades idénticas' : 'Techo por ventas de unidades idénticas',
+        calculo: `el método daba ${Math.round(totalAntes).toLocaleString('es-CL')} UF, ${haciaArriba ? 'bajo el mínimo' : 'sobre el máximo'} de las `
+          + `${n} ventas de unidades idénticas de los últimos ${meses} meses `
+          + `(${min_uf.toLocaleString('es-CL')}–${max_uf.toLocaleString('es-CL')} UF ajustadas por fecha): mandan los comparables`,
+        valor_uf: delta,
+      })
+      valorDet.valor_uf += delta
+      valorDet.precio_m2 = Math.round(valorDet.valor_uf / m2Construido)
+      coherencia = haciaArriba ? 'piso' : 'techo'
+    }
+  }
 
   // ── 2b. NORMATIVA REAL DEL PRC (módulo compartido, el mismo que usa Isidora) ──
   // Geocodifica la propiedad y obtiene su zona oficial del plan regulador. Sirve para
@@ -1081,7 +1150,7 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
       parsed.historial_propiedad = historialPropiedad
       parsed.ofertas_venta = ofertasVenta
       parsed.ofertas_arriendo = ofertasArriendo
-      parsed._diag = { ...(diag || {}), rest: diagRest, n_comparables: comparablesReales.length, n_suelo: sueloInfo ? sueloInfo.n : 0, metodo: valorDet ? (valorDet.metodo || 'mediana sector') : 'SIN valor determinístico (estimación referencial del LLM)' }
+      parsed._diag = { ...(diag || {}), rest: diagRest, n_comparables: comparablesReales.length, n_suelo: sueloInfo ? sueloInfo.n : 0, metodo: valorDet ? (valorDet.metodo || 'mediana sector') : 'SIN valor determinístico (estimación referencial del LLM)', coherencia, rango_identicas: rangoIdenticas }
       const _valorRef = parsed.valor_uf || null
       parsed.arriendo = arriendoMediana ? {
         uf_mes: arriendoMediana,
