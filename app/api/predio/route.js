@@ -213,7 +213,10 @@ function aCandidato(r, comuna, punto) {
     ano_construccion: toNum(r.ano_construccion),
     destino: r.cod_destino || null,
     es_copropiedad: !!r.copropiedad,
-    terreno_origen: 'sii',
+    // En copropiedad el rol de la unidad trae terreno 0: lo que el dueño conoce
+    // es su prorrateo del bien común. Marcarlo importa porque ese suelo no se
+    // vende por separado y no puede entrar al modelo aditivo de la tasación.
+    terreno_origen: (r.copropiedad && !(toNum(r.superficie_total_terreno) > 0)) ? 'bien_comun' : 'sii',
     avaluo_total_clp: toNum(r.avaluo_fiscal_clp),
     contribuciones_clp: toNum(r.contribuciones_clp ?? r.contribuciones_trimestrales),
     material: r.material_predominante || r.material || null,
