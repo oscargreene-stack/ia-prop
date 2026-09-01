@@ -37,6 +37,13 @@ const toNum = (...vals) => {
   for (const v of vals) { const n = parseFloat(v); if (isFinite(n)) return Math.round(n) }
   return null
 }
+
+// toNum REDONDEA (sirve para m2 y pesos). Las coordenadas necesitan los
+// decimales: redondeadas a entero se van cientos de kilometros.
+const toCoord = (...vals) => {
+  for (const v of vals) { const n = parseFloat(v); if (isFinite(n) && n !== 0) return n }
+  return null
+}
 const escRe = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
 // ── ROL ─────────────────────────────────────────────────────────────────────
@@ -221,6 +228,12 @@ function aCandidato(r, comuna, punto) {
     contribuciones_clp: toNum(r.contribuciones_clp ?? r.contribuciones_trimestrales),
     material: r.material_predominante || r.material || null,
     propietario: r.propietario || null,
+    // Coordenada del CATASTRO para este ROL. Viaja hasta /api/tasar, que la usa
+    // en vez de geocodificar la dirección: es la misma siempre, y de ella
+    // depende la zona del Plan Regulador (una propiedad puede estar a 55 m del
+    // borde de su zona, dentro del error del geocoder).
+    latitud: toCoord(r.lat, r.latitud),
+    longitud: toCoord(r.lng, r.longitud),
     _dist: distM(punto, parseFloat(r.lat ?? r.latitud), parseFloat(r.lng ?? r.longitud)),
   }
 }

@@ -196,5 +196,25 @@ console.log('\n3) UMBRAL DE CALLE')
   ok('sin ningun match de calle: no devuelve vacio', r.total === 1, { total: r.total })
 }
 
+console.log('\n4) COORDENADA DEL CATASTRO (zona del Plan Regulador)')
+{
+  // /api/tasar resuelve la zona del PRC sobre este punto. Si no viaja, cae al
+  // geocoder de Google, que devuelve puntos distintos entre corridas: la casa
+  // 21 de V. del Monasterio esta a 55 m del borde de su zona (ZHE-2.1) y a
+  // 507 m de ZM-6a, asi que el vaiven cambiaba el predial minimo de 630 a 400.
+  const r = await call({ direccion: '3669-481', comuna: 'Lo Barnechea' },
+    { detalle: detalleVecino, catastro: CONDOMINIO })
+  const c = r.candidatos?.[0] || r.propiedad
+  ok('la propiedad viaja con la coordenada del catastro',
+    c && c.latitud === LB.lat && c.longitud === LB.lng, { lat: c?.latitud, lng: c?.longitud })
+}
+{
+  const r = await call({ direccion: 'Valle del Monasterio 2577 casa 21', comuna: 'Lo Barnechea' },
+    { catastro: CONDOMINIO })
+  const c = r.candidatos?.[0]
+  ok('tambien por busqueda de direccion',
+    c && c.latitud === LB.lat && c.longitud === LB.lng, { lat: c?.latitud, lng: c?.longitud })
+}
+
 console.log('\n' + (fail ? `${fail} FALLARON` : 'TODOS LOS TESTS PASARON'))
 process.exit(fail ? 1 : 0)
