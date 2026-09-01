@@ -840,6 +840,10 @@ function ChatVendedor({ onBack }) {
         setData(newData)
         if (json._modo === 'servicio_no_disponible') {
           await addAgent(`⚠️ ${json.mensaje || 'El servicio de datos está temporalmente no disponible.'}\n\nSi prefieres continuar ahora: ¿cuántos **m² construidos** tiene la propiedad? (ej: 180)`, 400)
+        } else if (String(json._modo || '').startsWith('rol_')) {
+          // Búsqueda por ROL: el backend ya explica qué falló (falta la comuna,
+          // ROL inexistente); "no la encontré con esa dirección" confundiría.
+          await addAgent(`${json.mensaje}\n\nSi prefieres continuar ahora: ¿cuántos **m² construidos** tiene la propiedad? (ej: 180)`, 400)
         } else {
           await addAgent(`No encontré esta propiedad en el catastro con esa dirección. Para una tasación precisa necesito los metros cuadrados reales.\n\n¿Cuántos **m² construidos** tiene la propiedad? (ej: 180)`, 400)
         }
