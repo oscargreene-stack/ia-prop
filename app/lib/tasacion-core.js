@@ -389,27 +389,32 @@ export const CONJUNTO = {
   minCoherencia: 2,     // con UNA venta el rango es un punto: clavaría el valor
   factorMin: 0.7,       // topes absolutos del ajuste por fecha: un índice roto
   factorMax: 1.6,       // no puede mover la tasación al doble
-  // Techo del ajuste por fecha, en tasa ANUAL COMPUESTA. El índice del sector
-  // mezcla tipologías (en Lo Barnechea, 56% "otro") y llega a marcar 13,5%
-  // anual: aplicado a 8 años lleva una venta de 87,5 UF/m² (2019) a 148 UF/m²,
-  // un valor que NUNCA existió en el conjunto. Las ventas repetidas reales de
-  // este condominio (misma casa vendida dos veces) marcan 3,9%-6,1% anual:
-  //   casa 12  13.250 UF (2017-01) -> 18.400 UF (2025-09) = 3,9% anual
-  //   casa  3  11.350 UF (2013-09) -> 14.350 UF (2019-01) = 4,5% anual
-  //   casa  8  10.850 UF (2013-01) -> 12.000 UF (2014-10) = 6,1% anual
-  // 5% es el techo: acota el índice sectorial sin negar la plusvalía real.
+  // Tope del ajuste por fecha SOLO PARA EL RESPALDO (tasa implícita del
+  // conjunto / carry sin calibración), en tasa ANUAL COMPUESTA. El ajuste
+  // principal ya NO usa este tope: usa la variación REAL del mercado del
+  // período (índice del sector del MISMO TIPO, construido con ventas reales),
+  // que sube o baja según lo que el mercado efectivamente hizo. Un índice que
+  // mezcla tipologías (en Lo Barnechea, 56% "otro", 13,5% anual) NUNCA debe
+  // alimentar el ajuste: esa protección hoy vive en /api/tasar, que solo
+  // pasa series del mismo tipo, más los topes absolutos factorMin/factorMax.
   apreciacionMaxAnual: 0.05,
+  // Calidad mínima de la serie de mercado del mismo tipo para que el índice
+  // real reemplace al respaldo: puntos anuales con ventas suficientes, un
+  // tramo de historia razonable y un último punto que no esté vencido.
+  serieMinPorPunto: 2,    // ventas mínimas por punto anual de la serie
+  seriePuntosMin: 4,      // puntos mínimos de la serie
+  serieAnosMin: 3,        // historia mínima que debe cubrir (años)
+  serieMesesFrescura: 30, // el último punto no puede ser más viejo que esto
   mesesRecientes: 24,   // "reciente": cohortes de calibración y carry del techo
   // Ventana de la MUESTRA con que se lee el percentil de estado. 8 años, la
   // misma ventana de gemelas: un conjunto chico rota lento (27 casas venden ~1
   // al año) y con 24 meses quedaban 3 ventas — de las que no se puede leer un
   // percentil (el p32 cae entre la 1ª y la 2ª) y dejan la confianza en "Baja".
   // Con 8 años la muestra es de 9 ventas y la confianza sube a "Alta".
-  // OJO: ampliar la ventana NO baja la tasación. Con la plusvalía calibrada del
-  // conjunto (3% anual) las ventas viejas se ajustan POR ENCIMA de las
-  // recientes — la de 2018 (85,4 UF/m²) llega a 107,7 — así que suman masa en
-  // el extremo alto. Quien controla el nivel es el ajuste por fecha, no la
-  // ventana. Bajar esto a 24 recupera el comportamiento anterior.
+  // Con el ajuste por índice REAL cada venta entra en moneda de hoy — la de
+  // 2018 sube lo que el mercado subió desde 2018, la de 2025 baja si el
+  // mercado bajó desde entonces — así que la ventana larga solo agrega masa
+  // estadística, no sesgo. Quien controla el nivel es el ajuste por fecha.
   mesesPercentil: 96,
   anosMinCalibrar: 1.5, // separación mínima entre cohortes para leer una tasa
   minPorCohorte: 2,     // ventas mínimas a cada lado para calibrar con el conjunto
@@ -482,28 +487,118 @@ export function factorPorTasa(fecha, tasa, hoy = null) {
   return acotaFactor(Math.pow(1 + (tasa || 0), anos), anos)
 }
 
-// Factor para llevar un UF/m² desde su fecha hasta hoy con el índice del sector
-// (la serie de medianas trimestrales que ya calculamos). Sin serie utilizable
-// devuelve 1: mejor no ajustar que ajustar con ruido. El resultado va SIEMPRE
-// acotado a CONJUNTO.apreciacionMaxAnual: el índice sectorial mezcla tipologías
-// y no representa a un conjunto de casas idénticas (ver CONJUNTO).
+// Mes 'YYYY-MM' a tiempo numérico en años (mitad del mes) para interpolar.
+function tNum(ym) {
+  const m = /^(\d{4})-(\d{2})/.exec(String(ym || ''))
+  if (!m) return null
+  return parseInt(m[1], 10) + (parseInt(m[2], 10) - 0.5) / 12
+}
+
+// Factor para llevar un UF/m² desde su fecha hasta hoy con la VARIACIÓN REAL
+// DEL MERCADO del período: nivel actual del índice dividido por el nivel a la
+// fecha de la venta (interpolado entre puntos). Si el mercado subió 3% desde
+// la venta, la venta sube 3%; si bajó 1%, baja 1%. NO lleva tope de tasa
+// anual: el tope ES la realidad del índice. La única guarda son los topes
+// absolutos factorMin/factorMax (0,7–1,6): un índice roto no puede duplicar ni
+// demoler una tasación. La responsabilidad de que la serie sea del MISMO TIPO
+// (nunca la mezcla de tipologías que marcaba 13,5% anual) es de quien la pasa:
+// /api/tasar la construye con construirSerieMercado sobre ventas reales.
+// Sin serie utilizable devuelve 1: mejor no ajustar que ajustar con ruido.
+// Una venta anterior al inicio de la serie usa el primer punto (subajusta,
+// nunca inventa plusvalía); una posterior al último punto no se ajusta.
 export function factorFecha(fecha, serie, hoy = null) {
   const pts = (serie || [])
     .filter((p) => p && p.uf_m2 > 0 && p.trimestre)
-    .sort((a, b) => (a.trimestre < b.trimestre ? -1 : 1))
+    .map((p) => ({ t: tNum(p.trimestre), uf_m2: p.uf_m2 }))
+    .filter((p) => p.t != null)
+    .sort((a, b) => a.t - b.t)
   if (pts.length < 2) return 1
-  const mesHoy = hoy ? mesDe(hoy) : pts[pts.length - 1].trimestre
-  // Nivel de hoy: el último punto de la serie (ya viene suavizado a 3 meses).
+  const t = tNum(mesDe(fecha))
+  if (t == null) return 1
+  // Nivel del índice a un instante t, interpolando linealmente entre puntos y
+  // sin extrapolar fuera de la serie.
+  const nivel = (tt) => {
+    if (tt <= pts[0].t) return pts[0].uf_m2
+    const ult = pts[pts.length - 1]
+    if (tt >= ult.t) return ult.uf_m2
+    for (let i = 1; i < pts.length; i++) {
+      if (tt <= pts[i].t) {
+        const a = pts[i - 1], b = pts[i]
+        return a.uf_m2 + (b.uf_m2 - a.uf_m2) * ((tt - a.t) / (b.t - a.t))
+      }
+    }
+    return ult.uf_m2
+  }
   const nivelHoy = pts[pts.length - 1].uf_m2
-  const m = mesDe(fecha)
-  if (!m || m > mesHoy) return 1
-  // Último punto en o antes de la venta; si la venta es anterior a la serie se
-  // usa el punto más antiguo (subajusta, nunca inventa plusvalía).
-  let nivelEntonces = null
-  for (const p of pts) { if (p.trimestre <= m) nivelEntonces = p.uf_m2 }
-  if (nivelEntonces == null) nivelEntonces = pts[0].uf_m2
+  const nivelEntonces = nivel(t)
   if (!(nivelEntonces > 0) || !(nivelHoy > 0)) return 1
-  return acotaFactor(nivelHoy / nivelEntonces, anosEntre(fecha, hoy))
+  return Math.min(CONJUNTO.factorMax, Math.max(CONJUNTO.factorMin, nivelHoy / nivelEntonces))
+}
+
+// ── SERIE DE MERCADO DEL MISMO TIPO ─────────────────────────────────────────
+// Construye, desde ventas REALES ya filtradas al tipo objetivo, la serie que
+// alimenta factorFecha: un punto por año con la MEDIANA de UF/m² (la mediana
+// anual es el suavizado: robusta a outliers y a la mezcla de estados), fechado
+// en la fecha mediana de sus ventas. Es "lo que realmente dio el mercado" del
+// sector para ese tipo, en ambas direcciones. Devuelve null si el material no
+// alcanza para leer una trayectoria (pocos puntos, poca historia o el último
+// punto vencido): en ese caso manda el respaldo (tasa implícita del conjunto).
+export function construirSerieMercado({ ventas, hoy = null }) {
+  const vistas = new Set()
+  const filas = (ventas || [])
+    .map((v) => {
+      const m2 = parseFloat(v.m2 ?? v.superficie_construccion)
+      const uf = parseFloat(v.uf ?? v.precio_uf ?? v.price)
+      const fecha = String(v.fecha || v.date_inscripcion || '').slice(0, 10)
+      if (!(m2 > 0) || !(uf > 0) || !/^\d{4}-\d{2}/.test(fecha)) return null
+      const ufM2 = uf / m2
+      if (ufM2 < UFM2_MIN || ufM2 > UFM2_MAX) return null
+      const rol = v.rol ?? [v.cod_com, v.cod_mz, v.cod_pr].filter((x) => x != null).join('-')
+      const clave = [rol || String(v.direccion_sii || v.direccion || ''), fecha, uf].join('|')
+      if (vistas.has(clave)) return null
+      vistas.add(clave)
+      return { fecha, uf_m2: ufM2 }
+    })
+    .filter(Boolean)
+  const porAno = {}
+  for (const f of filas) (porAno[f.fecha.slice(0, 4)] = porAno[f.fecha.slice(0, 4)] || []).push(f)
+  const puntos = Object.keys(porAno).sort()
+    .map((ano) => {
+      let fs = porAno[ano]
+      // Outliers DENTRO del año (herencias, ventas entre relacionados): con 3+
+      // ventas se descartan las que quedan fuera del 55–180% de la mediana del
+      // año; con solo 2, si difieren en más de 1,6x el punto no es confiable.
+      if (fs.length >= 3) {
+        const medAno = mediana(fs.map((f) => f.uf_m2))
+        const limpio = fs.filter((f) => f.uf_m2 >= medAno * 0.55 && f.uf_m2 <= medAno * 1.8)
+        if (limpio.length >= CONJUNTO.serieMinPorPunto) fs = limpio
+      } else if (fs.length === 2) {
+        const [a, b] = fs.map((f) => f.uf_m2).sort((x, y) => x - y)
+        if (b / a > 1.6) return null
+      }
+      if (fs.length < CONJUNTO.serieMinPorPunto) return null
+      return {
+        trimestre: mesDe(medianaFecha(fs.map((f) => f.fecha))),
+        uf_m2: Math.round(mediana(fs.map((f) => f.uf_m2)) * 10) / 10,
+        n: fs.length,
+      }
+    })
+    .filter((p) => p && p.trimestre)
+  if (puntos.length < CONJUNTO.seriePuntosMin) return null
+  const desde = puntos[0].trimestre, hasta = puntos[puntos.length - 1].trimestre
+  const span = anosEntre(desde + '-15', hasta + '-15')
+  if (!(span >= CONJUNTO.serieAnosMin)) return null
+  // Frescura: sin un punto razonablemente actual no hay "nivel de hoy" creíble.
+  const edadUltimo = anosEntre(hasta + '-15', hoy)
+  if (!(edadUltimo != null && edadUltimo * 12 <= CONJUNTO.serieMesesFrescura)) return null
+  const n_ventas = puntos.reduce((a, p) => a + p.n, 0)
+  return {
+    puntos,
+    n_ventas,
+    desde,
+    hasta,
+    variacion_total_pct: Math.round((puntos[puntos.length - 1].uf_m2 / puntos[0].uf_m2 - 1) * 1000) / 10,
+  }
 }
 
 // Ventas de unidades GEMELAS: misma tipología (±10% de m² construidos) dentro
@@ -582,11 +677,19 @@ export function tasaApreciacionConjunto({ ventas, m2Objetivo, hoy = null, meses 
   }
 }
 
+// ¿La serie sirve para ajustar? (al menos dos puntos válidos)
+export function serieUtilizable(serie) {
+  return (serie || []).filter((p) => p && p.uf_m2 > 0 && p.trimestre).length >= 2
+}
+
 // Gemelas con su UF/m² llevado a hoy. Prioridad del ajuste por fecha:
-//   1º la apreciación implícita del PROPIO conjunto (si se puede calcular);
-//   2º el índice del sector, acotado a CONJUNTO.apreciacionMaxAnual.
-// `tasaConjunto` permite inyectar la tasa ya calculada (o null para forzar el
-// índice); si no se pasa, se calcula aquí.
+//   1º la VARIACIÓN REAL DEL MERCADO del período (serieIndice: índice del
+//      sector del MISMO TIPO, construido con construirSerieMercado) — sube o
+//      baja según lo que el mercado efectivamente hizo, sin tasa fija;
+//   2º respaldo: la apreciación implícita del PROPIO conjunto (si calibra);
+//   3º sin material: no se ajusta (factor 1).
+// `tasaConjunto` permite inyectar la tasa ya calculada (o null para anularla);
+// si no se pasa, se calcula aquí.
 export function gemelasAjustadas({ ventas, m2Objetivo, serieIndice, meses, hoy, tasaConjunto }) {
   const { limpias, descartadas } = sinOutliersConjunto(ventasGemelas({ ventas, m2Objetivo, meses, hoy }))
   // La calibración se hace SIEMPRE sobre la ventana completa: llamadas con una
@@ -595,11 +698,20 @@ export function gemelasAjustadas({ ventas, m2Objetivo, serieIndice, meses, hoy, 
   const cal = tasaConjunto === undefined
     ? tasaApreciacionConjunto({ ventas, m2Objetivo, hoy })
     : (tasaConjunto == null ? null : tasaConjunto)
+  const conIndice = serieUtilizable(serieIndice)
   return {
     tasa_conjunto: cal,
+    fuente_ajuste: conIndice ? 'indice_mercado' : cal ? 'tasa_conjunto' : 'sin_ajuste',
     ajustadas: limpias.map((g) => {
-      const f = cal ? factorPorTasa(g.fecha, cal.tasa, hoy) : factorFecha(g.fecha, serieIndice, hoy)
-      return { ...g, factor_fecha: Math.round(f * 1000) / 1000, uf_m2_ajustado: g.uf_m2 * f }
+      const f = conIndice
+        ? factorFecha(g.fecha, serieIndice, hoy)
+        : cal ? factorPorTasa(g.fecha, cal.tasa, hoy) : 1
+      return {
+        ...g,
+        factor_fecha: Math.round(f * 1000) / 1000,
+        ajuste_pct: Math.round((f - 1) * 1000) / 10,
+        uf_m2_ajustado: g.uf_m2 * f,
+      }
     }),
     descartadas,
   }
@@ -609,25 +721,30 @@ export function gemelasAjustadas({ ventas, m2Objetivo, serieIndice, meses, hoy, 
 // regla de coherencia: el valor final no puede quedar fuera.
 //
 // Se construye sobre precios NOMINALES (lo que realmente se pagó, normalizado a
-// los m² del objetivo) más un carry ACOTADO desde la fecha de venta — nunca
-// sobre valores inflados por el índice del sector. Es la diferencia entre un
-// techo que existió de verdad y uno inventado: con el índice pleno el techo del
-// caso V. del Monasterio subía de 18.400 UF a ~21.000 UF, y el PISO subía a
-// ~19.000 UF, de modo que la regla que debía contener la tasación era la que la
-// empujaba hacia arriba.
-export function rangoUnidadesIdenticas({ ventas, m2Objetivo, meses = CONJUNTO.mesesCoherencia, hoy, tasaConjunto }) {
+// los m² del objetivo) llevados a hoy con la VARIACIÓN REAL del mercado del
+// período (mismo índice del mismo tipo que usa el ajuste por fecha): si el
+// mercado bajó desde la venta, el techo baja con él; si subió, sube lo que
+// subió. Nunca con un índice de tipologías mezcladas — eso convertía la regla
+// que debía contener la tasación en la que la empujaba hacia arriba (el techo
+// del caso V. del Monasterio pasaba de 18.400 UF a ~21.000 UF). Como respaldo,
+// sin serie utilizable, el carry usa la tasa implícita del conjunto o el tope.
+export function rangoUnidadesIdenticas({ ventas, m2Objetivo, meses = CONJUNTO.mesesCoherencia, hoy, tasaConjunto, serieIndice }) {
   if (!(m2Objetivo > 0)) return null
   const { limpias } = sinOutliersConjunto(ventasGemelas({ ventas, m2Objetivo, meses, hoy }))
   if (limpias.length < CONJUNTO.minCoherencia) return null
+  const conIndice = serieUtilizable(serieIndice)
   const cal = tasaConjunto === undefined
     ? tasaApreciacionConjunto({ ventas, m2Objetivo, hoy })
     : (tasaConjunto == null ? null : tasaConjunto)
-  // Sin tasa propia del conjunto se usa el techo (5% anual): el carry más
+  // Respaldo sin serie ni tasa propia: el tope (5% anual), el carry más
   // permisivo posible, para que la regla acote sin estrangular.
   const cap = CONJUNTO.apreciacionMaxAnual
   const tasa = cal ? Math.min(cap, Math.max(-cap, cal.tasa)) : cap
+  const factorDe = (g) => conIndice
+    ? factorFecha(g.fecha, serieIndice, hoy)
+    : factorPorTasa(g.fecha, tasa, hoy)
   const ufs = limpias
-    .map((g) => g.uf_m2 * m2Objetivo * factorPorTasa(g.fecha, tasa, hoy))
+    .map((g) => g.uf_m2 * m2Objetivo * factorDe(g))
     .filter((x) => x > 0)
   // Con una sola venta min === max: en vez de acotar, clavaría la tasación en
   // ese precio y borraría remodelación y características. Mejor no acotar.
@@ -638,8 +755,13 @@ export function rangoUnidadesIdenticas({ ventas, m2Objetivo, meses = CONJUNTO.me
     max_uf: Math.round(Math.max(...ufs)),
     max_nominal_uf: Math.round(Math.max(...nominales)),
     min_nominal_uf: Math.round(Math.min(...nominales)),
-    carry_pct: Math.round(tasa * 1000) / 10,
-    carry_fuente: cal ? cal.fuente : 'tope de ' + Math.round(cap * 100) + '% anual (sin ventas propias para calibrar)',
+    carry_pct: conIndice ? null : Math.round(tasa * 1000) / 10,
+    carry_fuente: conIndice
+      ? 'variación real del mercado del período (índice del sector, mismo tipo)'
+      : cal ? cal.fuente : 'tope de ' + Math.round(cap * 100) + '% anual (sin ventas propias para calibrar)',
+    carry_desc: conIndice
+      ? 'la variación real del mercado desde cada venta'
+      : `carry de ${Math.round(tasa * 1000) / 10}% anual (${cal ? cal.fuente : 'tope sin calibración'})`,
     n: ufs.length,
     meses,
   }
@@ -650,11 +772,11 @@ export function rangoUnidadesIdenticas({ ventas, m2Objetivo, meses = CONJUNTO.me
 // El percentil de ESTADO se lee sobre la muestra de CONJUNTO.mesesPercentil
 // (8 años): en un conjunto chico las ventas de 24 meses se cuentan con los
 // dedos de una mano y de tres puntos no sale un percentil. Las ventas ya vienen
-// llevadas a hoy con la apreciación del propio conjunto, así que las antiguas
-// entran en moneda de hoy, no a su precio de entonces.
+// llevadas a hoy con la variación real del mercado del período (o el respaldo),
+// así que las antiguas entran en moneda de hoy, no a su precio de entonces.
 export function valorComparativoDirecto({ ventas, m2Objetivo, serieIndice, hoy, meses, pctl = PCTL_BASE }) {
   if (!(m2Objetivo > 0)) return null
-  const { ajustadas, descartadas, tasa_conjunto } = gemelasAjustadas({ ventas, m2Objetivo, serieIndice, hoy, meses })
+  const { ajustadas, descartadas, tasa_conjunto, fuente_ajuste } = gemelasAjustadas({ ventas, m2Objetivo, serieIndice, hoy, meses })
   if (ajustadas.length < CONJUNTO.minVentas) return null
   const mesesPctl = CONJUNTO.mesesPercentil
   const corte = corteMeses(hoy, mesesPctl)
@@ -679,6 +801,9 @@ export function valorComparativoDirecto({ ventas, m2Objetivo, serieIndice, hoy, 
     ventana_percentil_meses: pool.length === ajustadas.length ? (meses || CONJUNTO.mesesMax) : mesesPctl,
     muestra_recortada: pool.length !== ajustadas.length,
     tasa_conjunto: tasa_conjunto || null,
+    fuente_ajuste,
+    ajuste_min_pct: pool.length ? Math.min(...pool.map((g) => g.ajuste_pct)) : 0,
+    ajuste_max_pct: pool.length ? Math.max(...pool.map((g) => g.ajuste_pct)) : 0,
     n_descartadas: descartadas.length,
     ventas: pool,
     ventas_todas: ajustadas,
