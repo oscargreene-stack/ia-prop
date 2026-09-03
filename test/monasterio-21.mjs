@@ -64,7 +64,7 @@ const uf = (x) => x == null ? 'n/d' : Math.round(x).toLocaleString('es-CL') + ' 
 // -> regla de coherencia sobre el TOTAL.
 function corre({ remodelacion = 'ninguna', tiempo = 'reciente', serieIndice = INDICE, meses } = {}) {
   const c = valorComparativoDirecto({ ventas: VENTAS, m2Objetivo: M2, serieIndice, hoy: HOY, meses })
-  const rango = rangoUnidadesIdenticas({ ventas: VENTAS, m2Objetivo: M2, hoy: HOY })
+  const rango = rangoUnidadesIdenticas({ ventas: VENTAS, m2Objetivo: M2, hoy: HOY, serieIndice })
   if (!c) return { c: null, rango, final: null }
   const ajRemo = Math.round((REMO_UF_M2[remodelacion] || 0) * M2 * (REMO_TIEMPO[tiempo] || 1))
   const total = c.valor_uf + ajRemo
@@ -92,12 +92,17 @@ for (const g of base.c.ventas) {
 console.log(`  descartadas por outlier (fuera del 60-140% de la mediana): ${base.c.n_descartadas}`)
 console.log(`  rango ajustado ${base.c.uf_m2_min}–${base.c.uf_m2_max} UF/m² · mediana ${base.c.uf_m2_mediana}`)
 console.log(`  base en estado sin remodelar = percentil ${PCTL_BASE} = ${base.c.uf_m2} UF/m² = ${uf(base.c.valor_uf)}`)
-console.log(`  coherencia NOMINAL (idénticas, ${base.rango.meses} meses, n=${base.rango.n}): `
+console.log(`  coherencia (idénticas, ${base.rango.meses} meses, n=${base.rango.n}): `
   + `${uf(base.rango.min_nominal_uf)} – ${uf(base.rango.max_nominal_uf)} pagadas`
-  + ` -> con carry de ${base.rango.carry_pct}% anual: ${uf(base.rango.min_uf)} – ${uf(base.rango.max_uf)}`)
+  + ` -> llevadas a hoy con ${base.rango.carry_desc}: ${uf(base.rango.min_uf)} – ${uf(base.rango.max_uf)}`)
+
+console.log(`\nAJUSTE POR FECHA — LA VARIACIÓN REAL DEL MERCADO DEL PERÍODO`)
+console.log(`  fuente: ${base.c.fuente_ajuste} · ajustes entre ${base.c.ajuste_min_pct}% y ${base.c.ajuste_max_pct}%`)
+console.log('  si el mercado subió 3% desde la venta, la venta sube 3%; si bajó 1%, baja 1%.')
+console.log('  el mercado de casas del sector cayó desde el peak 2022: las ventas de sep-2025 BAJAN.')
 
 const cal = tasaApreciacionConjunto({ ventas: VENTAS, m2Objetivo: M2, hoy: HOY })
-console.log(`\nAJUSTE POR FECHA — calibrado con el PROPIO conjunto`)
+console.log(`\nRESPALDO (solo sin serie utilizable) — calibrado con el PROPIO conjunto`)
 console.log(`  ${cal.n_recientes} ventas recientes vs ${cal.n_antiguas} antiguas, separadas ${cal.anos} años`)
 console.log(`  -> apreciación implícita del conjunto: ${cal.tasa_pct}% anual (tope: ${CONJUNTO.apreciacionMaxAnual * 100}%)`)
 console.log('  contraste con las ventas REPETIDAS reales (misma casa, dos veces):')
@@ -124,9 +129,10 @@ for (const t of ['reciente', 'hace3', 'hace5']) {
   console.log(`  ${t.padEnd(9)} + ${uf(r.ajRemo).padStart(9)} = ${uf(r.final)}`)
 }
 
-console.log('\nSENSIBILIDAD — el indice del sector ya NO mueve la tasacion')
-console.log('  (esta era la causa raiz: el indice de 13,5% anual inflaba las ventas viejas)')
-for (const [nombre, serie] of [['plano (1,3% anual)', INDICE], ['PLENO (13,5% anual)', INDICE_PLENO], ['sin indice', null]]) {
+console.log('\nSENSIBILIDAD — el indice REAL manda; uno roto queda contenido')
+console.log('  (real: la tasacion sigue al mercado en ambas direcciones. PLENO 13,5%: los topes')
+console.log('   absolutos 0,7x-1,6x y la coherencia lo contienen. Sin indice: respaldo del conjunto.)')
+for (const [nombre, serie] of [['REAL del sector', INDICE], ['PLENO (13,5% anual)', INDICE_PLENO], ['sin indice', null]]) {
   const a = corre({ remodelacion: 'ninguna', serieIndice: serie })
   const b = corre({ remodelacion: 'media', serieIndice: serie })
   console.log(`  ${nombre.padEnd(20)} sin remodelar ${uf(a.final).padStart(10)} · media ${uf(b.final).padStart(10)}`)
