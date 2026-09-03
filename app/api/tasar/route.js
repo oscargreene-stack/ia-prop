@@ -15,7 +15,7 @@ import {
   clasificaTipo, TIPO_OBJETIVO, cutoffVentasStr, esVentaReciente, enBandaM2,
   UFM2_MIN, UFM2_MAX, puntosSuelo, resumenSuelo, sueloPorTramo, sueloDeTramo,
   valorAditivoCasa, confianzaPorN, buscarVentasPoligono, COSTO_CONSTR_RESIDUAL, BANDA_M2, terrenoDe, sinOutliers, DOTACION_TIPICA_DEPTO,
-  valorComparativoDirecto, rangoUnidadesIdenticas, terrenoEsProrrateoBC,
+  valorComparativoDirecto, rangoUnidadesIdenticas, terrenoEsProrrateoBC, CONJUNTO,
 } from '../../lib/tasacion-core.js'
 import { COD_COMUNA, normalizaComuna } from '../../lib/comunas.js'
 
@@ -200,9 +200,26 @@ export async function POST(request) {
     return 'Referencial'
   }
 
-  // Punto geocodificado de la propiedad: se usa para los comparables por polígono
-  // (misma fuente que /api/zona) y para la zona del Plan Regulador.
-  const punto = await geocodeDireccion(`${form.direccion || ''}, ${comuna}`)
+  // Punto de la propiedad: se usa para los comparables por polígono (misma
+  // fuente que /api/zona) y para la ZONA DEL PLAN REGULADOR.
+  //
+  // Manda la coordenada del CATASTRO (la que el SII tiene para ese ROL): es
+  // estable, exacta y siempre la misma para la misma propiedad. Geocodificar la
+  // dirección solo es el respaldo cuando no hay ROL o el catastro no la trae.
+  //
+  // POR QUÉ IMPORTA: el geocoder de Google devuelve puntos distintos entre
+  // corridas para la misma dirección (interpolación sobre la calle vs. techo, y
+  // otro resultado si el texto incluye el número de unidad). Con la propiedad a
+  // 55 m del borde de su zona, ese vaivén cambiaba la zona del PRC: la casa 21
+  // de V. del Monasterio devolvía ZHE-2.1 (predial 630) en una corrida y ZM-6a
+  // (predial 400) en otra — y ZM-6a está a 507 m, dentro del error del geocoder.
+  // Sobre el punto real del catastro solo UNA zona contiene la propiedad.
+  const puntoCatastro = (() => {
+    const la = parseFloat(siiData?.latitud), ln = parseFloat(siiData?.longitud)
+    return (Number.isFinite(la) && Number.isFinite(ln) && la !== 0 && ln !== 0) ? { lat: la, lng: ln } : null
+  })()
+  const punto = puntoCatastro || await geocodeDireccion(`${form.direccion || ''}, ${comuna}`)
+  const puntoFuente = puntoCatastro ? 'catastro_sii' : (punto ? 'geocode_google' : 'sin_punto')
 
   // ── 1. Comparables REALES del CBR — MISMA FUENTE que /api/zona (polígono) ──
   // Ventas reales alrededor de la propiedad, clasificadas por tipo real. De esta
@@ -725,8 +742,11 @@ export async function POST(request) {
       })
     : null
   // Rango infranqueable: unidades idénticas vendidas en los últimos 24 meses.
+  // Techo/piso NOMINAL: precios realmente pagados por unidades idénticas en los
+  // últimos 24 meses + carry acotado. No lleva serieIndice a propósito: la
+  // regla de coherencia no puede apoyarse en valores inflados por el índice.
   const rangoIdenticas = m2Construido
-    ? rangoUnidadesIdenticas({ ventas: ventasDelConjunto, m2Objetivo: m2Construido, serieIndice: serieMercado || indiceSector })
+    ? rangoUnidadesIdenticas({ ventas: ventasDelConjunto, m2Objetivo: m2Construido })
     : null
   // El suelo prorrateado del bien común no es vendible por separado y su valor
   // ya está dentro del precio de las gemelas: con él, el aditivo hunde el valor
@@ -736,10 +756,19 @@ export async function POST(request) {
   if (comparativo) {
     const { finalUf, lineas } = aplicarAjustes({ baseUf: comparativo.valor_uf, tipo, extras, answers, cfg: ajustesCfg })
     precioM2Base = comparativo.uf_m2
+    const tc = comparativo.tasa_conjunto
+    const fuenteAjuste = !comparativo.hubo_ajuste_fecha ? ''
+      : tc
+        ? ` (llevadas a hoy al ${tc.tasa_pct}% anual, la apreciación implícita del propio conjunto: `
+          + `${tc.n_recientes} ventas recientes contra ${tc.n_antiguas} antiguas separadas ${tc.anos} años)`
+        : ` (llevadas a hoy con el índice del sector, acotado a ${Math.round(CONJUNTO.apreciacionMaxAnual * 100)}% anual compuesto)`
     const desglose = [{
       concepto: 'Valor por comparación directa con unidades gemelas',
-      calculo: `${comparativo.n} ventas del mismo conjunto entre ${comparativo.uf_m2_min} y ${comparativo.uf_m2_max} UF/m²`
-        + (comparativo.hubo_ajuste_fecha ? ' (ajustadas por fecha con el índice del sector)' : '')
+      calculo: `${comparativo.n} ventas del mismo conjunto`
+        + ` de los últimos ${Math.round(comparativo.ventana_percentil_meses / 12)} años`
+        + (comparativo.muestra_recortada ? ` (de ${comparativo.n_total} gemelas encontradas)` : '')
+        + ` entre ${comparativo.uf_m2_min} y ${comparativo.uf_m2_max} UF/m²`
+        + fuenteAjuste
         + `; en estado base es el percentil ${comparativo.percentil_usado} = ${comparativo.uf_m2} UF/m² x ${m2Construido} m²`,
       valor_uf: comparativo.valor_uf,
     }]
@@ -869,7 +898,9 @@ export async function POST(request) {
         concepto: haciaArriba ? 'Piso por ventas de unidades idénticas' : 'Techo por ventas de unidades idénticas',
         calculo: `el método daba ${Math.round(totalAntes).toLocaleString('es-CL')} UF, ${haciaArriba ? 'bajo el mínimo' : 'sobre el máximo'} de las `
           + `${n} ventas de unidades idénticas de los últimos ${meses} meses `
-          + `(${min_uf.toLocaleString('es-CL')}–${max_uf.toLocaleString('es-CL')} UF ajustadas por fecha): mandan los comparables`,
+          + `(${min_uf.toLocaleString('es-CL')}–${max_uf.toLocaleString('es-CL')} UF: precios nominales `
+          + `${rangoIdenticas.min_nominal_uf.toLocaleString('es-CL')}–${rangoIdenticas.max_nominal_uf.toLocaleString('es-CL')} UF `
+          + `más carry de ${rangoIdenticas.carry_pct}% anual): mandan los comparables`,
         valor_uf: delta,
       })
       valorDet.valor_uf += delta
@@ -1144,7 +1175,7 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
 
       parsed.ajustes = ajustesExtra
       parsed.ventas_mapa = ventasMapa
-      parsed.punto = punto ? { lat: punto.lat, lng: punto.lng } : null
+      parsed.punto = punto ? { lat: punto.lat, lng: punto.lng, fuente: puntoFuente } : null
       parsed.sector = { composicion: sectorComposicion, indice_uf_m2: indiceSector, plusvalia_12m_pct: plusvalia12m }
       parsed.ventas_conjunto = ventasConjunto
       parsed.historial_propiedad = historialPropiedad
@@ -1171,7 +1202,7 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
         recomendacion_precio_venta: extractStr('recomendacion_precio_venta') || '',
         comparables: comparablesReales,
         ventas_mapa: ventasMapa,
-        punto: punto ? { lat: punto.lat, lng: punto.lng } : null,
+        punto: punto ? { lat: punto.lat, lng: punto.lng, fuente: puntoFuente } : null,
         sector: { composicion: sectorComposicion, indice_uf_m2: indiceSector, plusvalia_12m_pct: plusvalia12m },
         ventas_conjunto: ventasConjunto,
         historial_propiedad: historialPropiedad,
