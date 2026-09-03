@@ -7,12 +7,12 @@ import {
   valorComparativoDirecto, rangoUnidadesIdenticas, terrenoEsProrrateoBC,
   ventasGemelas, sinOutliersConjunto, factorFecha, percentilInterp,
   valorAditivoCasa, tasaApreciacionConjunto, acotaFactor, anosEntre, confianzaPorN,
-  CONJUNTO, PCTL_BASE,
+  premioEstadoConjunto, factorAntiguedadRemodelacion,
+  CONJUNTO, PCTL_BASE, PCTL_ESTADO,
 } from '../app/lib/tasacion-core.js'
 
 const M2 = 164
 const HOY = '2026-09-01'
-const REMO_UF_M2 = { ninguna: 0, baja: 5, media: 10, alta: 20 }
 
 // Las 20 ventas CBR del condominio (consulta completa, no una muestra). El
 // `rol` importa: hay unidades que se vendieron DOS veces (casas 12, 3 y 8) y
@@ -57,16 +57,17 @@ export const INDICE_PLENO = Array.from({ length: 12 }, (_, i) => ({
   uf_m2: Math.round(60 * Math.pow(1.135, i) * 10) / 10,
 }))
 
-// Reproduce la cadena de /api/tasar: base comparativa -> premio de
-// remodelación -> regla de coherencia sobre el TOTAL.
-export function tasa({ remodelacion = 'ninguna', serieIndice = INDICE, meses, ventas = VENTAS } = {}) {
+// Reproduce la cadena de /api/tasar: base comparativa -> premio de estado por
+// escalón de percentil -> regla de coherencia sobre el TOTAL.
+export function tasa({ remodelacion = 'ninguna', tiempo = 'reciente', serieIndice = INDICE, meses, ventas = VENTAS } = {}) {
   const c = valorComparativoDirecto({ ventas, m2Objetivo: M2, serieIndice, hoy: HOY, meses })
   const rango = rangoUnidadesIdenticas({ ventas, m2Objetivo: M2, hoy: HOY })
   if (!c) return { c: null, rango, final: null }
-  const ajRemo = Math.round((REMO_UF_M2[remodelacion] || 0) * M2)
+  const premio = premioEstadoConjunto({ comparativo: c, remodelacion, tiempo })
+  const ajRemo = Math.max(0, premio ? premio.premio_uf : 0)
   const total = c.valor_uf + ajRemo
   const final = rango ? Math.min(rango.max_uf, Math.max(rango.min_uf, total)) : total
-  return { c, rango, ajRemo, total, final, clamp: final !== total }
+  return { c, rango, premio, ajRemo, total, final, clamp: final !== total }
 }
 
 let fail = 0
@@ -92,11 +93,11 @@ console.log('\n4) JERARQUIA DE METODOS — casa 21 de V. del Monasterio 2577')
   ok('sin remodelar queda bajo el maximo nominal de 18.400 UF por si solo',
     r.final < 18400, { final: r.final })
   // Encaje del ladder de estado dentro de las ventas reales del conjunto.
-  ok('sin remodelar cae en 17.000-18.000 UF', entre(r.final, 17000, 18000), { final: r.final })
+  ok('sin remodelar cae en 16.200-17.000 UF', entre(r.final, 16200, 17000), { final: r.final })
 }
 {
   const r = tasa({ remodelacion: 'media' })
-  ok('remodelacion media cae en 18.000-19.000 UF', entre(r.final, 18000, 19000), { final: r.final })
+  ok('remodelacion media cae en 17.000-17.600 UF', entre(r.final, 17000, 17600), { final: r.final })
 }
 {
   // Monotonía: más remodelación nunca puede valer menos.
@@ -197,10 +198,18 @@ console.log('\n7b) CALIBRACION CON EL PROPIO CONJUNTO')
 
 console.log('\n8) REGLA DE COHERENCIA (TECHO NOMINAL)')
 {
+  // Con la escalera de percentil ningun estado se sale del conjunto: el maximo
+  // de la escalera es el p75 de ventas que existieron, no una tarifa sumada
+  // encima. La regla de coherencia deja de ser la que decide el valor.
   const r = tasa({ remodelacion: 'alta' })
-  ok('remodelacion alta se topa en el maximo de las identicas de 24 meses',
-    r.clamp && r.final === r.rango.max_uf && r.total > r.rango.max_uf,
+  ok('remodelacion alta ya no necesita topearse: cae dentro del rango sola',
+    !r.clamp && r.final === r.total && r.final < r.rango.max_uf,
     { total: r.total, final: r.final, max: r.rango.max_uf })
+  ok('ningun estado queda fuera del rango de las identicas',
+    ['ninguna', 'baja', 'media', 'alta'].every((e) => {
+      const t = tasa({ remodelacion: e })
+      return !t.clamp && t.final >= t.rango.min_uf && t.final <= t.rango.max_uf
+    }))
 }
 {
   const r = tasa()
@@ -240,33 +249,146 @@ console.log('\n8) REGLA DE COHERENCIA (TECHO NOMINAL)')
   ok('y el valor entonces no queda topado', !r.clamp && r.final === r.total, { final: r.final, total: r.total })
 }
 
-console.log('\n8c) MUESTRA DEL PERCENTIL DE ESTADO — 8 ANOS')
+console.log('\n8c) MUESTRA DEL PERCENTIL DE ESTADO - 24 MESES')
 {
   const c = valorComparativoDirecto({ ventas: VENTAS, m2Objetivo: M2, serieIndice: INDICE, hoy: HOY })
-  ok('la muestra del percentil es de ' + (CONJUNTO.mesesPercentil / 12) + ' anos',
-    CONJUNTO.mesesPercentil === 96 && c.ventana_percentil_meses === 96,
+  ok('el percentil de estado se lee sobre 24 meses',
+    CONJUNTO.mesesPercentil === 24 && c.ventana_percentil_meses === 24,
     { ventana: c.ventana_percentil_meses })
-  ok('usa las 9 gemelas de la ventana, no solo las 3 recientes',
-    c.n === 9 && c.n === c.n_total && !c.muestra_recortada, { n: c.n, n_total: c.n_total })
-  ok('con 9 comparables la confianza es Alta, no Baja', confianzaPorN(c.n) === 'Alta', { n: c.n })
-  ok('entran ventas de mas de 24 meses atras',
-    c.ventas.some((g) => g.fecha < '2024-09-01'), { n: c.n })
-  // Ampliar la ventana NO baja la tasacion: con la plusvalia calibrada del
-  // conjunto las ventas viejas se ajustan POR ENCIMA de las recientes. Por eso
-  // quien controla el nivel es el ajuste por fecha, no la ventana.
-  const vieja = c.ventas.find((g) => g.fecha === '2018-09-11')
-  const reciente = c.ventas.find((g) => g.fecha === '2025-01-23')
-  ok('la venta de 2018 ajustada supera a la de 2025 (por eso la muestra larga sube el valor)',
+  ok('son las 3 ventas de los ultimos 24 meses, de 9 gemelas encontradas',
+    c.n === 3 && c.n_total === 9 && c.muestra_recortada, { n: c.n, n_total: c.n_total })
+  ok('ninguna venta del percentil es anterior al corte de 24 meses',
+    c.ventas.every((g) => g.fecha >= '2024-09-01'), { fechas: c.ventas.map((g) => g.fecha) })
+  ok('son las ventas reales de 15.500, 17.400 y 18.400 UF',
+    c.ventas.map((g) => g.uf).sort((a, b) => a - b).join() === '15500,17400,18400',
+    { ufs: c.ventas.map((g) => g.uf) })
+  // EL PUNTO DEL FIX: con 8 anos, la venta de 2018 ajustada 8 anos hacia
+  // adelante SUPERA a las de 2025 y engorda el extremo alto de la muestra, de
+  // modo que el percentil sube sin que el mercado de hoy lo respalde.
+  const vieja = c.ventas_todas.find((g) => g.fecha === '2018-09-11')
+  const reciente = c.ventas_todas.find((g) => g.fecha === '2025-01-23')
+  ok('la venta de 2018 ajustada supera a la de 2025 (por eso no puede fijar el nivel)',
     vieja.uf_m2 < reciente.uf_m2 && vieja.uf_m2_ajustado > reciente.uf_m2_ajustado,
     { v2018: [vieja.uf_m2, Math.round(vieja.uf_m2_ajustado * 10) / 10],
       v2025: [reciente.uf_m2, Math.round(reciente.uf_m2_ajustado * 10) / 10] })
+  const con8anos = Math.round(percentilInterp(c.ventas_todas.map((g) => g.uf_m2_ajustado), PCTL_BASE) * M2)
+  ok('la muestra de 8 anos daba un percentil MAS ALTO que la de 24 meses',
+    con8anos > tasa().final, { con8anos, con24meses: tasa().final })
+  ok('sin remodelar cae en 16.200-17.400 UF, no en los ~17.800 de la muestra de 8 anos',
+    entre(tasa().final, 16200, 17400) && con8anos > 17400,
+    { final: tasa().final, con8anos })
+  // La confianza sigue leyendo la muestra COMPLETA: son 9 gemelas las que
+  // respaldan la tasacion (y las que calibran la apreciacion del conjunto),
+  // aunque el nivel de hoy lo fijen las 3 ventas recientes.
+  ok('la confianza se lee sobre las 9 gemelas, no sobre las 3 del percentil',
+    confianzaPorN(c.n_total) === 'Alta', { n_total: c.n_total })
 }
 {
-  // La ventana del percentil nunca puede dejar la muestra bajo el minimo.
+  // La ventana del percentil nunca puede dejar la muestra bajo el minimo: si en
+  // 24 meses no hay 3 ventas se usan todas las gemelas, antes que quedarse sin
+  // comparables.
   const pocas = [VENTAS[0], ...VENTAS.slice(3)]
   const c = valorComparativoDirecto({ ventas: pocas, m2Objetivo: M2, serieIndice: INDICE, hoy: HOY })
-  ok('con muestra corta se usan todas las gemelas', c.n === c.n_total, { n: c.n, n_total: c.n_total })
+  ok('con menos de 3 ventas en 24 meses se usan todas las gemelas',
+    c.n === c.n_total && c.n > 3, { n: c.n, n_total: c.n_total })
 }
+
+console.log('\n8d) EL ESTADO ES UN ESCALON DE PERCENTIL DEL PROPIO CONJUNTO')
+{
+  const c = valorComparativoDirecto({ ventas: VENTAS, m2Objetivo: M2, serieIndice: INDICE, hoy: HOY })
+  ok('el nivel se lee sobre precios NOMINALES, no ajustados', c.nivel_nominal === true, { nivel_nominal: c.nivel_nominal })
+  ok('y por eso el rango de la muestra son los UF/m2 pagados (94,5-112,2)',
+    c.uf_m2_min === 94.5 && c.uf_m2_max === 112.2, { min: c.uf_m2_min, max: c.uf_m2_max })
+  ok('el informe no anuncia un ajuste por fecha que el nivel no uso',
+    c.hubo_ajuste_fecha === false, { hubo: c.hubo_ajuste_fecha })
+  ok('la escalera cubre los cuatro estados',
+    ['ninguna', 'baja', 'media', 'alta'].every((e) => c.escalera[e] && c.escalera[e].valor_uf > 0),
+    { escalera: c.escalera })
+  ok('sin remodelar es el percentil ' + PCTL_BASE + ' y media es la mediana',
+    c.escalera.ninguna.percentil === PCTL_BASE && c.escalera.media.percentil === 50,
+    { pctls: Object.values(PCTL_ESTADO) })
+  ok('alta es p70-80, arriba pero sin llegar al maximo del conjunto',
+    entre(PCTL_ESTADO.alta, 70, 80) && c.escalera.alta.valor_uf < Math.round(c.uf_m2_max * M2),
+    { alta: c.escalera.alta, max: Math.round(c.uf_m2_max * M2) })
+  // Las cuatro bandas TIENEN que separarse: si media y alta dan el mismo numero,
+  // la tasacion dejo de distinguir una casa remodelada de una impecable.
+  const v = ['ninguna', 'baja', 'media', 'alta'].map((e) => tasa({ remodelacion: e }).final)
+  ok('las cuatro bandas son estrictamente crecientes', v.every((x, i) => i === 0 || x > v[i - 1]), { v })
+  ok('y ninguna se topa contra el techo', ['ninguna', 'baja', 'media', 'alta'].every((e) => !tasa({ remodelacion: e }).clamp), { v })
+  // La escalera no puede pasarse del conjunto por construccion: su techo es un
+  // percentil de ventas que existieron, no una tarifa sumada encima.
+  ok('el premio de alta es menor que el que daba la tarifa de 20 UF/m2',
+    tasa({ remodelacion: 'alta' }).ajRemo < 20 * M2, { premio: tasa({ remodelacion: 'alta' }).ajRemo })
+  ok('sin remodelar no paga premio', tasa({ remodelacion: 'ninguna' }).ajRemo === 0)
+}
+{
+  // El premio se mide contra el escalon BASE y se suma sobre valor_uf: si el
+  // percentil publicado cambia, los dos tienen que seguir hablando del mismo
+  // numero. Con pctl 60 y el escalon base clavado en p32, alta terminaba 885 UF
+  // por encima de su propio p75.
+  const c60 = valorComparativoDirecto({ ventas: VENTAS, m2Objetivo: M2, serieIndice: INDICE, hoy: HOY, pctl: 60 })
+  const p60 = premioEstadoConjunto({ comparativo: c60, remodelacion: 'alta' })
+  ok('con otro percentil base, base + premio cae EXACTO en el percentil del estado',
+    c60.valor_uf + p60.premio_uf === c60.escalera.alta.valor_uf,
+    { base: c60.valor_uf, premio: p60.premio_uf, p75: c60.escalera.alta.valor_uf })
+}
+{
+  // Un conjunto sin dispersion (proyecto nuevo que vendio todo al mismo precio
+  // de lista) no tiene escala de estados que leer: el premio da 0 y la ruta
+  // vuelve a la tarifa en UF/m², o una casa a refaccionar y una remodelada a
+  // nuevo se tasarian iguales.
+  const uniforme = [1, 2, 3].map((i) => ({ rol: 'r' + i, fecha: '2025-0' + i + '-01', m2: M2, uf: 16000 }))
+  const cu = valorComparativoDirecto({ ventas: uniforme, m2Objetivo: M2, serieIndice: null, hoy: HOY })
+  ok('sin dispersion en el conjunto el escalon no paga nada (la ruta cae a la tarifa)',
+    premioEstadoConjunto({ comparativo: cu, remodelacion: 'alta' }).premio_uf === 0,
+    { premio: premioEstadoConjunto({ comparativo: cu, remodelacion: 'alta' }).premio_uf })
+}
+{
+  // Sin gemelas no hay escalera que leer: manda la tarifa en UF/m2 del aditivo.
+  ok('sin comparativo no hay premio por escalon',
+    premioEstadoConjunto({ comparativo: null, remodelacion: 'alta' }) === null)
+  ok('un estado desconocido cae al estado base',
+    premioEstadoConjunto({
+      comparativo: valorComparativoDirecto({ ventas: VENTAS, m2Objetivo: M2, serieIndice: INDICE, hoy: HOY }),
+      remodelacion: 'lo-que-sea',
+    }).premio_uf === 0)
+}
+
+console.log('\n8e) ANTIGUEDAD DE LA REMODELACION — PREMIO INTERPOLADO')
+{
+  ok('recien hecha paga el premio entero', factorAntiguedadRemodelacion('reciente') === 1)
+  ok('a los 3 anos paga 75%', factorAntiguedadRemodelacion('hace3') === 0.75)
+  ok('a los 5 anos paga 50%', factorAntiguedadRemodelacion('hace5') === 0.5)
+  // Lo que se arreglo: antes eran escalones (1,0 / 0,85 / 0,7) y dos casas
+  // remodeladas con un mes de diferencia saltaban 15% de premio.
+  ok('a los 4 anos interpola entre 75% y 50%',
+    Math.abs(factorAntiguedadRemodelacion(4) - 0.625) < 1e-9, { f: factorAntiguedadRemodelacion(4) })
+  ok('a los 1,5 anos interpola entre 100% y 75%',
+    Math.abs(factorAntiguedadRemodelacion(1.5) - 0.875) < 1e-9, { f: factorAntiguedadRemodelacion(1.5) })
+  ok('acepta los anos como texto', factorAntiguedadRemodelacion('4') === factorAntiguedadRemodelacion(4))
+  // El default silencioso sobrevalora: un texto que no empieza con numero caia
+  // en 1 y pagaba el premio ENTERO.
+  ok('extrae los anos de una frase, no paga el premio entero por no parsear',
+    factorAntiguedadRemodelacion('hace 4 anos') === factorAntiguedadRemodelacion(4),
+    { f: factorAntiguedadRemodelacion('hace 4 anos') })
+  ok('y acepta la coma decimal dentro de la frase',
+    factorAntiguedadRemodelacion('hace 1,5 anos') === factorAntiguedadRemodelacion(1.5))
+  ok('mas alla de 5 anos no sigue cayendo', factorAntiguedadRemodelacion(30) === 0.5)
+  ok('sin dato no castiga', factorAntiguedadRemodelacion('') === 1 && factorAntiguedadRemodelacion(null) === 1)
+  ok('respeta la tabla editable de /admin',
+    factorAntiguedadRemodelacion('hace5', { hace5: 0.9 }) === 0.9)
+  // El factor amortiza el PREMIO, nunca la base.
+  const base = tasa({ remodelacion: 'ninguna' }).final
+  const nueva = tasa({ remodelacion: 'alta', tiempo: 'reciente' })
+  const vieja = tasa({ remodelacion: 'alta', tiempo: 'hace5' })
+  ok('una remodelacion alta de 5 anos vale la mitad del premio, no la mitad de la casa',
+    vieja.ajRemo === Math.round(nueva.ajRemo * 0.5) && vieja.final > base,
+    { nueva: nueva.ajRemo, vieja: vieja.ajRemo, base })
+  ok('el premio nunca baja al bajar la antiguedad',
+    ['reciente', 'hace3', 'hace5'].map((t) => tasa({ remodelacion: 'alta', tiempo: t }).ajRemo)
+      .every((x, i, a) => i === 0 || x <= a[i - 1]))
+}
+
 
 console.log('\n8b) DEDUPLICACION DEL POOL')
 {

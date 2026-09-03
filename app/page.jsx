@@ -189,7 +189,7 @@ const FLUJOS = {
 // ─── Ajustes de tasación ──────────────────────────────────────────────────────
 const AJUSTE_REMO = { alta:15, media:10, baja:5, ninguna:0 } // UF/m² sobre m² útiles
 const AJUSTE_JARDIN_POR_M2 = 0.35 // Factor sobre precio/m² útil — jardín vale ~35% del precio/m² construido
-const AJUSTE_TIEMPO = { reciente:1.0, hace3:0.85, hace5:0.7 }
+const AJUSTE_TIEMPO = { reciente:1.0, hace3:0.75, hace5:0.5 } // hitos 0/3/5 anos; el servidor interpola
 const AJUSTES_CARACT = {
   piscina:300, quincho:120, vista:150, jardin:80, doble_altura:100, seguridad:40,
   vista_despejada:100, piscina_edificio:80, gimnasio:40, conserje:30, calefaccion:50,

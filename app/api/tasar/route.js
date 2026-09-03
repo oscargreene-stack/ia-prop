@@ -14,7 +14,7 @@ import {
   poligono, distanciaM, mediana, percentil,
   clasificaTipo, TIPO_OBJETIVO, cutoffVentasStr, esVentaReciente, enBandaM2,
   UFM2_MIN, UFM2_MAX, puntosSuelo, resumenSuelo, sueloPorTramo, sueloDeTramo,
-  valorAditivoCasa, confianzaPorN, buscarVentasPoligono, COSTO_CONSTR_RESIDUAL, BANDA_M2, terrenoDe, sinOutliers, DOTACION_TIPICA_DEPTO,
+  valorAditivoCasa, confianzaPorN, buscarVentasPoligono, factorAntiguedadRemodelacion, premioEstadoConjunto, COSTO_CONSTR_RESIDUAL, BANDA_M2, terrenoDe, sinOutliers, DOTACION_TIPICA_DEPTO,
   valorComparativoDirecto, rangoUnidadesIdenticas, terrenoEsProrrateoBC, CONJUNTO,
 } from '../../lib/tasacion-core.js'
 import { COD_COMUNA, normalizaComuna } from '../../lib/comunas.js'
@@ -52,7 +52,9 @@ const AJUSTES_CONFIG = {
   // Remodelación: UF/m² sobre m² útiles, multiplicado por antigüedad.
   remodelacion: {
     baja: 5, media: 10, alta: 20,
-    tiempo: { reciente: 1.0, hace3: 0.85, hace5: 0.7 },
+    // Antigüedad de la remodelación: el premio se interpola entre estos hitos
+    // (0 / 3 / 5 años). Ver factorAntiguedadRemodelacion en tasacion-core.
+    tiempo: { reciente: 1.0, hace3: 0.75, hace5: 0.5 },
     // 'ninguna' → 0
   },
   // Jardín: cada m² de jardín vale (factor) × precio por m² real de la propiedad.
@@ -142,12 +144,23 @@ function aplicarAjustes({ baseUf, tipo, extras, answers, cfg }) {
 // Ajustes que se devuelven aparte (el frontend los suma sobre el valor base):
 // remodelación (UF/m² × m² útiles × antigüedad), características (UF c/u) y
 // jardín (factor × precio real por m²). Todo desde la config editable.
-function calcAjustesExtra({ cfg, answers, extras, m2Util, precioM2 }) {
+function calcAjustesExtra({ cfg, answers, extras, m2Util, precioM2, premioEstado }) {
   const remoKey = String(answers?.remodelacion || '').toLowerCase()
   const remoUfM2 = (typeof cfg.remodelacion[remoKey] === 'number') ? cfg.remodelacion[remoKey] : 0
-  const tiempoKey = String(answers?.tiempo_remo || '').toLowerCase()
-  const tiempoMult = (cfg.remodelacion.tiempo && typeof cfg.remodelacion.tiempo[tiempoKey] === 'number') ? cfg.remodelacion.tiempo[tiempoKey] : 1
-  const ajRemo = Math.round(remoUfM2 * (m2Util || 0) * tiempoMult)
+  // El premio se interpola por antigüedad: 100% recién hecha, 75% a los 3
+  // años, 50% a los 5. Acepta el hito de la UI o los años declarados.
+  const tiempoMult = factorAntiguedadRemodelacion(answers?.tiempo_remo, cfg.remodelacion.tiempo)
+  // Con gemelas, el estado se paga con el escalón de percentil del propio
+  // conjunto (ya viene amortizado por antigüedad). La tarifa en UF/m² queda
+  // para la ruta aditiva, donde no hay una escala que leer.
+  // El premio en 0 con un estado declarado significa que el conjunto no tiene
+  // dispersión (un proyecto nuevo que vendió todo al mismo precio de lista):
+  // ahí no hay escala que leer y vuelve a mandar la tarifa, o una casa
+  // remodelada a nuevo y una a refaccionar se tasarían iguales. La regla de
+  // coherencia sigue acotando el resultado al techo del conjunto.
+  const ajRemo = premioEstado && premioEstado.premio_uf > 0
+    ? premioEstado.premio_uf
+    : Math.round(remoUfM2 * (m2Util || 0) * tiempoMult)
 
   const lista = [
     ...(Array.isArray(extras?.caracteristicas) ? extras.caracteristicas : []),
@@ -160,7 +173,7 @@ function calcAjustesExtra({ cfg, answers, extras, m2Util, precioM2 }) {
   const factor = (cfg.jardin && typeof cfg.jardin.factor === 'number') ? cfg.jardin.factor : 0
   const ajJardin = (jardinM2 > 0 && precioM2 > 0) ? Math.round(jardinM2 * precioM2 * factor) : 0
 
-  return { ajRemo, ajCar, ajJardin, remoUfM2 }
+  return { ajRemo, ajCar, ajJardin, remoUfM2, premio_estado: premioEstado || null }
 }
 
 export async function POST(request) {
@@ -753,23 +766,47 @@ export async function POST(request) {
   // (caso V. del Monasterio 2577: 11.404 UF contra ventas reales de 14.350+).
   const terrenoProrrateado = terrenoEsProrrateoBC(siiData)
 
+  // El estado se paga como escalón de percentil del propio conjunto cuando hay
+  // gemelas (sin remodelar p32, media p50, alta p75); null cuando no las hay y
+  // el premio vuelve a salir de la tarifa en UF/m².
+  const premioEstado = premioEstadoConjunto({
+    comparativo,
+    remodelacion: answers?.remodelacion,
+    tiempo: answers?.tiempo_remo,
+    tabla: ajustesCfg.remodelacion.tiempo,
+  })
+
   if (comparativo) {
     const { finalUf, lineas } = aplicarAjustes({ baseUf: comparativo.valor_uf, tipo, extras, answers, cfg: ajustesCfg })
     precioM2Base = comparativo.uf_m2
     const tc = comparativo.tasa_conjunto
-    const fuenteAjuste = !comparativo.hubo_ajuste_fecha ? ''
+    const plusvalia = tc
+      ? `${tc.tasa_pct}% anual, la apreciación implícita del propio conjunto `
+        + `(${tc.n_recientes} ventas recientes contra ${tc.n_antiguas} antiguas separadas ${tc.anos} años)`
+      : `el índice del sector, acotado a ${Math.round(CONJUNTO.apreciacionMaxAnual * 100)}% anual compuesto`
+    // Con el nivel nominal no se ajustó nada, pero la plusvalía del conjunto
+    // sigue siendo la que fija el techo de coherencia: callarla dejaría al
+    // informe sin explicar de dónde sale ese techo.
+    const fuenteAjuste = comparativo.hubo_ajuste_fecha
+      ? ` (llevadas a hoy al ${plusvalia})`
       : tc
-        ? ` (llevadas a hoy al ${tc.tasa_pct}% anual, la apreciación implícita del propio conjunto: `
-          + `${tc.n_recientes} ventas recientes contra ${tc.n_antiguas} antiguas separadas ${tc.anos} años)`
-        : ` (llevadas a hoy con el índice del sector, acotado a ${Math.round(CONJUNTO.apreciacionMaxAnual * 100)}% anual compuesto)`
+        ? `. No se ajustan por fecha: ya son ventas de hoy. La plusvalía del conjunto (${plusvalia}) se usa solo para el techo de coherencia`
+        : ''
     const desglose = [{
       concepto: 'Valor por comparación directa con unidades gemelas',
       calculo: `${comparativo.n} ventas del mismo conjunto`
         + ` de los últimos ${Math.round(comparativo.ventana_percentil_meses / 12)} años`
-        + (comparativo.muestra_recortada ? ` (de ${comparativo.n_total} gemelas encontradas)` : '')
+        + (comparativo.muestra_recortada ? ` (de ${comparativo.n_total} gemelas encontradas en ${Math.round(CONJUNTO.mesesMax / 12)} años)` : '')
         + ` entre ${comparativo.uf_m2_min} y ${comparativo.uf_m2_max} UF/m²`
+        + (comparativo.nivel_nominal ? ' a precio pagado' : '')
         + fuenteAjuste
-        + `; en estado base es el percentil ${comparativo.percentil_usado} = ${comparativo.uf_m2} UF/m² x ${m2Construido} m²`,
+        + `. En estado base es el percentil ${comparativo.percentil_usado} = ${comparativo.uf_m2} UF/m² x ${m2Construido} m²`
+        + (premioEstado && premioEstado.premio_uf > 0
+          ? `. El estado declarado (${premioEstado.estado}) sube al percentil ${premioEstado.percentil} = `
+            + `${premioEstado.uf_m2} UF/m², y ese premio se suma aparte`
+            + (premioEstado.factor_antiguedad < 1
+              ? ` amortizado al ${Math.round(premioEstado.factor_antiguedad * 100)}% por la antigüedad de la remodelación` : '')
+          : ''),
       valor_uf: comparativo.valor_uf,
     }]
     if (comparativo.n_descartadas > 0) {
@@ -782,7 +819,10 @@ export async function POST(request) {
     valorDet = {
       valor_uf: finalUf,
       precio_m2: Math.round(finalUf / m2Construido),
-      confianza: confianzaPorN(comparativo.n),
+      // La confianza mide cuánta evidencia hay detrás, y esa es la muestra
+      // COMPLETA de gemelas (la que además calibra la apreciación implícita),
+      // no las 3 ventas de 24 meses con que se lee el percentil de estado.
+      confianza: confianzaPorN(comparativo.n_total),
       metodo: 'comparativo directo: ventas de unidades gemelas del mismo conjunto',
       desglose: [...desglose, ...lineas],
     }
@@ -877,6 +917,7 @@ export async function POST(request) {
     cfg: ajustesCfg, answers, extras,
     m2Util: m2UtilCalc,
     precioM2: precioM2Base || 50,
+    premioEstado,
   })
 
   // ── REGLA DE COHERENCIA ───────────────────────────────────────────────────

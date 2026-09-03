@@ -400,28 +400,133 @@ export const CONJUNTO = {
   // 5% es el techo: acota el índice sectorial sin negar la plusvalía real.
   apreciacionMaxAnual: 0.05,
   mesesRecientes: 24,   // "reciente": cohortes de calibración y carry del techo
-  // Ventana de la MUESTRA con que se lee el percentil de estado. 8 años, la
-  // misma ventana de gemelas: un conjunto chico rota lento (27 casas venden ~1
-  // al año) y con 24 meses quedaban 3 ventas — de las que no se puede leer un
-  // percentil (el p32 cae entre la 1ª y la 2ª) y dejan la confianza en "Baja".
-  // Con 8 años la muestra es de 9 ventas y la confianza sube a "Alta".
-  // OJO: ampliar la ventana NO baja la tasación. Con la plusvalía calibrada del
-  // conjunto (3% anual) las ventas viejas se ajustan POR ENCIMA de las
-  // recientes — la de 2018 (85,4 UF/m²) llega a 107,7 — así que suman masa en
-  // el extremo alto. Quien controla el nivel es el ajuste por fecha, no la
-  // ventana. Bajar esto a 24 recupera el comportamiento anterior.
-  mesesPercentil: 96,
+  // Ventana de la MUESTRA con que se lee el percentil de ESTADO. 24 meses: el
+  // NIVEL lo fija el mercado de hoy, no la historia.
+  // Se probó con 8 años (la ventana completa de gemelas) y sube el valor sin
+  // que el mercado lo respalde: con la plusvalía calibrada del conjunto (3%
+  // anual) las ventas viejas se ajustan POR ENCIMA de las recientes — la de
+  // 2018 (85,4 UF/m²) llega a 107,7, sobre las tres ventas de 2025 — así que
+  // engordan el extremo alto y empujan el percentil hacia arriba (17.794 UF
+  // contra 17.318 con 24 meses). Un ajuste por fecha, por bien calibrado que
+  // esté, no convierte una venta de 2018 en evidencia del nivel de hoy.
+  // La ventana de 8 años (mesesMax) sigue mandando en lo demás: es la muestra
+  // que da el contexto del informe ("9 ventas históricas"), la que calibra la
+  // apreciación implícita del conjunto y la que fija la confianza.
+  mesesPercentil: 24,
   anosMinCalibrar: 1.5, // separación mínima entre cohortes para leer una tasa
   minPorCohorte: 2,     // ventas mínimas a cada lado para calibrar con el conjunto
+}
+
+// ── ANTIGÜEDAD DE LA REMODELACIÓN ───────────────────────────────────────────
+// Una remodelación se paga entera cuando está recién hecha y se va gastando:
+// a los 3 años vale 75% del premio y a los 5 años, 50%. Entre esos hitos el
+// premio se INTERPOLA en vez de saltar por escalones: con la tabla anterior
+// (1,0 / 0,85 / 0,7 por tramo) dos casas remodeladas con un mes de diferencia
+// valían 15% distinto solo por caer a un lado del corte, y el salto se veía
+// entero en el precio publicado.
+// Los factores son editables desde /admin (AJUSTES_CONFIG.remodelacion.tiempo);
+// acá van los años que representa cada hito, que es lo que permite interpolar.
+export const ANTIGUEDAD_REMO = [
+  { clave: 'reciente', anos: 0, factor: 1.00 },  // recién hecha (la UI: <3 años)
+  { clave: 'hace3',    anos: 3, factor: 0.75 },  // 3 años       (la UI: 3 a 5)
+  { clave: 'hace5',    anos: 5, factor: 0.50 },  // 5 años       (la UI: >5)
+]
+
+// Factor por antigüedad de la remodelación. Acepta:
+//   - los hitos de la UI ('reciente' | 'hace3' | 'hace5') -> su factor exacto;
+//   - un número de años (3.5, '4', '4 años') -> interpolado entre los hitos.
+// Más allá del último hito no sigue cayendo: una remodelación de 20 años ya
+// está incorporada al estado de la casa y el premio se acabó, no se vuelve
+// negativo. Sin dato reconocible devuelve 1: no se castiga por no responder.
+export function factorAntiguedadRemodelacion(tiempo, tabla) {
+  const hitos = ANTIGUEDAD_REMO.map((h) => ({
+    anos: h.anos,
+    factor: (tabla && typeof tabla[h.clave] === 'number') ? tabla[h.clave] : h.factor,
+  }))
+  const t = String(tiempo ?? '').trim().toLowerCase()
+  if (!t) return 1
+  const hito = ANTIGUEDAD_REMO.findIndex((h) => h.clave === t)
+  if (hito >= 0) return hitos[hito].factor
+  // El primer número que aparezca, venga solo ('4') o dentro de una frase
+  // ('hace 4 años'). Sin esto, cualquier texto que empiece con palabra caía al
+  // default de 1 y pagaba el premio ENTERO: el default silencioso sobrevalora,
+  // que es la dirección peligrosa.
+  const m = t.match(/-?\d+(?:[.,]\d+)?/)
+  const anos = m ? parseFloat(m[0].replace(',', '.')) : NaN
+  if (!isFinite(anos)) return 1
+  if (anos <= hitos[0].anos) return hitos[0].factor
+  const ultimo = hitos[hitos.length - 1]
+  if (anos >= ultimo.anos) return ultimo.factor
+  for (let i = 1; i < hitos.length; i++) {
+    const a = hitos[i - 1], b = hitos[i]
+    if (anos <= b.anos) {
+      const paso = (anos - a.anos) / (b.anos - a.anos)
+      return a.factor + paso * (b.factor - a.factor)
+    }
+  }
+  return ultimo.factor
 }
 
 // Percentil del rango de gemelas que representa la unidad EN ESTADO BASE, sin
 // remodelar. Las gemelas se vendieron en estados distintos: la mediana del
 // rango incluye a las remodeladas, así que tomarla como base y encima sumar el
 // premio de remodelación contaría lo mismo dos veces. El estado declarado se
-// paga UNA sola vez, con la tarifa de AJUSTES_CONFIG.remodelacion (5/10/20
-// UF/m² para baja/media/alta), que es editable desde /admin.
+// paga UNA sola vez — ver PCTL_ESTADO más abajo.
 export const PCTL_BASE = 32
+
+// ── EL ESTADO ES UN ESCALÓN DE PERCENTIL, NO UNA TARIFA ─────────────────────
+// Cuando hay gemelas, el premio por remodelación NO se cobra con una tarifa en
+// UF/m²: se cobra moviéndose dentro del propio conjunto. Las 27 casas son
+// idénticas en todo menos en su estado, así que la dispersión de precios ES la
+// escala de estados, medida por el mercado y no por nosotros.
+//   sin remodelar -> percentil 32   (la parte baja: se vendieron así)
+//   baja          -> percentil 41
+//   media         -> percentil 50   (la mediana del conjunto)
+//   alta          -> percentil 75   (arriba, sin llegar al máximo)
+// La tarifa de AJUSTES_CONFIG.remodelacion (5/10/20 UF/m², editable desde
+// /admin) sigue mandando en la ruta ADITIVA, donde no hay gemelas de las que
+// leer una escala.
+//
+// Por qué se cambió: con la tarifa, el premio de "media" en el caso V. del
+// Monasterio era de 1.640 UF sobre una base de 16.716, y el total se pasaba del
+// techo de las ventas idénticas (18.929 UF). Media y alta terminaban topadas en
+// el MISMO número: la tasación dejaba de distinguir una casa remodelada de una
+// impecable. La escalera no puede pasarse del techo por construcción — su
+// máximo es una venta que existió.
+export const PCTL_ESTADO = { ninguna: PCTL_BASE, baja: 41, media: 50, alta: 75 }
+export const ESTADO_BASE = 'ninguna'
+
+// Normaliza la respuesta de remodelación a una de las claves de PCTL_ESTADO.
+export function estadoRemodelacion(remodelacion) {
+  const k = String(remodelacion || '').toLowerCase()
+  return Object.prototype.hasOwnProperty.call(PCTL_ESTADO, k) ? k : ESTADO_BASE
+}
+
+// Premio por estado leído como escalón de percentil sobre el propio conjunto.
+// Es la diferencia entre el percentil del estado declarado y el del estado base
+// (sin remodelar), amortizada por la antigüedad de la remodelación. Devuelve
+// null cuando no hay escalera: ahí manda la tarifa en UF/m² del aditivo.
+export function premioEstadoConjunto({ comparativo, remodelacion, tiempo, tabla }) {
+  const esc = comparativo && comparativo.escalera
+  if (!esc) return null
+  const estado = estadoRemodelacion(remodelacion)
+  const base = esc[ESTADO_BASE]
+  const nivel = esc[estado]
+  if (!base || !nivel) return null
+  const bruto = nivel.valor_uf - base.valor_uf
+  // Sin remodelación no hay premio que amortizar: el factor no aplica.
+  const factor = estado === ESTADO_BASE ? 1 : factorAntiguedadRemodelacion(tiempo, tabla)
+  return {
+    estado,
+    percentil: nivel.percentil,
+    percentil_base: base.percentil,
+    uf_m2: nivel.uf_m2,
+    uf_m2_base: base.uf_m2,
+    factor_antiguedad: factor,
+    premio_bruto_uf: bruto,
+    premio_uf: Math.round(bruto * factor),
+  }
+}
 
 const mesDe = (f) => String(f || '').slice(0, 7)
 
@@ -609,12 +714,15 @@ export function gemelasAjustadas({ ventas, m2Objetivo, serieIndice, meses, hoy, 
 // regla de coherencia: el valor final no puede quedar fuera.
 //
 // Se construye sobre precios NOMINALES (lo que realmente se pagó, normalizado a
-// los m² del objetivo) más un carry ACOTADO desde la fecha de venta — nunca
-// sobre valores inflados por el índice del sector. Es la diferencia entre un
-// techo que existió de verdad y uno inventado: con el índice pleno el techo del
-// caso V. del Monasterio subía de 18.400 UF a ~21.000 UF, y el PISO subía a
-// ~19.000 UF, de modo que la regla que debía contener la tasación era la que la
-// empujaba hacia arriba.
+// los m² del objetivo) — nunca sobre valores inflados por el índice del sector.
+// Es la diferencia entre un techo que existió de verdad y uno inventado: con el
+// índice pleno el techo del caso V. del Monasterio subía de 18.400 UF a ~21.000
+// UF, y el PISO a ~19.000 UF, de modo que la regla que debía contener la
+// tasación era la que la empujaba hacia arriba.
+//   piso  = venta idéntica más barata, sin carry (15.500 UF: se pagó eso)
+//   techo = venta idéntica más cara + carry acotado (18.400 UF -> 18.929 UF)
+// El carry va solo en el techo, y a propósito: el piso es un hecho consumado,
+// el techo es hasta dónde puede llegar hoy una unidad de las mismas.
 export function rangoUnidadesIdenticas({ ventas, m2Objetivo, meses = CONJUNTO.mesesCoherencia, hoy, tasaConjunto }) {
   if (!(m2Objetivo > 0)) return null
   const { limpias } = sinOutliersConjunto(ventasGemelas({ ventas, m2Objetivo, meses, hoy }))
@@ -626,32 +734,49 @@ export function rangoUnidadesIdenticas({ ventas, m2Objetivo, meses = CONJUNTO.me
   // permisivo posible, para que la regla acote sin estrangular.
   const cap = CONJUNTO.apreciacionMaxAnual
   const tasa = cal ? Math.min(cap, Math.max(-cap, cal.tasa)) : cap
-  const ufs = limpias
-    .map((g) => g.uf_m2 * m2Objetivo * factorPorTasa(g.fecha, tasa, hoy))
-    .filter((x) => x > 0)
+  // Precios NOMINALES normalizados a los m² del objetivo: lo que de verdad se
+  // pagó por una unidad idéntica. El piso y el techo salen SIEMPRE de acá, no
+  // de la lista ajustada: sobre valores ajustados la regla deja de describir
+  // ventas reales y pasa a describir un mercado calculado.
+  const nominales = limpias
+    .map((g) => ({ uf: g.uf_m2 * m2Objetivo, fecha: g.fecha }))
+    .filter((x) => x.uf > 0)
   // Con una sola venta min === max: en vez de acotar, clavaría la tasación en
   // ese precio y borraría remodelación y características. Mejor no acotar.
-  if (ufs.length < CONJUNTO.minCoherencia) return null
-  const nominales = limpias.map((g) => g.uf_m2 * m2Objetivo).filter((x) => x > 0)
+  if (nominales.length < CONJUNTO.minCoherencia) return null
+  const barata = nominales.reduce((a, b) => (b.uf < a.uf ? b : a))
+  const cara = nominales.reduce((a, b) => (b.uf > a.uf ? b : a))
+  // PISO: la venta más barata TAL CUAL se pagó, sin carry. Es el precio que el
+  // mercado ya aceptó por una unidad idéntica; subirle plusvalía lo convierte
+  // en un mínimo que nunca existió y la regla que debía CONTENER la tasación
+  // termina empujándola hacia arriba. En el caso V. del Monasterio el piso con
+  // carry daba 16.244 UF cuando la venta real fue de 15.500 UF.
+  // TECHO: la venta más cara MÁS su carry acotado hasta hoy. Acá el carry sí
+  // corresponde: un techo congelado en el precio de hace dos años le negaría
+  // al vendedor la plusvalía que el propio conjunto demuestra.
   return {
-    min_uf: Math.round(Math.min(...ufs)),
-    max_uf: Math.round(Math.max(...ufs)),
-    max_nominal_uf: Math.round(Math.max(...nominales)),
-    min_nominal_uf: Math.round(Math.min(...nominales)),
+    min_uf: Math.round(barata.uf),
+    max_uf: Math.round(cara.uf * factorPorTasa(cara.fecha, tasa, hoy)),
+    max_nominal_uf: Math.round(cara.uf),
+    min_nominal_uf: Math.round(barata.uf),
     carry_pct: Math.round(tasa * 1000) / 10,
     carry_fuente: cal ? cal.fuente : 'tope de ' + Math.round(cap * 100) + '% anual (sin ventas propias para calibrar)',
-    n: ufs.length,
+    n: nominales.length,
     meses,
   }
 }
 
 // Valor por comparación directa con las gemelas. null si no alcanzan.
 //
-// El percentil de ESTADO se lee sobre la muestra de CONJUNTO.mesesPercentil
-// (8 años): en un conjunto chico las ventas de 24 meses se cuentan con los
-// dedos de una mano y de tres puntos no sale un percentil. Las ventas ya vienen
-// llevadas a hoy con la apreciación del propio conjunto, así que las antiguas
-// entran en moneda de hoy, no a su precio de entonces.
+// El percentil de ESTADO se lee sobre las ventas de CONJUNTO.mesesPercentil
+// (24 meses) y sobre sus precios NOMINALES: dentro de dos años una venta es el
+// mercado de hoy, y agregarle carry sería calcular encima de un hecho ya
+// observado. El nivel lo fija lo que se pagó, no lo que se proyecta.
+// Si en 24 meses no hay CONJUNTO.minVentas ventas, la muestra se estira a la
+// ventana completa y AHÍ sí se usan los valores llevados a hoy: sin ajuste por
+// fecha, una venta de 2018 fijaría el nivel de 2026.
+// Devuelve además la ESCALERA de estado completa (PCTL_ESTADO), para que el
+// premio por remodelación salga de la dispersión del propio conjunto.
 export function valorComparativoDirecto({ ventas, m2Objetivo, serieIndice, hoy, meses, pctl = PCTL_BASE }) {
   if (!(m2Objetivo > 0)) return null
   const { ajustadas, descartadas, tasa_conjunto } = gemelasAjustadas({ ventas, m2Objetivo, serieIndice, hoy, meses })
@@ -661,14 +786,32 @@ export function valorComparativoDirecto({ ventas, m2Objetivo, serieIndice, hoy, 
   const enVentana = ajustadas.filter((g) => g.fecha >= corte)
   // Si la ventana del percentil recorta la muestra por debajo del mínimo, se
   // usan todas las gemelas: quedarse sin comparables es peor que estirar años.
-  const pool = enVentana.length >= CONJUNTO.minVentas ? enVentana : ajustadas
-  const lista = pool.map((g) => g.uf_m2_ajustado)
+  const reciente = enVentana.length >= CONJUNTO.minVentas
+  const pool = reciente ? enVentana : ajustadas
+  // Nominal dentro de la ventana corta; llevado a hoy solo si hubo que estirar.
+  const lista = pool.map((g) => (reciente ? g.uf_m2 : g.uf_m2_ajustado))
   // Se redondea ANTES de multiplicar: el informe muestra "percentil 32 =
   // <uf_m2> UF/m² x <m²>" y ese producto tiene que dar el valor que se publica.
+  const nivel = (p) => {
+    const v = r1(percentilInterp(lista, p))
+    return v > 0 ? { percentil: p, uf_m2: v, valor_uf: Math.round(v * m2Objetivo) } : null
+  }
   const ufM2 = r1(percentilInterp(lista, pctl))
   if (!(ufM2 > 0)) return null
+  const escalera = {}
+  for (const estado of Object.keys(PCTL_ESTADO)) {
+    const n = nivel(PCTL_ESTADO[estado])
+    if (n) escalera[estado] = n
+  }
+  // El escalón base es el percentil que de verdad se publicó, no PCTL_ESTADO
+  // .ninguna: el premio se mide contra escalera[ESTADO_BASE] pero se suma sobre
+  // valor_uf, y con un `pctl` distinto del default los dos dejarían de hablar
+  // del mismo número (con pctl 60, alta terminaba 885 UF sobre su propio p75).
+  escalera[ESTADO_BASE] = { percentil: pctl, uf_m2: ufM2, valor_uf: Math.round(ufM2 * m2Objetivo) }
   return {
     uf_m2: ufM2,
+    escalera,
+    nivel_nominal: reciente,
     uf_m2_mediana: r1(mediana(lista)),
     uf_m2_min: r1(Math.min(...lista)),
     uf_m2_max: r1(Math.max(...lista)),
@@ -676,13 +819,15 @@ export function valorComparativoDirecto({ ventas, m2Objetivo, serieIndice, hoy, 
     percentil_usado: pctl,
     n: pool.length,
     n_total: ajustadas.length,
-    ventana_percentil_meses: pool.length === ajustadas.length ? (meses || CONJUNTO.mesesMax) : mesesPctl,
+    ventana_percentil_meses: reciente ? mesesPctl : (meses || CONJUNTO.mesesMax),
     muestra_recortada: pool.length !== ajustadas.length,
     tasa_conjunto: tasa_conjunto || null,
     n_descartadas: descartadas.length,
     ventas: pool,
     ventas_todas: ajustadas,
-    hubo_ajuste_fecha: pool.some((g) => g.factor_fecha !== 1),
+    // Solo cuando el NIVEL se leyó sobre valores llevados a hoy: con la muestra
+    // nominal de 24 meses el informe no puede decir que ajustó por fecha.
+    hubo_ajuste_fecha: !reciente && pool.some((g) => g.factor_fecha !== 1),
   }
 }
 

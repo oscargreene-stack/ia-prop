@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic'
 const DEFAULTS = {
   piso: { pctPorCada5SobreEl5: 0.02, pisoBajoUmbral: 2, pctPisoBajo: -0.02 },
   orientacion: { norte: 0.04, sur: -0.03, oriente: 0.02, poniente: -0.02 },
-  remodelacion: { baja: 5, media: 10, alta: 20, tiempo: { reciente: 1.0, hace3: 0.85, hace5: 0.7 } },
+  remodelacion: { baja: 5, media: 10, alta: 20, tiempo: { reciente: 1.0, hace3: 0.75, hace5: 0.5 } },
   jardin: { factor: 0.3333 },
   caracteristicas: {
     piscina:300, quincho:120, vista:150, jardin:80, doble_altura:100, seguridad:40,
