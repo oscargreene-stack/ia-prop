@@ -8,16 +8,12 @@
 // Ventas: cbr_limpio x consolidado, unidades con cod_*_bc = 15161-3669-90461.
 import {
   valorComparativoDirecto, rangoUnidadesIdenticas, terrenoEsProrrateoBC,
-  valorAditivoCasa, tasaApreciacionConjunto, anosEntre, CONJUNTO, PCTL_BASE,
+  valorAditivoCasa, tasaApreciacionConjunto, anosEntre, premioEstadoConjunto,
+  factorAntiguedadRemodelacion, CONJUNTO, PCTL_BASE, PCTL_ESTADO,
 } from '../app/lib/tasacion-core.js'
 
 const M2 = 164
 const HOY = '2026-09-01'
-
-// Tarifa de remodelación de AJUSTES_CONFIG (editable desde /admin), sobre m²
-// útiles y multiplicada por la antigüedad de la remodelación.
-const REMO_UF_M2 = { ninguna: 0, baja: 5, media: 10, alta: 20 }
-const REMO_TIEMPO = { reciente: 1.0, hace3: 0.85, hace5: 0.7 }
 
 // Las 20 ventas CBR del condominio. Las casas 12, 3 y 8 aparecen DOS veces:
 // esas ventas repetidas son la evidencia dura de la plusvalía del conjunto.
@@ -60,16 +56,17 @@ const INDICE_PLENO = Array.from({ length: 12 }, (_, i) => ({
 
 const uf = (x) => x == null ? 'n/d' : Math.round(x).toLocaleString('es-CL') + ' UF'
 
-// Reproduce la cadena de la ruta: base comparativa -> premio de remodelación
-// -> regla de coherencia sobre el TOTAL.
+// Reproduce la cadena de la ruta: base comparativa -> premio de estado por
+// escalón de percentil -> regla de coherencia sobre el TOTAL.
 function corre({ remodelacion = 'ninguna', tiempo = 'reciente', serieIndice = INDICE, meses } = {}) {
   const c = valorComparativoDirecto({ ventas: VENTAS, m2Objetivo: M2, serieIndice, hoy: HOY, meses })
   const rango = rangoUnidadesIdenticas({ ventas: VENTAS, m2Objetivo: M2, hoy: HOY })
   if (!c) return { c: null, rango, final: null }
-  const ajRemo = Math.round((REMO_UF_M2[remodelacion] || 0) * M2 * (REMO_TIEMPO[tiempo] || 1))
+  const premio = premioEstadoConjunto({ comparativo: c, remodelacion, tiempo })
+  const ajRemo = Math.max(0, premio ? premio.premio_uf : 0)
   const total = c.valor_uf + ajRemo
   const final = rango ? Math.min(rango.max_uf, Math.max(rango.min_uf, total)) : total
-  return { c, rango, ajRemo, total, final, clamp: final !== total }
+  return { c, rango, premio, ajRemo, total, final, clamp: final !== total }
 }
 
 console.log('\n════ AV V DEL MONASTERIO 2577 CASA 21 — ROL 15161-3669-481 ════')
@@ -85,12 +82,15 @@ console.log('  ya no corre: terrenoEsProrrateoBC(copropiedad + bien_comun) = '
 
 const base = corre()
 console.log(`GEMELAS (mismo conjunto, ±10% de ${M2} m², últimos ${CONJUNTO.mesesMax} meses)`)
-for (const g of base.c.ventas) {
+for (const g of base.c.ventas_todas) {
   console.log(`  casa ${String(g.casa).padStart(2)} · ${g.fecha} · ${uf(g.uf).padStart(10)}`
     + ` · ${g.uf_m2.toFixed(1)} UF/m² x${g.factor_fecha} -> ${g.uf_m2_ajustado.toFixed(1)} UF/m²`)
 }
 console.log(`  descartadas por outlier (fuera del 60-140% de la mediana): ${base.c.n_descartadas}`)
-console.log(`  rango ajustado ${base.c.uf_m2_min}–${base.c.uf_m2_max} UF/m² · mediana ${base.c.uf_m2_mediana}`)
+console.log(`  rango de la muestra del nivel ${base.c.uf_m2_min}–${base.c.uf_m2_max} UF/m² · mediana ${base.c.uf_m2_mediana}`)
+console.log(`  las ${base.c.n_total} gemelas dan el contexto y calibran la plusvalía; el NIVEL lo fijan`
+  + ` las ${base.c.n} ventas de ${CONJUNTO.mesesPercentil} meses, a precio pagado:`)
+for (const g of base.c.ventas) console.log(`    ${g.fecha} · ${uf(g.uf)} · ${g.uf_m2.toFixed(1)} UF/m²`)
 console.log(`  base en estado sin remodelar = percentil ${PCTL_BASE} = ${base.c.uf_m2} UF/m² = ${uf(base.c.valor_uf)}`)
 console.log(`  coherencia NOMINAL (idénticas, ${base.rango.meses} meses, n=${base.rango.n}): `
   + `${uf(base.rango.min_nominal_uf)} – ${uf(base.rango.max_nominal_uf)} pagadas`
@@ -110,18 +110,23 @@ for (const [casa, f1, u1, f2, u2] of [[12, '2017-01-18', 13250, '2025-09-10', 18
 }
 console.log(`  el índice del sector marcaba 13,5% anual: 3x la plusvalía real de estas casas\n`)
 
-console.log('RESULTADOS — remodelación reciente, tarifa 5/10/20 UF/m² sobre 164 m²')
+console.log('RESULTADOS — el estado se paga como ESCALÓN DE PERCENTIL del propio conjunto')
+console.log('  (las 27 casas son idénticas salvo en su estado: la dispersión de precios ES la escala)')
 for (const estado of ['ninguna', 'baja', 'media', 'alta']) {
   const r = corre({ remodelacion: estado })
-  console.log(`  ${estado.padEnd(8)} base ${uf(r.c.valor_uf).padStart(10)}`
-    + ` + remodelación ${uf(r.ajRemo).padStart(9)} = ${uf(r.total).padStart(10)}`
-    + ` -> ${uf(r.final).padStart(10)}` + (r.clamp ? '  (techo por coherencia)' : ''))
+  console.log(`  ${estado.padEnd(8)} p${String(PCTL_ESTADO[estado]).padStart(2)} ${String(r.premio.uf_m2).padStart(6)} UF/m²`
+    + ` = base ${uf(r.c.valor_uf).padStart(10)} + premio ${uf(r.ajRemo).padStart(8)}`
+    + ` = ${uf(r.final).padStart(10)}` + (r.clamp ? '  (techo por coherencia)' : ''))
 }
+console.log(`  ninguna se topa: el techo de la escalera es el p75 de ventas que existieron`)
 
-console.log('\nEFECTO DE LA ANTIGÜEDAD DE LA REMODELACIÓN (calidad media)')
-for (const t of ['reciente', 'hace3', 'hace5']) {
-  const r = corre({ remodelacion: 'media', tiempo: t })
-  console.log(`  ${t.padEnd(9)} + ${uf(r.ajRemo).padStart(9)} = ${uf(r.final)}`)
+console.log('\nEFECTO DE LA ANTIGÜEDAD DE LA REMODELACIÓN (calidad alta)')
+console.log('  el premio se interpola entre los hitos 0 / 3 / 5 años, no salta por tramos')
+for (const t of ['reciente', 1, 'hace3', 4, 'hace5', 10]) {
+  const r = corre({ remodelacion: 'alta', tiempo: t })
+  const et = typeof t === 'number' ? `${t} año(s)` : t
+  console.log(`  ${String(et).padEnd(9)} x${r.premio.factor_antiguedad.toFixed(2)}`
+    + ` + ${uf(r.ajRemo).padStart(9)} = ${uf(r.final)}`)
 }
 
 console.log('\nSENSIBILIDAD — el indice del sector ya NO mueve la tasacion')
