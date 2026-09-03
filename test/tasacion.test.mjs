@@ -7,7 +7,7 @@ import {
   valorComparativoDirecto, rangoUnidadesIdenticas, terrenoEsProrrateoBC,
   ventasGemelas, sinOutliersConjunto, factorFecha, percentilInterp,
   valorAditivoCasa, tasaApreciacionConjunto, acotaFactor, anosEntre, confianzaPorN,
-  CONJUNTO, PCTL_BASE,
+  construirSerieMercado, CONJUNTO, PCTL_BASE,
 } from '../app/lib/tasacion-core.js'
 
 const M2 = 164
@@ -58,10 +58,11 @@ export const INDICE_PLENO = Array.from({ length: 12 }, (_, i) => ({
 }))
 
 // Reproduce la cadena de /api/tasar: base comparativa -> premio de
-// remodelación -> regla de coherencia sobre el TOTAL.
+// remodelación -> regla de coherencia sobre el TOTAL. Igual que la ruta, la
+// coherencia usa el MISMO índice real que el ajuste por fecha.
 export function tasa({ remodelacion = 'ninguna', serieIndice = INDICE, meses, ventas = VENTAS } = {}) {
   const c = valorComparativoDirecto({ ventas, m2Objetivo: M2, serieIndice, hoy: HOY, meses })
-  const rango = rangoUnidadesIdenticas({ ventas, m2Objetivo: M2, hoy: HOY })
+  const rango = rangoUnidadesIdenticas({ ventas, m2Objetivo: M2, hoy: HOY, serieIndice })
   if (!c) return { c: null, rango, final: null }
   const ajRemo = Math.round((REMO_UF_M2[remodelacion] || 0) * M2)
   const total = c.valor_uf + ajRemo
@@ -83,20 +84,22 @@ console.log('\n4) JERARQUIA DE METODOS — casa 21 de V. del Monasterio 2577')
   ok('el aditivo con terreno prorrateado daba 11.404 UF', viejo.total_uf === 11404, { viejo })
 }
 {
-  // El valor NUNCA puede superar el maximo NOMINAL de una unidad identica de
-  // los ultimos 24 meses (18.400 UF) mas el carry acotado. Ese es el limite
-  // duro que produccion violaba (daba 19.285 UF).
+  // El valor NUNCA puede superar el maximo de una unidad identica de los
+  // ultimos 24 meses llevado a hoy con la variacion REAL del mercado. Ese es
+  // el limite duro que produccion violaba (daba 19.285 UF).
   const r = tasa({ remodelacion: 'ninguna' })
   const techo = tasa().rango.max_uf
-  ok('sin remodelar queda bajo el maximo nominal + carry', r.final <= techo, { final: r.final, techo })
+  ok('sin remodelar queda bajo el maximo de identicas llevado a hoy', r.final <= techo, { final: r.final, techo })
   ok('sin remodelar queda bajo el maximo nominal de 18.400 UF por si solo',
     r.final < 18400, { final: r.final })
-  // Encaje del ladder de estado dentro de las ventas reales del conjunto.
-  ok('sin remodelar cae en 17.000-18.000 UF', entre(r.final, 17000, 18000), { final: r.final })
+  // Encaje del ladder dentro de la realidad que describio el dueño del caso:
+  // "las casas no remodeladas cuestan entre 14 y 15 mil, las remodeladas
+  // desde 15 a 17". Con el ajuste por indice REAL el modelo cae ahi solo.
+  ok('sin remodelar cae en 14.500-15.500 UF', entre(r.final, 14500, 15500), { final: r.final })
 }
 {
   const r = tasa({ remodelacion: 'media' })
-  ok('remodelacion media cae en 18.000-19.000 UF', entre(r.final, 18000, 19000), { final: r.final })
+  ok('remodelacion media cae en 16.000-17.000 UF', entre(r.final, 16000, 17000), { final: r.final })
 }
 {
   // Monotonía: más remodelación nunca puede valer menos.
@@ -135,36 +138,43 @@ console.log('\n6) TIPOLOGIA Y VENTANA')
   ok('conserva las 10 ventas de 164 m2 de la ventana', g.length === 10, { n: g.length })
 }
 
-console.log('\n7) AJUSTE POR FECHA')
+console.log('\n7) AJUSTE POR FECHA — LA VARIACION REAL DEL MERCADO, EN AMBAS DIRECCIONES')
 {
   ok('sin serie utilizable el factor es 1', factorFecha('2019-01-31', null) === 1)
-  ok('una venta vieja se ajusta hacia arriba', factorFecha('2019-01-31', INDICE) > 1,
-    { f: factorFecha('2019-01-31', INDICE) })
-  ok('una venta reciente sobre el nivel actual se ajusta hacia abajo',
-    factorFecha('2025-09-10', INDICE) < 1, { f: factorFecha('2025-09-10', INDICE) })
+  // El contrato pedido por el dueño del producto: "si el mercado subio un 3%
+  // desde que se compro la propiedad, esta sube un 3%; si bajo un 1%, baja un
+  // 1%". El factor es el nivel actual del indice sobre el nivel a la fecha de
+  // la venta (interpolado), SIN tasa fija ni tope de tasa anual.
+  const f2019 = factorFecha('2019-01-31', INDICE, HOY)
+  ok('una venta vieja sube exactamente lo que subio el mercado (2019: +4,3%)',
+    entre(f2019, 1.03, 1.06), { f: f2019 })
+  const f2509 = factorFecha('2025-09-10', INDICE, HOY)
+  ok('una venta reciente BAJA si el mercado bajo desde entonces (sep-25: -3,2%)',
+    entre(f2509, 0.95, 0.99), { f: f2509 })
+  const f2022 = factorFecha('2022-05-03', INDICE, HOY)
+  ok('el mercado cayo desde el peak 2022: esa venta se ajusta hacia ABAJO',
+    f2022 < 1, { f: f2022 })
   ok('una venta futura no se ajusta', factorFecha('2027-01-01', INDICE) === 1)
-  // Un índice absurdo no puede duplicar la tasación: el tope es una TASA ANUAL
-  // compuesta, no un factor plano, así que crece con los años transcurridos.
-  const loco = [{ trimestre: '2019-06', uf_m2: 1 }, { trimestre: '2026-06', uf_m2: 900 }]
-  const anos = anosEntre('2019-01-31', HOY)
-  const techo = Math.pow(1 + CONJUNTO.apreciacionMaxAnual, anos)
-  const f = factorFecha('2019-01-31', loco, HOY)
-  ok('un indice roto queda topado en ' + (CONJUNTO.apreciacionMaxAnual * 100) + '% anual compuesto',
-    Math.abs(f - techo) < 1e-9, { f, techo, anos })
-  ok('y ese tope es mas estricto que el tope plano anterior', f < CONJUNTO.factorMax, { f })
+  ok('una venta anterior al inicio de la serie usa el primer punto (subajusta)',
+    Math.abs(factorFecha('2010-01-01', INDICE, HOY) - factorFecha('2015-01-01', INDICE, HOY)) < 1e-9)
 }
 {
-  // El caso concreto que rompio produccion: la venta de 2019 a 87,5 UF/m2.
-  // Con el indice pleno (13,5% anual) el factor bruto era ~2,5x -> 219 UF/m2;
-  // acotado a 5% anual sobre 7,6 anos queda en 1,44x -> 126 UF/m2.
+  // Guardas ABSOLUTAS: un indice roto no puede duplicar ni demoler una
+  // tasacion. Son el unico tope — el tope del ajuste normal ES la realidad
+  // del indice. La proteccion contra el indice de tipologias MEZCLADAS
+  // (13,5% anual) es estructural: /api/tasar solo pasa series del mismo tipo.
+  const disparado = [{ trimestre: '2019-06', uf_m2: 1 }, { trimestre: '2026-06', uf_m2: 900 }]
+  ok('un indice disparado queda en el tope absoluto (' + CONJUNTO.factorMax + 'x)',
+    factorFecha('2019-01-31', disparado, HOY) === CONJUNTO.factorMax)
+  const desplomado = [{ trimestre: '2019-06', uf_m2: 900 }, { trimestre: '2026-06', uf_m2: 1 }]
+  ok('un indice desplomado queda en el piso absoluto (' + CONJUNTO.factorMin + 'x)',
+    factorFecha('2019-01-31', desplomado, HOY) === CONJUNTO.factorMin)
   const fPleno = factorFecha('2019-01-31', INDICE_PLENO, HOY)
-  const anos = anosEntre('2019-01-31', HOY)
-  ok('el indice pleno queda acotado a la tasa maxima',
-    Math.abs(fPleno - Math.pow(1 + CONJUNTO.apreciacionMaxAnual, anos)) < 1e-9, { fPleno })
-  ok('la venta de 2019 ya no se ajusta sobre lo que nunca existio',
-    87.5 * fPleno < 130, { ajustado: Math.round(87.5 * fPleno * 10) / 10 })
+  ok('el indice pleno (13,5% anual) no pasa del tope absoluto',
+    fPleno === CONJUNTO.factorMax, { fPleno })
 }
 {
+  // acotaFactor sigue vigente para el RESPALDO (carry por tasa del conjunto).
   ok('acotaFactor respeta un factor dentro de la tasa maxima',
     Math.abs(acotaFactor(1.05, 2) - 1.05) < 1e-9, { f: acotaFactor(1.05, 2) })
   ok('acotaFactor es simetrico hacia abajo',
@@ -172,30 +182,39 @@ console.log('\n7) AJUSTE POR FECHA')
   ok('acotaFactor a 0 anos no mueve nada', acotaFactor(3, 0) === 1, { f: acotaFactor(3, 0) })
 }
 
-console.log('\n7b) CALIBRACION CON EL PROPIO CONJUNTO')
+console.log('\n7b) PRIORIDAD DEL AJUSTE: INDICE REAL PRIMERO, CONJUNTO DE RESPALDO')
 {
+  // Con una serie utilizable manda el INDICE REAL, no una tasa fija: la
+  // tasacion sigue al mercado (el rechazo del "3% anual" fijo fue explicito).
+  const conIndice = valorComparativoDirecto({ ventas: VENTAS, m2Objetivo: M2, serieIndice: INDICE, hoy: HOY })
+  ok('con serie utilizable la fuente del ajuste es el indice del mercado',
+    conIndice.fuente_ajuste === 'indice_mercado', { fuente: conIndice.fuente_ajuste })
+  ok('cada gemela declara su ajuste real en %',
+    conIndice.ventas.every((g) => typeof g.ajuste_pct === 'number'), {})
+  ok('hay ajustes hacia ARRIBA (ventas viejas) y hacia ABAJO (mercado cayo desde 2022)',
+    conIndice.ajuste_min_pct < 0 && conIndice.ajuste_max_pct > 0,
+    { min: conIndice.ajuste_min_pct, max: conIndice.ajuste_max_pct })
+}
+{
+  // RESPALDO: sin serie utilizable, el conjunto calibra su propia apreciacion.
   const t = tasaApreciacionConjunto({ ventas: VENTAS, m2Objetivo: M2, hoy: HOY })
   ok('el conjunto calibra su propia apreciacion', t != null && t.tasa > 0, { t })
   ok('y da una tasa realista (1%-5% anual), no el 13,5% del sector',
     t.tasa > 0.01 && t.tasa <= CONJUNTO.apreciacionMaxAnual, { tasa_pct: t.tasa_pct })
   ok('usa ventas recientes contra antiguas del propio conjunto',
     t.n_recientes >= CONJUNTO.minPorCohorte && t.n_antiguas >= CONJUNTO.minPorCohorte, { t })
-  // La prueba de fuego: con la tasa propia del conjunto, el indice del sector
-  // deja de importar. Mismo resultado con un indice de 13,5% y sin indice.
-  const conPleno = tasa({ serieIndice: INDICE_PLENO }).final
-  const conPlano = tasa({ serieIndice: INDICE }).final
-  const sinIndice = tasa({ serieIndice: null }).final
-  ok('la tasacion es INMUNE al indice del sector cuando el conjunto se calibra solo',
-    conPleno === conPlano && conPlano === sinIndice, { conPleno, conPlano, sinIndice })
+  const sinSerie = valorComparativoDirecto({ ventas: VENTAS, m2Objetivo: M2, serieIndice: null, hoy: HOY })
+  ok('sin serie la fuente del ajuste es la tasa del conjunto',
+    sinSerie.fuente_ajuste === 'tasa_conjunto', { fuente: sinSerie.fuente_ajuste })
 }
 {
-  // Sin ventas antiguas no se puede calibrar: manda el indice, ya acotado.
+  // Sin ventas antiguas no se puede calibrar el respaldo.
   const soloRecientes = VENTAS.slice(0, 3)
   ok('sin cohorte antigua no hay calibracion propia',
     tasaApreciacionConjunto({ ventas: soloRecientes, m2Objetivo: M2, hoy: HOY }) === null)
 }
 
-console.log('\n8) REGLA DE COHERENCIA (TECHO NOMINAL)')
+console.log('\n8) REGLA DE COHERENCIA (PRECIOS REALES LLEVADOS A HOY CON EL MERCADO)')
 {
   const r = tasa({ remodelacion: 'alta' })
   ok('remodelacion alta se topa en el maximo de las identicas de 24 meses',
@@ -208,27 +227,32 @@ console.log('\n8) REGLA DE COHERENCIA (TECHO NOMINAL)')
   ok('ningun resultado queda bajo el minimo de las identicas',
     ['ninguna', 'baja', 'media', 'alta'].every((e) => tasa({ remodelacion: e }).final >= r.rango.min_uf),
     { min: r.rango.min_uf })
-  // EL PUNTO DEL FIX: el techo se construye sobre PRECIOS NOMINALES (lo que de
-  // verdad se pago) mas un carry acotado, nunca sobre valores inflados por el
-  // indice del sector.
+  // El techo se construye sobre PRECIOS NOMINALES (lo que de verdad se pago)
+  // llevados a hoy con la variacion REAL del mercado — que desde sep-2025
+  // BAJO, asi que el techo queda BAJO la venta de 18.400 UF. Un indice de
+  // tipologias mezcladas jamas vuelve a inflarlo: la ruta no se lo pasa.
   ok('el maximo nominal es la venta real de 18.400 UF', r.rango.max_nominal_uf === 18400, { rango: r.rango })
   ok('el minimo nominal es la venta real de 15.500 UF', r.rango.min_nominal_uf === 15500, { rango: r.rango })
-  const carryMax = Math.pow(1 + CONJUNTO.apreciacionMaxAnual, anosEntre('2025-09-10', HOY))
-  ok('el techo es el nominal mas carry acotado, y nada mas',
-    r.rango.max_uf <= Math.round(18400 * carryMax) && r.rango.max_uf >= 18400,
-    { max: r.rango.max_uf, tope: Math.round(18400 * carryMax) })
-  ok('el carry del techo nunca supera el ' + (CONJUNTO.apreciacionMaxAnual * 100) + '% anual',
-    r.rango.carry_pct <= CONJUNTO.apreciacionMaxAnual * 100, { carry_pct: r.rango.carry_pct })
+  ok('el mercado bajo desde sep-2025: el techo queda BAJO el nominal',
+    r.rango.max_uf < 18400 && r.rango.max_uf > 17000, { max: r.rango.max_uf })
+  ok('la fuente del carry es la variacion real del mercado',
+    r.rango.carry_pct === null && /variación real/.test(r.rango.carry_fuente), { rango: r.rango })
 }
 {
-  // El techo NO se mueve aunque el indice del sector se vuelva loco: es la
-  // diferencia entre contener la tasacion y empujarla hacia arriba.
+  // RESPALDO sin serie: nominal mas carry por la tasa del conjunto, acotada.
   const a = rangoUnidadesIdenticas({ ventas: VENTAS, m2Objetivo: M2, hoy: HOY })
-  ok('el techo no depende del indice del sector', a.max_uf < 19500, { max: a.max_uf })
-  ok('ninguna corrida puede pasar de 18.400 UF + carry acotado',
+  const carryMax = Math.pow(1 + CONJUNTO.apreciacionMaxAnual, anosEntre('2025-09-10', HOY))
+  ok('sin serie, el techo es el nominal mas carry acotado, y nada mas',
+    a.max_uf <= Math.round(18400 * carryMax) && a.max_uf >= 18400,
+    { max: a.max_uf, tope: Math.round(18400 * carryMax) })
+  ok('sin serie, el carry nunca supera el ' + (CONJUNTO.apreciacionMaxAnual * 100) + '% anual',
+    a.carry_pct <= CONJUNTO.apreciacionMaxAnual * 100, { carry_pct: a.carry_pct })
+  ok('ninguna corrida puede pasar del techo de su propio rango',
     ['ninguna', 'baja', 'media', 'alta'].every((e) =>
-      [INDICE, INDICE_PLENO, null].every((ix) => tasa({ remodelacion: e, serieIndice: ix }).final <= a.max_uf)),
-    { max: a.max_uf })
+      [INDICE, INDICE_PLENO, null].every((ix) => {
+        const t = tasa({ remodelacion: e, serieIndice: ix })
+        return t.final <= t.rango.max_uf
+      })), {})
 }
 {
   // Con UNA sola venta reciente min === max: acotar ahi clavaria la tasacion en
@@ -251,13 +275,15 @@ console.log('\n8c) MUESTRA DEL PERCENTIL DE ESTADO — 8 ANOS')
   ok('con 9 comparables la confianza es Alta, no Baja', confianzaPorN(c.n) === 'Alta', { n: c.n })
   ok('entran ventas de mas de 24 meses atras',
     c.ventas.some((g) => g.fecha < '2024-09-01'), { n: c.n })
-  // Ampliar la ventana NO baja la tasacion: con la plusvalia calibrada del
-  // conjunto las ventas viejas se ajustan POR ENCIMA de las recientes. Por eso
-  // quien controla el nivel es el ajuste por fecha, no la ventana.
+  // Con el indice REAL cada venta entra en moneda de hoy: la de 2018 sube lo
+  // que el mercado subio desde 2018 (+6%) y la de sep-2025 baja lo que el
+  // mercado bajo desde entonces (-3%). Las ajustadas convergen al nivel
+  // actual del mercado en vez de apilarse en el extremo alto.
   const vieja = c.ventas.find((g) => g.fecha === '2018-09-11')
   const reciente = c.ventas.find((g) => g.fecha === '2025-01-23')
-  ok('la venta de 2018 ajustada supera a la de 2025 (por eso la muestra larga sube el valor)',
-    vieja.uf_m2 < reciente.uf_m2 && vieja.uf_m2_ajustado > reciente.uf_m2_ajustado,
+  ok('la venta de 2018 sube y la de ene-2025 baja: ambas quedan en niveles comparables',
+    vieja.uf_m2_ajustado > vieja.uf_m2 && reciente.uf_m2_ajustado < reciente.uf_m2
+      && Math.abs(vieja.uf_m2_ajustado - reciente.uf_m2_ajustado) < 5,
     { v2018: [vieja.uf_m2, Math.round(vieja.uf_m2_ajustado * 10) / 10],
       v2025: [reciente.uf_m2, Math.round(reciente.uf_m2_ajustado * 10) / 10] })
 }
@@ -301,6 +327,34 @@ console.log('\n10) FALLBACK CUANDO NO HAY GEMELAS')
     valorComparativoDirecto({ ventas: [], m2Objetivo: M2, serieIndice: INDICE, hoy: HOY }) === null)
   ok('sin m2 construidos tampoco',
     valorComparativoDirecto({ ventas: VENTAS, m2Objetivo: 0, serieIndice: INDICE, hoy: HOY }) === null)
+}
+
+console.log('\n10b) SERIE DE MERCADO DEL MISMO TIPO (construirSerieMercado)')
+{
+  // Ventas sinteticas: mercado que sube 2013-2022 y baja 2022-2026 (como el
+  // real de Lo Barnechea). 3 ventas por año alrededor del nivel del año.
+  const niveles = { 2018: 82, 2019: 85, 2020: 85, 2021: 90, 2022: 92, 2023: 92, 2024: 90, 2025: 91, 2026: 88 }
+  const sint = Object.entries(niveles).flatMap(([ano, nv]) => [0.94, 1.0, 1.08].map((k, i) => ({
+    rol: ano + '-' + i, fecha: `${ano}-0${3 + i * 2}-15`, m2: 100, uf: Math.round(nv * 100 * k),
+  })))
+  const s = construirSerieMercado({ ventas: sint, hoy: '2026-09-01' })
+  ok('construye un punto anual con la mediana de UF/m2',
+    s != null && s.puntos.length === 9 && Math.abs(s.puntos[0].uf_m2 - 82) < 1, { s })
+  ok('reporta la variacion total real del periodo',
+    Math.abs(s.variacion_total_pct - Math.round((88 / 82 - 1) * 1000) / 10) < 0.2, { v: s.variacion_total_pct })
+  ok('con la serie, una venta del peak 2022 se ajusta hacia ABAJO',
+    factorFecha('2022-06-15', s.puntos, '2026-09-01') < 1, { f: factorFecha('2022-06-15', s.puntos, '2026-09-01') })
+}
+{
+  // Guardas de calidad: sin material no hay serie (manda el respaldo).
+  ok('con pocas ventas no hay serie', construirSerieMercado({ ventas: VENTAS.slice(0, 4), hoy: HOY }) === null)
+  const viejas = VENTAS.filter((v) => v.fecha < '2020-01-01')
+  ok('con el ultimo punto vencido no hay serie', construirSerieMercado({ ventas: viejas, hoy: HOY }) === null)
+  // Un punto anual de 2 ventas contaminado por una venta entre relacionados
+  // (7.297 UF contra 15.850 UF el mismo año) se descarta, no se promedia.
+  const s = construirSerieMercado({ ventas: VENTAS, hoy: HOY })
+  ok('el año 2021 (venta relacionada + venta real) no genera punto',
+    s === null || !s.puntos.some((p) => p.trimestre.startsWith('2021')), { s })
 }
 
 console.log('\n11) PERCENTIL INTERPOLADO')

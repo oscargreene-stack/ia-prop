@@ -16,6 +16,7 @@ import {
   UFM2_MIN, UFM2_MAX, puntosSuelo, resumenSuelo, sueloPorTramo, sueloDeTramo,
   valorAditivoCasa, confianzaPorN, buscarVentasPoligono, COSTO_CONSTR_RESIDUAL, BANDA_M2, terrenoDe, sinOutliers, DOTACION_TIPICA_DEPTO,
   valorComparativoDirecto, rangoUnidadesIdenticas, terrenoEsProrrateoBC, CONJUNTO,
+  construirSerieMercado,
 } from '../../lib/tasacion-core.js'
 import { COD_COMUNA, normalizaComuna } from '../../lib/comunas.js'
 
@@ -230,7 +231,12 @@ export async function POST(request) {
   let ventasConjunto = []
   let historialPropiedad = []
   let indiceSector = null
-  let serieMercado = null // serie completa (solo para ajustar por fecha)
+  let serieMercado = null // serie completa del proveedor (SOLO informativa: mezcla tipologías)
+  // Ventas REALES del MISMO TIPO para construir el índice del ajuste por fecha
+  // (la variación real del mercado del período). Se junta de todas las fuentes
+  // (polígono, detalle por ROL, conjunto); construirSerieMercado deduplica.
+  let ventasParaSerie = []
+  let indiceSectorMismoTipo = false // true solo si indiceSector salió de ventas del tipo objetivo
   let plusvalia12m = null
   let arriendoMediana = null
   let arriendoN = 0
@@ -261,6 +267,14 @@ export async function POST(request) {
         const ufm2 = uf / m2
         return ufm2 >= UFM2_MIN && ufm2 <= UFM2_MAX
       })
+
+      // Para el ÍNDICE del ajuste por fecha: mismo tipo, sin corte de 5 años
+      // (una serie corta no puede llevar a hoy una venta de hace 8 años).
+      ventasParaSerie.push(...ventas.filter(v => {
+        if (tipoObjetivo && clasificaTipo(v) !== tipoObjetivo) return false
+        if (String(v.unit || '').toUpperCase() !== 'UF') return false
+        return parseFloat(v.superficie_construccion) > 0 && parseFloat(v.price) > 0
+      }))
 
       let similares = base.filter(v => enBandaM2(parseFloat(v.superficie_construccion), m2Construido))
       if (similares.length < 3) similares = base
@@ -369,7 +383,7 @@ export async function POST(request) {
       const trims = Object.keys(porTrim).sort()
         .map(q => ({ trimestre: q, uf_m2: Math.round(mediana(porTrim[q]) * 10) / 10, n: porTrim[q].length }))
         .filter(x => x.n >= 3)
-      if (trims.length >= 2) indiceSector = trims.slice(-8)
+      if (trims.length >= 2) { indiceSector = trims.slice(-8); indiceSectorMismoTipo = true }
       const hoyD = new Date()
       const d12 = new Date(hoyD); d12.setFullYear(hoyD.getFullYear() - 1)
       const d24 = new Date(hoyD); d24.setFullYear(hoyD.getFullYear() - 2)
@@ -465,9 +479,12 @@ export async function POST(request) {
         const fuente = filtroR.length > 0 ? filtroR : ventasR
         diagRest.n_ventas = ventasR.length
         diagRest.n_filtro = filtroR.length
-        filtradosRest = fuente
+        const mismoTipoRest = fuente
           .filter(v => parseFloat(v.superficie_construccion) > 0 && parseFloat(v.price) > 0 && (v.unit === 'UF' || !v.unit))
           .filter(v => !tipoObjetivo || clasificaTipo(v) === tipoObjetivo)
+        // Índice del ajuste por fecha: mismo tipo, SIN corte de 5 años.
+        ventasParaSerie.push(...mismoTipoRest)
+        filtradosRest = mismoTipoRest
           .filter(v => esVentaReciente(v, _cutoffStr))
         diagRest.n_antes_outliers = filtradosRest.length
         // Sin outliers: ventas a <50% o >190% de la mediana solo confunden
@@ -569,11 +586,14 @@ export async function POST(request) {
             .filter(x => parseFloat(x.promedio_precio_m2_3m) > 0)
             .map(x => ({ trimestre: String(x.mes || '').slice(0, 7), uf_m2: Math.round(parseFloat(x.promedio_precio_m2_3m) * 10) / 10, n: parseInt(x.recuento_3m) || 0 }))
           if (serieM.length >= 4) {
-            // La serie COMPLETA alimenta el ajuste por fecha del comparativo
-            // directo (las gemelas llegan hasta 8 años atrás); al informe siguen
-            // yendo solo los últimos 8 puntos.
+            // OJO: esta serie del proveedor MEZCLA tipologías (56% "otro" en Lo
+            // Barnechea, 13,5% anual). Es SOLO informativa para el gráfico del
+            // informe — NUNCA alimenta el ajuste por fecha (eso rompió la
+            // tasación v2: 19.285 UF). El ajuste usa la serie del MISMO TIPO
+            // construida más abajo con construirSerieMercado.
             serieMercado = serieM
             indiceSector = serieM.slice(-8)
+            indiceSectorMismoTipo = false
             const ult = serieM[serieM.length - 1]
             const hace12 = serieM[Math.max(0, serieM.length - 13)]
             if (ult && hace12 && hace12.uf_m2 > 0) plusvalia12m = Math.round((ult.uf_m2 / hace12.uf_m2 - 1) * 1000) / 10
@@ -734,19 +754,27 @@ export async function POST(request) {
   // Gemelas del conjunto + ventas anteriores de ESTA misma unidad (mismo
   // conjunto y misma tipología por definición). ventasGemelas deduplica.
   const ventasDelConjunto = [...ventasConjunto, ...historialPropiedad]
+  // ── ÍNDICE REAL DEL MERCADO (mismo tipo) para el ajuste por fecha ─────────
+  // "Lo que realmente dio el mercado" del período: serie de medianas UF/m²
+  // anuales construida con TODAS las ventas reales del tipo objetivo que ya
+  // trajimos (sector + conjunto, deduplicadas, sin corte de 5 años). Si el
+  // mercado subió 3% desde una venta, esa venta sube 3%; si bajó 1%, baja 1%.
+  // NUNCA se usa la serie del proveedor que mezcla tipologías (serieMercado).
+  const serieTipo = construirSerieMercado({ ventas: [...ventasParaSerie, ...ventasDelConjunto] })
+  const serieAjuste = serieTipo ? serieTipo.puntos : (indiceSectorMismoTipo ? indiceSector : null)
   const comparativo = m2Construido
     ? valorComparativoDirecto({
         ventas: ventasDelConjunto,
         m2Objetivo: m2Construido,
-        serieIndice: serieMercado || indiceSector,
+        serieIndice: serieAjuste,
       })
     : null
   // Rango infranqueable: unidades idénticas vendidas en los últimos 24 meses.
-  // Techo/piso NOMINAL: precios realmente pagados por unidades idénticas en los
-  // últimos 24 meses + carry acotado. No lleva serieIndice a propósito: la
-  // regla de coherencia no puede apoyarse en valores inflados por el índice.
+  // Techo/piso: precios realmente pagados por unidades idénticas en los
+  // últimos 24 meses, llevados a hoy con la MISMA variación real del mercado
+  // (si el mercado bajó desde la venta, el techo baja; si subió, sube).
   const rangoIdenticas = m2Construido
-    ? rangoUnidadesIdenticas({ ventas: ventasDelConjunto, m2Objetivo: m2Construido })
+    ? rangoUnidadesIdenticas({ ventas: ventasDelConjunto, m2Objetivo: m2Construido, serieIndice: serieAjuste })
     : null
   // El suelo prorrateado del bien común no es vendible por separado y su valor
   // ya está dentro del precio de las gemelas: con él, el aditivo hunde el valor
@@ -757,11 +785,16 @@ export async function POST(request) {
     const { finalUf, lineas } = aplicarAjustes({ baseUf: comparativo.valor_uf, tipo, extras, answers, cfg: ajustesCfg })
     precioM2Base = comparativo.uf_m2
     const tc = comparativo.tasa_conjunto
+    const fmtPct = (x) => (x > 0 ? '+' : '') + String(x).replace('.', ',') + '%'
     const fuenteAjuste = !comparativo.hubo_ajuste_fecha ? ''
-      : tc
-        ? ` (llevadas a hoy al ${tc.tasa_pct}% anual, la apreciación implícita del propio conjunto: `
-          + `${tc.n_recientes} ventas recientes contra ${tc.n_antiguas} antiguas separadas ${tc.anos} años)`
-        : ` (llevadas a hoy con el índice del sector, acotado a ${Math.round(CONJUNTO.apreciacionMaxAnual * 100)}% anual compuesto)`
+      : comparativo.fuente_ajuste === 'indice_mercado'
+        ? ` (cada venta llevada a hoy con la variación REAL del mercado en su período — índice de ${tipoObjetivo || 'mismo tipo'}s del sector`
+          + (serieTipo ? ` construido con ${serieTipo.n_ventas} ventas reales ${serieTipo.desde.slice(0, 4)}–${serieTipo.hasta.slice(0, 4)}` : '')
+          + `: ajustes entre ${fmtPct(comparativo.ajuste_min_pct)} y ${fmtPct(comparativo.ajuste_max_pct)})`
+        : tc
+          ? ` (llevadas a hoy al ${tc.tasa_pct}% anual, la apreciación implícita del propio conjunto: `
+            + `${tc.n_recientes} ventas recientes contra ${tc.n_antiguas} antiguas separadas ${tc.anos} años)`
+          : ` (llevadas a hoy con tope de ${Math.round(CONJUNTO.apreciacionMaxAnual * 100)}% anual compuesto, sin índice del sector utilizable)`
     const desglose = [{
       concepto: 'Valor por comparación directa con unidades gemelas',
       calculo: `${comparativo.n} ventas del mismo conjunto`
@@ -900,7 +933,7 @@ export async function POST(request) {
           + `${n} ventas de unidades idénticas de los últimos ${meses} meses `
           + `(${min_uf.toLocaleString('es-CL')}–${max_uf.toLocaleString('es-CL')} UF: precios nominales `
           + `${rangoIdenticas.min_nominal_uf.toLocaleString('es-CL')}–${rangoIdenticas.max_nominal_uf.toLocaleString('es-CL')} UF `
-          + `más carry de ${rangoIdenticas.carry_pct}% anual): mandan los comparables`,
+          + `llevados a hoy con ${rangoIdenticas.carry_desc}): mandan los comparables`,
         valor_uf: delta,
       })
       valorDet.valor_uf += delta
@@ -1181,7 +1214,7 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
       parsed.historial_propiedad = historialPropiedad
       parsed.ofertas_venta = ofertasVenta
       parsed.ofertas_arriendo = ofertasArriendo
-      parsed._diag = { ...(diag || {}), rest: diagRest, n_comparables: comparablesReales.length, n_suelo: sueloInfo ? sueloInfo.n : 0, metodo: valorDet ? (valorDet.metodo || 'mediana sector') : 'SIN valor determinístico (estimación referencial del LLM)', coherencia, rango_identicas: rangoIdenticas }
+      parsed._diag = { ...(diag || {}), rest: diagRest, n_comparables: comparablesReales.length, n_suelo: sueloInfo ? sueloInfo.n : 0, metodo: valorDet ? (valorDet.metodo || 'mediana sector') : 'SIN valor determinístico (estimación referencial del LLM)', coherencia, rango_identicas: rangoIdenticas, serie_ajuste: serieTipo ? { fuente: 'indice_mismo_tipo', n_ventas: serieTipo.n_ventas, desde: serieTipo.desde, hasta: serieTipo.hasta, variacion_total_pct: serieTipo.variacion_total_pct, puntos: serieTipo.puntos } : (indiceSectorMismoTipo ? { fuente: 'indice_sector_poligono_mismo_tipo', puntos: indiceSector } : { fuente: 'sin_serie_mismo_tipo (respaldo: tasa del conjunto)' }) }
       const _valorRef = parsed.valor_uf || null
       parsed.arriendo = arriendoMediana ? {
         uf_mes: arriendoMediana,
