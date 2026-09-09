@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "node test/predio.test.mjs && node test/tasacion.test.mjs",
+    "test": "node test/predio.test.mjs && node test/tasacion.test.mjs && node test/indice-mercado.test.mjs",
     "caso:monasterio": "node test/monasterio-21.mjs"
   },
   "dependencies": {
