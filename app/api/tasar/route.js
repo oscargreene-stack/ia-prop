@@ -18,6 +18,7 @@ import {
   valorComparativoDirecto, rangoUnidadesIdenticas, terrenoEsProrrateoBC, CONJUNTO,
   construirSerieMercado,
 } from '../../lib/tasacion-core.js'
+import { indiceMercado } from '../../lib/indice-mercado.js'
 import { COD_COMUNA, normalizaComuna } from '../../lib/comunas.js'
 
 export const maxDuration = 60
@@ -755,13 +756,29 @@ export async function POST(request) {
   // conjunto y misma tipología por definición). ventasGemelas deduplica.
   const ventasDelConjunto = [...ventasConjunto, ...historialPropiedad]
   // ── ÍNDICE REAL DEL MERCADO (mismo tipo) para el ajuste por fecha ─────────
-  // "Lo que realmente dio el mercado" del período: serie de medianas UF/m²
-  // anuales construida con TODAS las ventas reales del tipo objetivo que ya
-  // trajimos (sector + conjunto, deduplicadas, sin corte de 5 años). Si el
-  // mercado subió 3% desde una venta, esa venta sube 3%; si bajó 1%, baja 1%.
-  // NUNCA se usa la serie del proveedor que mezcla tipologías (serieMercado).
-  const serieTipo = construirSerieMercado({ ventas: [...ventasParaSerie, ...ventasDelConjunto] })
-  const serieAjuste = serieTipo ? serieTipo.puntos : (indiceSectorMismoTipo ? indiceSector : null)
+  // "Lo que realmente dio el mercado" del período. Si el mercado subió 3%
+  // desde una venta, esa venta sube 3%; si bajó 1%, baja 1%. Prioridad:
+  //  1º ÍNDICE PRECALCULADO por comuna x tipo x banda de tamaño (medianas
+  //     anuales de TODAS las ventas CBR de la comuna para propiedades como
+  //     esta — decenas a cientos por punto, datos duros de Data Inmobiliaria).
+  //     Una muestra local de ~5 ventas al año inventa caídas y subidas que el
+  //     mercado nunca tuvo (eso infló la casa 21 a 17.5k): por eso el índice
+  //     robusto manda sobre la serie local.
+  //  2º Serie local construida con las ventas del mismo tipo que ya trajimos.
+  //  3º Índice trimestral del polígono (solo si es del mismo tipo).
+  // NUNCA la serie del proveedor que mezcla tipologías (serieMercado).
+  const codComProp = siiData?.cod_comuna
+    || (rol ? parseInt(String(rol).split('-')[0], 10) : null)
+    || COD_COMUNA[normalizaComuna(comuna)] || null
+  const indiceComunal = (codComProp && tipoObjetivo)
+    ? indiceMercado({ codCom: codComProp, tipo: tipoObjetivo, m2: m2Construido })
+    : null
+  const serieTipo = indiceComunal
+    ? null
+    : construirSerieMercado({ ventas: [...ventasParaSerie, ...ventasDelConjunto] })
+  const serieAjuste = indiceComunal
+    ? indiceComunal.puntos
+    : serieTipo ? serieTipo.puntos : (indiceSectorMismoTipo ? indiceSector : null)
   const comparativo = m2Construido
     ? valorComparativoDirecto({
         ventas: ventasDelConjunto,
@@ -788,8 +805,12 @@ export async function POST(request) {
     const fmtPct = (x) => (x > 0 ? '+' : '') + String(x).replace('.', ',') + '%'
     const fuenteAjuste = !comparativo.hubo_ajuste_fecha ? ''
       : comparativo.fuente_ajuste === 'indice_mercado'
-        ? ` (cada venta llevada a hoy con la variación REAL del mercado en su período — índice de ${tipoObjetivo || 'mismo tipo'}s del sector`
-          + (serieTipo ? ` construido con ${serieTipo.n_ventas} ventas reales ${serieTipo.desde.slice(0, 4)}–${serieTipo.hasta.slice(0, 4)}` : '')
+        ? ` (cada venta llevada a hoy con la variación REAL del mercado en su período — `
+          + (indiceComunal
+            ? `índice de ${tipoObjetivo || 'propiedades'}s ${indiceComunal.banda_label} de ${comuna || 'la comuna'}, `
+              + `${indiceComunal.n_ventas.toLocaleString('es-CL')} ventas reales ${indiceComunal.desde.slice(0, 4)}–${indiceComunal.hasta.slice(0, 4)} (Data Inmobiliaria)`
+            : `índice de ${tipoObjetivo || 'mismo tipo'}s del sector`
+              + (serieTipo ? ` construido con ${serieTipo.n_ventas} ventas reales ${serieTipo.desde.slice(0, 4)}–${serieTipo.hasta.slice(0, 4)}` : ''))
           + `: ajustes entre ${fmtPct(comparativo.ajuste_min_pct)} y ${fmtPct(comparativo.ajuste_max_pct)})`
         : tc
           ? ` (llevadas a hoy al ${tc.tasa_pct}% anual, la apreciación implícita del propio conjunto: `
@@ -1214,7 +1235,7 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
       parsed.historial_propiedad = historialPropiedad
       parsed.ofertas_venta = ofertasVenta
       parsed.ofertas_arriendo = ofertasArriendo
-      parsed._diag = { ...(diag || {}), rest: diagRest, n_comparables: comparablesReales.length, n_suelo: sueloInfo ? sueloInfo.n : 0, metodo: valorDet ? (valorDet.metodo || 'mediana sector') : 'SIN valor determinístico (estimación referencial del LLM)', coherencia, rango_identicas: rangoIdenticas, serie_ajuste: serieTipo ? { fuente: 'indice_mismo_tipo', n_ventas: serieTipo.n_ventas, desde: serieTipo.desde, hasta: serieTipo.hasta, variacion_total_pct: serieTipo.variacion_total_pct, puntos: serieTipo.puntos } : (indiceSectorMismoTipo ? { fuente: 'indice_sector_poligono_mismo_tipo', puntos: indiceSector } : { fuente: 'sin_serie_mismo_tipo (respaldo: tasa del conjunto)' }) }
+      parsed._diag = { ...(diag || {}), rest: diagRest, n_comparables: comparablesReales.length, n_suelo: sueloInfo ? sueloInfo.n : 0, metodo: valorDet ? (valorDet.metodo || 'mediana sector') : 'SIN valor determinístico (estimación referencial del LLM)', coherencia, rango_identicas: rangoIdenticas, serie_ajuste: indiceComunal ? { fuente: indiceComunal.fuente, banda: indiceComunal.banda, banda_label: indiceComunal.banda_label, n_ventas: indiceComunal.n_ventas, desde: indiceComunal.desde, hasta: indiceComunal.hasta, generado: indiceComunal.generado, puntos: indiceComunal.puntos } : serieTipo ? { fuente: 'indice_local_mismo_tipo', n_ventas: serieTipo.n_ventas, desde: serieTipo.desde, hasta: serieTipo.hasta, variacion_total_pct: serieTipo.variacion_total_pct, puntos: serieTipo.puntos } : (indiceSectorMismoTipo ? { fuente: 'indice_sector_poligono_mismo_tipo', puntos: indiceSector } : { fuente: 'sin_serie_mismo_tipo (respaldo: tasa del conjunto)' }) }
       const _valorRef = parsed.valor_uf || null
       parsed.arriendo = arriendoMediana ? {
         uf_mes: arriendoMediana,
