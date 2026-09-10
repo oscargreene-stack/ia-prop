@@ -23,6 +23,12 @@ const COMUNAS_RM = ['Cerrillos','Cerro Navia','Conchalí','El Bosque','Estación
 // ─── Flujos por tipo ─────────────────────────────────────────────────────────
 const FLUJOS = {
   casa: [
+    { id:'dormitorios', msg:'¿Cuántos dormitorios tiene la casa?', tipo:'options', opts:[
+      {id:'1',label:'1',icon:'🛏️'},{id:'2',label:'2',icon:'🛏️'},{id:'3',label:'3',icon:'🛏️'},
+      {id:'4',label:'4',icon:'🛏️'},{id:'5+',label:'5 o más',icon:'🛏️'}]},
+    { id:'banos', msg:'¿Cuántos baños tiene?', tipo:'options', opts:[
+      {id:'1',label:'1',icon:'🚿'},{id:'2',label:'2',icon:'🚿'},{id:'3',label:'3',icon:'🚿'},
+      {id:'4',label:'4',icon:'🚿'},{id:'5+',label:'5 o más',icon:'🚿'}]},
     { id:'remodelacion', msg:'¿Tu casa tiene alguna remodelación?', tipo:'options', opts:[
       {id:'alta',label:'Sí — alta calidad',icon:'⭐'},{id:'media',label:'Sí — calidad media',icon:'✨'},
       {id:'baja',label:'Sí — terminaciones básicas',icon:'🔧'},{id:'ninguna',label:'No tiene',icon:'—'}]},
@@ -35,6 +41,12 @@ const FLUJOS = {
       {id:'ninguna',label:'Ninguna en especial',icon:'—'}]},
   ],
   departamento: [
+    { id:'dormitorios', msg:'¿Cuántos dormitorios tiene el departamento?', tipo:'options', opts:[
+      {id:'1',label:'1',icon:'🛏️'},{id:'2',label:'2',icon:'🛏️'},{id:'3',label:'3',icon:'🛏️'},
+      {id:'4',label:'4',icon:'🛏️'},{id:'5+',label:'5 o más',icon:'🛏️'}]},
+    { id:'banos', msg:'¿Cuántos baños tiene?', tipo:'options', opts:[
+      {id:'1',label:'1',icon:'🚿'},{id:'2',label:'2',icon:'🚿'},{id:'3',label:'3',icon:'🚿'},
+      {id:'4',label:'4',icon:'🚿'},{id:'5+',label:'5 o más',icon:'🚿'}]},
     { id:'piso', msg:'¿En qué piso está el departamento?', tipo:'options', opts:[
       {id:'1_4',label:'Piso 1 al 4',icon:'🔽'},{id:'5_10',label:'Piso 5 al 10',icon:'🏙️'},
       {id:'11_20',label:'Piso 11 al 20',icon:'🌆'},{id:'21+',label:'Piso 21 o más',icon:'🌇'}]},
@@ -248,6 +260,56 @@ function ChatVendedor({ onBack }) {
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
   const tasRef = useRef(null)
+  const mapSecRef = useRef(null) // sección del mapa/tabla de comparables (navegación rápida)
+  const histRef = useRef([])   // pila de snapshots para "volver atrás"
+  const sugRef = useRef(null)  // {dorms, banos, n} sugeridos desde avisos cercanos
+  const sugPromiseRef = useRef(null) // promesa de la consulta de avisos en curso
+  const pubRef = useRef(null)  // {precio, conPrecio} cuando se llega desde Publicar (vender.c2cprops.com)
+
+  // ── Volver atrás: guarda un snapshot ANTES de procesar cada respuesta ──────
+  const guardarPaso = () => {
+    const h = histRef.current
+    const top = h[h.length - 1]
+    if (top && top.stage === stage && top.messagesLen === messages.length) return // reintento de la misma pregunta
+    h.push({ messagesLen: messages.length, data, stage, flujoIdx, inputMode, options, multiSel, placeholder, deptoVal, comunaForm, searchTab })
+    if (h.length > 40) h.shift()
+  }
+  const volverAtras = () => {
+    const s = histRef.current.pop()
+    if (!s) return
+    setMessages(m => m.slice(0, s.messagesLen))
+    setData(s.data); setStage(s.stage); setFlujoIdx(s.flujoIdx)
+    setInputMode(s.inputMode); setOptions(s.options); setMultiSel(s.multiSel || [])
+    setPlaceholder(s.placeholder || ''); setDeptoVal(s.deptoVal || ''); setComunaForm(s.comunaForm || '')
+    setSearchTab(s.searchTab || 'direccion'); setInputVal(''); setTyping(false)
+    // limpiar restos de una tasación si se retrocede desde el resultado
+    setVentasTasacion(null); setOfertasTasacion(null); setPuntoTasacion(null); setVistaTas('ventas'); setTasBody(null)
+  }
+
+  // ── Dormitorios/baños sugeridos: avisos de portales a ≤150 m con superficie
+  // similar (±20%) y mismo tipo — se toma la MODA. Es una sugerencia (el
+  // usuario siempre confirma): el cruce no es por ROL exacto. ────────────────
+  const cargarSugerencia = (punto, m2, tipo) => {
+    if (!punto || !punto.lat || !['casa', 'departamento'].includes(tipo)) return
+    sugRef.current = null
+    const dLat = 200 / 111320, dLng = 200 / (111320 * Math.cos(punto.lat * Math.PI / 180))
+    const polygon = [
+      { lat: punto.lat + dLat, lng: punto.lng - dLng }, { lat: punto.lat + dLat, lng: punto.lng + dLng },
+      { lat: punto.lat - dLat, lng: punto.lng + dLng }, { lat: punto.lat - dLat, lng: punto.lng - dLng },
+    ]
+    sugPromiseRef.current = fetch('/api/ofertas', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ polygon, tipo, transaction_type: 'venta' }) })
+      .then(r => r.json())
+      .then(j => {
+        const m2n = parseFloat(m2) || 0
+        const dist = (a) => { const rad = Math.PI / 180, R = 6371000; const dLa = (a.lat - punto.lat) * rad, dLn = (a.lng - punto.lng) * rad; const h = Math.sin(dLa / 2) ** 2 + Math.cos(punto.lat * rad) * Math.cos(a.lat * rad) * Math.sin(dLn / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(h)) }
+        const match = (j.ofertas || []).filter(o => o.dorms > 0 && dist(o) <= 150 && (!m2n || (o.m2 > 0 && o.m2 >= m2n * 0.8 && o.m2 <= m2n * 1.2)))
+        if (!match.length) return
+        const moda = (arr) => { const c = {}; arr.forEach(x => { c[x] = (c[x] || 0) + 1 }); return +Object.keys(c).sort((a, b) => c[b] - c[a])[0] }
+        const ba = match.filter(o => o.banos > 0).map(o => o.banos)
+        sugRef.current = { dorms: moda(match.map(o => o.dorms)), banos: ba.length ? moda(ba) : null, n: match.length }
+      })
+      .catch(() => {})
+  }
 
   // Al llegar la TASACIÓN, posicionar el chat en la tarjeta del VALOR (inicio),
   // no al fondo: el informe es largo y el precio quedaba fuera de pantalla.
@@ -304,10 +366,26 @@ function ChatVendedor({ onBack }) {
   // Inicio
   useEffect(() => {
     const init = async () => {
-      await addAgent('¡Hola! ¿Cómo estás? Soy Valentina, tu agente inmobiliaria 👋\n\nEstoy aquí para ayudarte a vender tu propiedad al mejor precio posible.\n\n¿Qué tipo de propiedad quieres vender?', 800)
-      setInputMode('options')
-      setOptions(TIPOS)
-      setStage('tipo')
+      // Deep-link desde Publicar (vender.c2cprops.com): si la URL ya trae la
+      // dirección, tasamos de inmediato sin volver a preguntar nada.
+      let qp = null
+      try { qp = new URLSearchParams(window.location.search) } catch (e) {}
+      const dirQP = qp ? (qp.get('direccion') || '').trim() : ''
+      if (dirQP) {
+        const d = { direccion: dirQP, depto: (qp.get('depto') || '').trim(), comuna: (qp.get('comuna') || '').trim() }
+        // Si el publicador ya preguntó dormitorios/baños, NO volver a preguntarlos
+        const dorQP = parseInt(qp.get('dorms')), banQP = parseInt(qp.get('banos'))
+        if (dorQP > 0) d.dormitorios = dorQP >= 5 ? '5+' : String(dorQP)
+        if (banQP > 0) d.banos = banQP >= 5 ? '5+' : String(banQP)
+        await addAgent(`¡Hola! Soy Valentina 👋 Ya tengo los datos de tu propiedad:\n\n**${dirQP}${d.depto ? ' depto ' + d.depto : ''}${d.comuna ? ', ' + d.comuna : ''}**\n\nLa busco en el catastro y partimos con la tasación de inmediato.`, 700)
+        setData(d)
+        await fetchSII(d)
+        return
+      }
+      await addAgent('¡Hola! ¿Cómo estás? Soy Valentina, tu agente inmobiliaria 👋\n\nEstoy aquí para ayudarte a vender tu propiedad al mejor precio posible.\n\nPara partir, ingresa la **dirección** de tu propiedad (o su ROL SII) y buscaré automáticamente sus datos en el catastro:', 800)
+      setSearchTab('direccion')
+      setInputMode('search_form')
+      setStage('direccion')
     }
     init()
   }, [])
@@ -327,6 +405,20 @@ function ChatVendedor({ onBack }) {
         const val = currentData[field]
         if (validos.includes(val)) { nextIdx++; continue } // saltar
       }
+      // Dormitorios/baños: SOLO se preguntan si hay sugerencia automática de
+      // avisos del sector (no influyen en la fórmula del valor; sin dato
+      // automático la pregunta es pura fricción). Se espera brevemente a que
+      // termine la consulta de avisos antes de decidir saltar.
+      if (paso.id === 'dormitorios' || paso.id === 'banos') {
+        // Ya respondido (p.ej. viene del publicador de vender.c2cprops.com) → no repetir
+        const yaLoTiene = paso.id === 'dormitorios' ? currentData.dormitorios : currentData.banos
+        if (yaLoTiene) { nextIdx++; continue }
+        if (!sugRef.current && sugPromiseRef.current) {
+          await Promise.race([sugPromiseRef.current, new Promise(r => setTimeout(r, 2500))])
+        }
+        const sVal = paso.id === 'dormitorios' ? sugRef.current?.dorms : sugRef.current?.banos
+        if (!(sVal > 0)) { nextIdx++; continue } // sin sugerencia → no preguntar
+      }
       break
     }
 
@@ -344,11 +436,24 @@ function ChatVendedor({ onBack }) {
 
     const paso = flujo[nextIdx]
     setFlujoIdx(nextIdx + 1)
-    await addAgent(paso.msg, 600)
+
+    // Sugerencia automática de dormitorios/baños (avisos cercanos del sector)
+    let msgPaso = paso.msg
+    let optsPaso = paso.opts
+    const sug = sugRef.current
+    if (sug && (paso.id === 'dormitorios' || paso.id === 'banos')) {
+      const val = paso.id === 'dormitorios' ? sug.dorms : sug.banos
+      if (val > 0) {
+        msgPaso = paso.msg + `\n\n✨ Según ${sug.n > 1 ? sug.n + ' avisos recientes' : 'un aviso reciente'} de propiedades similares del sector: **${val}**. Confírmalo o corrígelo.`
+        const idSug = val >= 5 ? '5+' : String(val)
+        optsPaso = paso.opts.map(o => o.id === idSug ? { ...o, label: o.label + ' ✨', icon: '✅' } : o)
+      }
+    }
+    await addAgent(msgPaso, 600)
 
     if (paso.tipo === 'options') {
       setInputMode('options')
-      setOptions(paso.opts)
+      setOptions(optsPaso)
       setStage(`flujo_${paso.id}`)
     } else if (paso.tipo === 'multi') {
       setInputMode('multi')
@@ -362,9 +467,62 @@ function ChatVendedor({ onBack }) {
     }
   }
 
+  // Tipo de propiedad inferido desde el catastro: solo cuando la dirección SII
+  // trae un marcador explícito de unidad (DP/OF/LC). Ni la copropiedad ni las
+  // superficies alcanzan para decidir (una casa en condominio también figura
+  // como copropiedad), así que en esos casos devolvemos null y se pregunta.
+  const inferirTipo = (sii) => {
+    const dir = ' ' + String(sii?.direccion || '').toUpperCase().replace(/\s+/g, ' ').trim() + ' '
+    if (/ (DP|DEPTO|DPTO|DEPT) /.test(dir) || / D \d/.test(dir)) return 'departamento'
+    if (/ (OF|OFIC|OFICINA) /.test(dir)) return 'oficina'
+    if (/ (LC|LOC|LOCAL) /.test(dir)) return 'comercial'
+    return null
+  }
+
+  // Pista para acompañar la pregunta del tipo: no decide por el usuario, solo
+  // le muestra lo que dice el catastro para que elija informado.
+  const pistaTipo = (sii) => {
+    const m2c = parseFloat(sii?.m2_construido) || 0
+    const m2t = parseFloat(sii?.m2_terreno) || 0
+    if (m2c <= 0 && m2t <= 0) return ''
+    const partes = []
+    if (m2c > 0) partes.push(`**${m2c.toLocaleString('es-CL')} m² construidos**`)
+    if (m2t > 0) partes.push(`**${m2t.toLocaleString('es-CL')} m² de terreno**`)
+    return `\n\nSegún el catastro: ${partes.join(' y ')}.`
+  }
+
+  // Continuación común tras confirmar los datos SII (con el tipo ya conocido):
+  // pedir m² faltantes si corresponde y entrar al flujo de preguntas.
+  const continuarTrasSII = async (d) => {
+    cargarSugerencia(d._punto, d.siiData?.m2_construido, d.tipo)
+    const tipoActual = d.tipo
+    const terrenoSII = parseFloat(d.siiData?.m2_terreno) || 0
+    if (['casa', 'terreno', 'parcela'].includes(tipoActual)) {
+      // El terreno del SII ya se muestra y confirma en la ficha de arriba: no repreguntar.
+      if (terrenoSII > 0) {
+        const m2C = parseFloat(d.siiData?.m2_construido) || 0
+        if (!m2C && ['casa', 'departamento'].includes(tipoActual)) {
+          await addAgent('¿Cuántos **m² construidos** tiene la propiedad? (superficie total construida)', 400)
+          setInputMode('text'); setPlaceholder('Ej: 440')
+          setStage('ingresar_m2_construido')
+        } else {
+          await nextStep(d, 0)
+        }
+      } else {
+        await addAgent('¿Cuántos m² de terreno tiene la propiedad? (el SII no registra este dato para esta propiedad)', 500)
+        setInputMode('text')
+        setPlaceholder('Ej: 3982')
+        setStage('ingresar_terreno')
+      }
+    } else {
+      await nextStep(d, 0)
+    }
+  }
+
   // Handler opciones
   const handleOption = async (opt) => {
     if (opt.disabled) return
+    guardarPaso()
     addUser(opt.label)
     setInputMode(null)
 
@@ -399,6 +557,8 @@ function ChatVendedor({ onBack }) {
 
       const newData = { ...data, siiData: sii }
       setData(newData)
+      // En paralelo: sugerencia de dormitorios/baños desde avisos cercanos
+      cargarSugerencia(data._punto, sii?.m2_construido, data.tipo)
       setMessages(m => [...m, { role:'agent', content:{ type:'sii', data:sii }}])
       await addAgent('¿Estos datos son correctos?', 400)
       setInputMode('options')
@@ -424,36 +584,39 @@ function ChatVendedor({ onBack }) {
 
     } else if (stage === 'confirmar_sii') {
       if (opt.id === 'si') {
-        await addAgent('Perfecto, datos confirmados ✓', 400)
-        // Para casas y terrenos, pedir confirmación de m² de terreno antes de continuar
-        const tipoActual = data.tipo
-        const terrenoSII = parseFloat(data.siiData?.m2_terreno) || 0
-        if (['casa', 'terreno', 'parcela'].includes(tipoActual)) {
-          // El terreno del SII ya se muestra y confirma en la ficha de arriba: no repreguntar.
-          if (terrenoSII > 0) {
-            const m2C = parseFloat(data.siiData?.m2_construido) || 0
-            if (!m2C && ['casa', 'departamento'].includes(tipoActual)) {
-              await addAgent('¿Cuántos **m² construidos** tiene la propiedad? (superficie total construida)', 400)
-              setInputMode('text'); setPlaceholder('Ej: 440')
-              setStage('ingresar_m2_construido')
-            } else {
-              await nextStep(data, 0)
-            }
+        let d = data
+        if (!d.tipo) {
+          // Solo se infiere si la dirección SII trae marcador de unidad; si no, se pregunta.
+          const t = inferirTipo(d.siiData)
+          if (t) {
+            d = { ...d, tipo: t }
+            setData(d)
+            const NOM = { casa: 'una casa', departamento: 'un departamento', oficina: 'una oficina', comercial: 'una propiedad comercial', terreno: 'un terreno' }
+            await addAgent(`Perfecto, datos confirmados ✓ — según el catastro, tu propiedad es **${(NOM[t] || t).replace(/^un[a]? /, '')}**.`, 400)
           } else {
-            await addAgent('¿Cuántos m² de terreno tiene la propiedad? (el SII no registra este dato para esta propiedad)', 500)
-            setInputMode('text')
-            setPlaceholder('Ej: 3982')
-            setStage('ingresar_terreno')
+            await addAgent(`Perfecto, datos confirmados ✓\n\n¿Qué tipo de propiedad es?${pistaTipo(d.siiData)}`, 400)
+            setInputMode('options')
+            setOptions(TIPOS)
+            setStage('tipo_post_sii')
+            return
           }
         } else {
-          await nextStep(data, 0)
+          await addAgent('Perfecto, datos confirmados ✓', 400)
         }
+        await continuarTrasSII(d)
       } else {
-        await addAgent('Sin problema. Dame la dirección correcta:', 400)
-        setInputMode('text')
-        setPlaceholder('Escribe la dirección correcta…')
+        await addAgent('Sin problema. Ingresa la dirección correcta:', 400)
+        setSearchTab('direccion')
+        setInputVal(''); setDeptoVal('')
+        setInputMode('search_form')
         setStage('direccion')
       }
+
+    } else if (stage === 'tipo_post_sii') {
+      const newData = { ...data, tipo: opt.id }
+      setData(newData)
+      await addAgent('Perfecto ✓', 300)
+      await continuarTrasSII(newData)
 
     } else if (stage === 'precio_idea') {
       if (opt.id === 'tasar') {
@@ -482,6 +645,34 @@ function ChatVendedor({ onBack }) {
         setStage('ingresar_terreno')
       }
 
+    } else if (stage === 'resultado') {
+      if (opt.id === 'pub_precio' || opt.id === 'pub_otro') {
+        pubRef.current = { ...(pubRef.current || {}), conPrecio: opt.id === 'pub_precio' }
+        await addAgent(opt.id === 'pub_precio' ? '¡Excelente! Última pregunta y quedamos: ¿cómo prefieres que te contacten los interesados?' : 'Perfecto, el precio lo pones tú al publicar. Última pregunta: ¿cómo prefieres que te contacten los interesados?', 600)
+        setInputMode('options')
+        setOptions([
+          { id:'cm_whatsapp', label:'Por WhatsApp', icon:'💬' },
+          { id:'cm_telefono', label:'Por teléfono', icon:'📞' },
+          { id:'cm_email', label:'Por mail', icon:'✉️' },
+          { id:'cm_ejecutivo', label:'Que me asignen un ejecutivo C2C', icon:'🤝' },
+        ])
+        setStage('contacto_publicar')
+      } else {
+        await addAgent('Aquí abajo tienes el detalle completo: el informe, las ventas reales que respaldan el valor, las ofertas vigentes del sector y el informe en PDF. 👇', 500)
+        setInputMode('options')
+        setOptions(opcionesPublicar())
+      }
+
+    } else if (stage === 'contacto_publicar') {
+      const metodo = opt.id.replace('cm_', '')
+      const p = pubRef.current || {}
+      await addAgent('¡Listo! Te llevo de vuelta para que confirmes y tu propiedad quede publicada 🚀', 600)
+      const params = new URLSearchParams()
+      if (p.conPrecio && p.precio > 0) params.set('precio_uf', String(p.precio))
+      else params.set('volver', '1')
+      params.set('contacto', metodo)
+      setTimeout(() => { window.location.href = 'https://vender.c2cprops.com/?' + params.toString() }, 1100)
+
     } else if (stage.startsWith('flujo_')) {
       const campo = stage.replace('flujo_', '')
       const newData = { ...data, [campo]: opt.id }
@@ -490,8 +681,21 @@ function ChatVendedor({ onBack }) {
     }
   }
 
+  // Opciones del cierre cuando la tasación nació desde Publicar
+  const opcionesPublicar = () => {
+    const p = pubRef.current
+    const opts = []
+    if (p && p.precio > 0) {
+      opts.push({ id:'pub_precio', label:`Publicar con este precio (${p.precio.toLocaleString('es-CL')} UF)`, icon:'✅' })
+      opts.push({ id:'pub_otro', label:'Publicar con otro precio', icon:'💰' })
+    }
+    opts.push({ id:'detalle', label:'Quiero más detalle', icon:'🔍' })
+    return opts
+  }
+
   // Handler multiselect
   const handleMultiConfirm = async () => {
+    guardarPaso()
     const campo = stage.replace('flujo_', '')
     const labels = multiSel.map(s => options.find(o => o.id === s)?.label).filter(Boolean)
     addUser(labels.length ? labels.join(', ') : 'Ninguna en especial')
@@ -505,6 +709,7 @@ function ChatVendedor({ onBack }) {
   const handleSend = async () => {
     const val = inputVal.trim()
     if (!val) return
+    guardarPaso()
     setInputVal('')
     setInputMode(null)
 
@@ -624,7 +829,7 @@ function ChatVendedor({ onBack }) {
           icon: '🏠',
           _sii: r,
         })))
-        setData(prev => ({ ...prev, _candidatos: resultados, _pendingData: d }))
+        setData(prev => ({ ...prev, _candidatos: resultados, _pendingData: d, _punto: json.punto || null }))
         setStage('elegir_unidad')
         return
       }
@@ -635,6 +840,10 @@ function ChatVendedor({ onBack }) {
         setData(newData)
         if (json._modo === 'servicio_no_disponible') {
           await addAgent(`⚠️ ${json.mensaje || 'El servicio de datos está temporalmente no disponible.'}\n\nSi prefieres continuar ahora: ¿cuántos **m² construidos** tiene la propiedad? (ej: 180)`, 400)
+        } else if (String(json._modo || '').startsWith('rol_')) {
+          // Búsqueda por ROL: el backend ya explica qué falló (falta la comuna,
+          // ROL inexistente); "no la encontré con esa dirección" confundiría.
+          await addAgent(`${json.mensaje}\n\nSi prefieres continuar ahora: ¿cuántos **m² construidos** tiene la propiedad? (ej: 180)`, 400)
         } else {
           await addAgent(`No encontré esta propiedad en el catastro con esa dirección. Para una tasación precisa necesito los metros cuadrados reales.\n\n¿Cuántos **m² construidos** tiene la propiedad? (ej: 180)`, 400)
         }
@@ -645,8 +854,10 @@ function ChatVendedor({ onBack }) {
 
       // Un solo resultado
       const sii = resultados[0]
-      const newData = { ...d, siiData: sii }
+      const newData = { ...d, siiData: sii, _punto: json.punto || null }
       setData(newData)
+      // En paralelo: sugerencia de dormitorios/baños desde avisos cercanos
+      cargarSugerencia(json.punto, sii.m2_construido, d.tipo)
       setMessages(m => [...m, { role:'agent', content:{ type:'sii', data:sii }}])
       const terrenoTxt = sii.terreno_origen === 'bien_comun' ? ' (el terreno corresponde al bien común del edificio)' : ''
       await addAgent(`¿Estos datos son correctos?${terrenoTxt}`, 400)
@@ -688,7 +899,7 @@ function ChatVendedor({ onBack }) {
         body: JSON.stringify({
           siiData: finalData.siiData,
           form:{ direccion: finalData.direccion, depto:'', comuna: finalData.comuna || '' },
-          answers:{ remodelacion: finalData.remodelacion || 'ninguna', tiempo_remo: finalData.tiempo_remo || 'reciente', conservacion:'bueno', terraza_m2: parseInt(finalData.terraza_m2)||0, estacionamientos: parseInt(finalData.estacionamientos)||0, bodegas: parseInt(finalData.bodega)||0, m2_util: finalData.siiData?.m2_util || null },
+          answers:{ remodelacion: finalData.remodelacion || 'ninguna', tiempo_remo: finalData.tiempo_remo || 'reciente', conservacion:'bueno', terraza_m2: parseInt(finalData.terraza_m2)||0, estacionamientos: parseInt(finalData.estacionamientos)||0, bodegas: parseInt(finalData.bodega)||0, m2_util: finalData.siiData?.m2_util || null, dormitorios: finalData.dormitorios || null, banos: finalData.banos || null },
           extras: { ...finalData, tipo: finalData.tipo, piso: finalData.piso, orientacion: finalData.orientacion, jardin_m2: finalData.jardin_m2, precio_idea: finalData.precio_idea },
         })
       })
@@ -723,8 +934,18 @@ function ChatVendedor({ onBack }) {
       for (const msg of mensajes) {
         await addAgent(msg, 900)
       }
-      setInputMode('options')
-      setOptions([{id:'detalle',label:'Quiero más detalle',icon:'🔍'}])
+      // Si vino desde Publicar (vender.c2cprops.com): el cierre va AL FINAL del chat,
+      // como opciones guiadas — aceptar el precio, poner uno propio, o ver más detalle.
+      const origenPublicar = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('origen') === 'publicar'
+      if (origenPublicar && valorFinal > 0) {
+        pubRef.current = { precio: Math.round(valorFinal) }
+        await addAgent('¿Quieres publicar tu propiedad con este precio, o prefieres poner uno propio?', 700)
+        setInputMode('options')
+        setOptions(opcionesPublicar())
+      } else {
+        setInputMode('options')
+        setOptions([{id:'detalle',label:'Quiero más detalle',icon:'🔍'}])
+      }
       setStage('resultado')
     } catch(e) {
       setMessages(m => m.filter(x => !(x.role==='agent' && x.content?.type==='loading')))
@@ -993,6 +1214,7 @@ function ChatVendedor({ onBack }) {
   const handleSearchForm = async () => {
     let busqueda = inputVal.trim()
     if (!busqueda || !comunaForm) return
+    guardarPaso()
     let conDepto = deptoVal.trim()
     // Tolerancia: si el usuario escribió la unidad DENTRO de la dirección
     // ("Luis Carrera 2376 Depto 202, Vitacura"), separarla — el catastro
@@ -1003,7 +1225,7 @@ function ChatVendedor({ onBack }) {
       if (!conDepto) conDepto = mU[1]
       busqueda = busqueda.slice(0, mU.index).trim()
     }
-    const label = data.tipo === 'oficina' ? 'Of.' : data.tipo === 'departamento' ? 'Depto' : ''
+    const label = data.tipo === 'oficina' ? 'Of.' : 'Depto'
     const resumen = conDepto ? `${busqueda} ${label} ${conDepto}, ${comunaForm}` : `${busqueda}, ${comunaForm}`
     addUser(resumen)
     setInputVal(''); setDeptoVal(''); setComunaForm(''); setInputMode(null)
@@ -1045,7 +1267,7 @@ function ChatVendedor({ onBack }) {
         )}
         {typing && <AgentBubble typing/>}
         {ventasTasacion && ventasTasacion.length > 0 && (
-          <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(202,161,90,0.25)', display: 'flex', gap: 8 }}>
+          <div ref={mapSecRef} style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(202,161,90,0.25)', display: 'flex', gap: 8 }}>
             <button onClick={() => setVistaTas('ventas')} style={{ padding: '6px 12px', borderRadius: 20, border: '1px solid ' + (vistaTas === 'ventas' ? 'var(--gold)' : 'rgba(255,255,255,0.18)'), background: vistaTas === 'ventas' ? 'var(--gold-dim)' : 'transparent', color: vistaTas === 'ventas' ? 'var(--gold-light)' : '#cfcfcf', cursor: 'pointer', fontSize: 13 }}>🏠 Ventas registradas</button>
             <button onClick={verOfertasTas} style={{ padding: '6px 12px', borderRadius: 20, border: '1px solid ' + (vistaTas === 'ofertas' ? 'var(--gold)' : 'rgba(255,255,255,0.18)'), background: vistaTas === 'ofertas' ? 'var(--gold-dim)' : 'transparent', color: vistaTas === 'ofertas' ? 'var(--gold-light)' : '#cfcfcf', cursor: 'pointer', fontSize: 13 }}>🏷️ Ofertas en venta</button>
           </div>
@@ -1058,7 +1280,29 @@ function ChatVendedor({ onBack }) {
         <div ref={bottomRef}/>
       </div>
 
+      {/* Navegación rápida tras la tasación: saltar entre el valor y los comparables */}
+      {ventasTasacion && ventasTasacion.length > 0 && (
+        <div style={{ position: 'fixed', right: 18, bottom: 120, zIndex: 5000, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <button onClick={() => tasRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            title="Subir a la tarjeta del valor"
+            style={{ background: 'rgba(18,18,18,0.92)', border: '1px solid var(--gold)', color: 'var(--gold-light)', borderRadius: 20, padding: '8px 14px', fontSize: 13, cursor: 'pointer', boxShadow: '0 4px 14px rgba(0,0,0,0.45)' }}>
+            ⬆ Valor
+          </button>
+          <button onClick={() => mapSecRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}
+            title="Bajar al mapa y la tabla de comparables"
+            style={{ background: 'rgba(18,18,18,0.92)', border: '1px solid rgba(255,255,255,0.25)', color: '#e8e8e8', borderRadius: 20, padding: '8px 14px', fontSize: 13, cursor: 'pointer', boxShadow: '0 4px 14px rgba(0,0,0,0.45)' }}>
+            🗺️ Comparables
+          </button>
+        </div>
+      )}
+
       <div className="options-area">
+        {inputMode && stage !== 'tipo' && stage !== 'tasando' && histRef.current.length > 0 && (
+          <button onClick={volverAtras} title="Corrige tu respuesta anterior sin perder el avance"
+            style={{ background: 'none', border: '1px solid rgba(255,255,255,0.18)', color: '#9a9a9a', borderRadius: 16, padding: '4px 12px', fontSize: 12, cursor: 'pointer', marginBottom: 8, display: 'inline-block' }}>
+            ↩ Volver atrás para corregir
+          </button>
+        )}
         {inputMode === 'options' && (
           <>
             <div className="options-hint">Selecciona una opción</div>
@@ -1128,9 +1372,9 @@ function ChatVendedor({ onBack }) {
                       placeholder="Ej. Lo Fontecilla 267" autoFocus
                       onKeyDown={e => { if (e.key==='Enter') handleSearchForm() }} />
                   </div>
-                  {['departamento','oficina'].includes(data.tipo) && (
+                  {(!data.tipo || ['departamento','oficina'].includes(data.tipo)) && (
                     <div className="search-field unit">
-                      <div className="search-field-label">Nº {data.tipo==='oficina'?'Oficina':'Unidad'}</div>
+                      <div className="search-field-label">Nº {data.tipo==='oficina'?'Oficina':'Depto/Unidad'}</div>
                       <input value={deptoVal} onChange={e => setDeptoVal(e.target.value)}
                         placeholder="204 A (Opcional)"
                         onKeyDown={e => { if (e.key==='Enter') handleSearchForm() }} />
@@ -1811,7 +2055,7 @@ function OfertasMapa({ ofertas, centro }) {
           {!full && <button onClick={() => setFull(true)} title="Ver a pantalla completa" style={{ position: 'absolute', top: 10, right: 10, border: 'none', background: 'rgba(0,0,0,0.6)', color: '#fff', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', fontSize: 13 }}>⛶ Ampliar</button>}
         </div>
         <div style={{ fontSize: 12, color: '#9a9a9a', marginTop: 6 }}>Avisos vigentes en portales. Tocá un pin azul o una fila para ver la foto y el enlace al aviso.</div>
-        <div style={{ marginTop: 10, maxHeight: 280, overflow: 'auto', overscrollBehavior: 'contain', borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)' }}>
+        <div style={{ marginTop: 10, maxHeight: 280, overflow: 'auto', borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)' }}>
           {ofertas.map((o, i) => (
             <div key={i} onClick={() => setSel(o)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '9px 12px', borderBottom: i < ofertas.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none', cursor: 'pointer' }}>
               <div style={{ overflow: 'hidden' }}>
@@ -2049,7 +2293,7 @@ function VentasMapa({ ventas, titulo, centro }) {
           {!full && <button onClick={() => setFull(true)} title="Ver a pantalla completa" style={{ position: 'absolute', top: 10, right: 10, border: 'none', background: 'rgba(0,0,0,0.6)', color: '#fff', borderRadius: 8, padding: '6px 10px', cursor: 'pointer', fontSize: 13 }}>⛶ Ampliar</button>}
         </div>
         <div style={{ fontSize: 12, color: '#9a9a9a', marginTop: 6 }}>Tocá una pastilla en el mapa, o una fila de la lista de abajo, para ver la ficha de la propiedad. Con ⛶ lo ves a pantalla completa.</div>
-        <div style={{ marginTop: 10, maxHeight: 280, overflow: 'auto', overscrollBehavior: 'contain', borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)' }}>
+        <div style={{ marginTop: 10, maxHeight: 280, overflow: 'auto', borderRadius: 10, border: '1px solid rgba(255,255,255,0.1)' }}>
           {ventas.map((v, i) => (
             <div key={i} onClick={() => setSel(v)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10, padding: '9px 12px', borderBottom: i < ventas.length - 1 ? '1px solid rgba(255,255,255,0.06)' : 'none', cursor: 'pointer' }}>
               <div style={{ overflow: 'hidden' }}>

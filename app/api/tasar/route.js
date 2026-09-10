@@ -15,25 +15,13 @@ import {
   clasificaTipo, TIPO_OBJETIVO, cutoffVentasStr, esVentaReciente, enBandaM2,
   UFM2_MIN, UFM2_MAX, puntosSuelo, resumenSuelo, sueloPorTramo, sueloDeTramo,
   valorAditivoCasa, confianzaPorN, buscarVentasPoligono, COSTO_CONSTR_RESIDUAL, BANDA_M2, terrenoDe, sinOutliers, DOTACION_TIPICA_DEPTO,
+  valorComparativoDirecto, rangoUnidadesIdenticas, terrenoEsProrrateoBC, CONJUNTO,
+  construirSerieMercado,
 } from '../../lib/tasacion-core.js'
+import { indiceMercado } from '../../lib/indice-mercado.js'
+import { COD_COMUNA, normalizaComuna } from '../../lib/comunas.js'
 
 export const maxDuration = 60
-
-const COD_COMUNA = {
-  'CERRILLOS':14166,'CERRO NAVIA':14156,'CONCHALI':14127,'EL BOSQUE':16165,'ESTACION CENTRAL':14157,
-  'HUECHURABA':14158,'INDEPENDENCIA':13167,'LA CISTERNA':16110,'LA FLORIDA':15128,'LA GRANJA':16131,
-  'LA PINTANA':16154,'LA REINA':15132,'LAS CONDES':15108,'LO BARNECHEA':15161,'LO ESPEJO':16164,
-  'LO PRADO':14155,'MACUL':15151,'MAIPU':14109,'NUNOA':15105,'PEDRO AGUIRRE CERDA':16162,
-  'PENALOLEN':15152,'PROVIDENCIA':15103,'PUDAHUEL':14111,'PUENTE ALTO':16301,'QUILICURA':14114,
-  'QUINTA NORMAL':14107,'RECOLETA':13159,'RENCA':14113,'SAN BERNARDO':16401,'SAN JOAQUIN':16163,
-  'SAN MIGUEL':16106,'SAN RAMON':16153,'SANTIAGO':13101,'VITACURA':15160,
-}
-
-function normalizaComuna(s) {
-  return String(s || '').trim().toUpperCase()
-    .replace(/Á/g,'A').replace(/É/g,'E').replace(/Í/g,'I').replace(/Ó/g,'O').replace(/Ú/g,'U')
-    .replace(/Ñ/g,'N')
-}
 
 // Geocodifica una dirección a {lat,lng} (mismo enfoque que /api/zona). Sirve para ubicar
 // la propiedad en su zona del Plan Regulador.
@@ -214,9 +202,26 @@ export async function POST(request) {
     return 'Referencial'
   }
 
-  // Punto geocodificado de la propiedad: se usa para los comparables por polígono
-  // (misma fuente que /api/zona) y para la zona del Plan Regulador.
-  const punto = await geocodeDireccion(`${form.direccion || ''}, ${comuna}`)
+  // Punto de la propiedad: se usa para los comparables por polígono (misma
+  // fuente que /api/zona) y para la ZONA DEL PLAN REGULADOR.
+  //
+  // Manda la coordenada del CATASTRO (la que el SII tiene para ese ROL): es
+  // estable, exacta y siempre la misma para la misma propiedad. Geocodificar la
+  // dirección solo es el respaldo cuando no hay ROL o el catastro no la trae.
+  //
+  // POR QUÉ IMPORTA: el geocoder de Google devuelve puntos distintos entre
+  // corridas para la misma dirección (interpolación sobre la calle vs. techo, y
+  // otro resultado si el texto incluye el número de unidad). Con la propiedad a
+  // 55 m del borde de su zona, ese vaivén cambiaba la zona del PRC: la casa 21
+  // de V. del Monasterio devolvía ZHE-2.1 (predial 630) en una corrida y ZM-6a
+  // (predial 400) en otra — y ZM-6a está a 507 m, dentro del error del geocoder.
+  // Sobre el punto real del catastro solo UNA zona contiene la propiedad.
+  const puntoCatastro = (() => {
+    const la = parseFloat(siiData?.latitud), ln = parseFloat(siiData?.longitud)
+    return (Number.isFinite(la) && Number.isFinite(ln) && la !== 0 && ln !== 0) ? { lat: la, lng: ln } : null
+  })()
+  const punto = puntoCatastro || await geocodeDireccion(`${form.direccion || ''}, ${comuna}`)
+  const puntoFuente = puntoCatastro ? 'catastro_sii' : (punto ? 'geocode_google' : 'sin_punto')
 
   // ── 1. Comparables REALES del CBR — MISMA FUENTE que /api/zona (polígono) ──
   // Ventas reales alrededor de la propiedad, clasificadas por tipo real. De esta
@@ -227,6 +232,12 @@ export async function POST(request) {
   let ventasConjunto = []
   let historialPropiedad = []
   let indiceSector = null
+  let serieMercado = null // serie completa del proveedor (SOLO informativa: mezcla tipologías)
+  // Ventas REALES del MISMO TIPO para construir el índice del ajuste por fecha
+  // (la variación real del mercado del período). Se junta de todas las fuentes
+  // (polígono, detalle por ROL, conjunto); construirSerieMercado deduplica.
+  let ventasParaSerie = []
+  let indiceSectorMismoTipo = false // true solo si indiceSector salió de ventas del tipo objetivo
   let plusvalia12m = null
   let arriendoMediana = null
   let arriendoN = 0
@@ -257,6 +268,14 @@ export async function POST(request) {
         const ufm2 = uf / m2
         return ufm2 >= UFM2_MIN && ufm2 <= UFM2_MAX
       })
+
+      // Para el ÍNDICE del ajuste por fecha: mismo tipo, sin corte de 5 años
+      // (una serie corta no puede llevar a hoy una venta de hace 8 años).
+      ventasParaSerie.push(...ventas.filter(v => {
+        if (tipoObjetivo && clasificaTipo(v) !== tipoObjetivo) return false
+        if (String(v.unit || '').toUpperCase() !== 'UF') return false
+        return parseFloat(v.superficie_construccion) > 0 && parseFloat(v.price) > 0
+      }))
 
       let similares = base.filter(v => enBandaM2(parseFloat(v.superficie_construccion), m2Construido))
       if (similares.length < 3) similares = base
@@ -365,7 +384,7 @@ export async function POST(request) {
       const trims = Object.keys(porTrim).sort()
         .map(q => ({ trimestre: q, uf_m2: Math.round(mediana(porTrim[q]) * 10) / 10, n: porTrim[q].length }))
         .filter(x => x.n >= 3)
-      if (trims.length >= 2) indiceSector = trims.slice(-8)
+      if (trims.length >= 2) { indiceSector = trims.slice(-8); indiceSectorMismoTipo = true }
       const hoyD = new Date()
       const d12 = new Date(hoyD); d12.setFullYear(hoyD.getFullYear() - 1)
       const d24 = new Date(hoyD); d24.setFullYear(hoyD.getFullYear() - 2)
@@ -461,9 +480,12 @@ export async function POST(request) {
         const fuente = filtroR.length > 0 ? filtroR : ventasR
         diagRest.n_ventas = ventasR.length
         diagRest.n_filtro = filtroR.length
-        filtradosRest = fuente
+        const mismoTipoRest = fuente
           .filter(v => parseFloat(v.superficie_construccion) > 0 && parseFloat(v.price) > 0 && (v.unit === 'UF' || !v.unit))
           .filter(v => !tipoObjetivo || clasificaTipo(v) === tipoObjetivo)
+        // Índice del ajuste por fecha: mismo tipo, SIN corte de 5 años.
+        ventasParaSerie.push(...mismoTipoRest)
+        filtradosRest = mismoTipoRest
           .filter(v => esVentaReciente(v, _cutoffStr))
         diagRest.n_antes_outliers = filtradosRest.length
         // Sin outliers: ventas a <50% o >190% de la mediana solo confunden
@@ -565,7 +587,14 @@ export async function POST(request) {
             .filter(x => parseFloat(x.promedio_precio_m2_3m) > 0)
             .map(x => ({ trimestre: String(x.mes || '').slice(0, 7), uf_m2: Math.round(parseFloat(x.promedio_precio_m2_3m) * 10) / 10, n: parseInt(x.recuento_3m) || 0 }))
           if (serieM.length >= 4) {
+            // OJO: esta serie del proveedor MEZCLA tipologías (56% "otro" en Lo
+            // Barnechea, 13,5% anual). Es SOLO informativa para el gráfico del
+            // informe — NUNCA alimenta el ajuste por fecha (eso rompió la
+            // tasación v2: 19.285 UF). El ajuste usa la serie del MISMO TIPO
+            // construida más abajo con construirSerieMercado.
+            serieMercado = serieM
             indiceSector = serieM.slice(-8)
+            indiceSectorMismoTipo = false
             const ult = serieM[serieM.length - 1]
             const hace12 = serieM[Math.max(0, serieM.length - 13)]
             if (ult && hace12 && hace12.uf_m2 > 0) plusvalia12m = Math.round((ult.uf_m2 / hace12.uf_m2 - 1) * 1000) / 10
@@ -716,10 +745,105 @@ export async function POST(request) {
   let valorDet = null      // { valor_uf, precio_m2, confianza, desglose[] }
   let precioM2Base = null  // precio por m² base (mediana CBR), para el jardín
 
-  // ── CASAS: modelo ADITIVO (suelo × m² terreno + construcción × m² construidos) ──
+  // ── JERARQUÍA DE MÉTODOS ──────────────────────────────────────────────────
+  // 1º COMPARATIVO DIRECTO: si hay ≥3 ventas de unidades GEMELAS del mismo
+  //    conjunto (misma tipología, ±10% de m², dentro de la ventana de
+  //    CONJUNTO.mesesMax), el mercado ya tasó esta propiedad y esas ventas mandan.
+  // 2º ADITIVO (suelo + construcción): solo si no hay gemelas suficientes, y
+  //    nunca con un terreno que es prorrateo del bien común.
+  // 3º Mediana UF/m² del sector.
+  // Gemelas del conjunto + ventas anteriores de ESTA misma unidad (mismo
+  // conjunto y misma tipología por definición). ventasGemelas deduplica.
+  const ventasDelConjunto = [...ventasConjunto, ...historialPropiedad]
+  // ── ÍNDICE REAL DEL MERCADO (mismo tipo) para el ajuste por fecha ─────────
+  // "Lo que realmente dio el mercado" del período. Si el mercado subió 3%
+  // desde una venta, esa venta sube 3%; si bajó 1%, baja 1%. Prioridad:
+  //  1º ÍNDICE PRECALCULADO por comuna x tipo x banda de tamaño (medianas
+  //     anuales de TODAS las ventas CBR de la comuna para propiedades como
+  //     esta — decenas a cientos por punto, datos duros de Data Inmobiliaria).
+  //     Una muestra local de ~5 ventas al año inventa caídas y subidas que el
+  //     mercado nunca tuvo (eso infló la casa 21 a 17.5k): por eso el índice
+  //     robusto manda sobre la serie local.
+  //  2º Serie local construida con las ventas del mismo tipo que ya trajimos.
+  //  3º Índice trimestral del polígono (solo si es del mismo tipo).
+  // NUNCA la serie del proveedor que mezcla tipologías (serieMercado).
+  const codComProp = siiData?.cod_comuna
+    || (rol ? parseInt(String(rol).split('-')[0], 10) : null)
+    || COD_COMUNA[normalizaComuna(comuna)] || null
+  const indiceComunal = (codComProp && tipoObjetivo)
+    ? indiceMercado({ codCom: codComProp, tipo: tipoObjetivo, m2: m2Construido })
+    : null
+  const serieTipo = indiceComunal
+    ? null
+    : construirSerieMercado({ ventas: [...ventasParaSerie, ...ventasDelConjunto] })
+  const serieAjuste = indiceComunal
+    ? indiceComunal.puntos
+    : serieTipo ? serieTipo.puntos : (indiceSectorMismoTipo ? indiceSector : null)
+  const comparativo = m2Construido
+    ? valorComparativoDirecto({
+        ventas: ventasDelConjunto,
+        m2Objetivo: m2Construido,
+        serieIndice: serieAjuste,
+      })
+    : null
+  // Rango infranqueable: unidades idénticas vendidas en los últimos 24 meses.
+  // Techo/piso: precios realmente pagados por unidades idénticas en los
+  // últimos 24 meses, llevados a hoy con la MISMA variación real del mercado
+  // (si el mercado bajó desde la venta, el techo baja; si subió, sube).
+  const rangoIdenticas = m2Construido
+    ? rangoUnidadesIdenticas({ ventas: ventasDelConjunto, m2Objetivo: m2Construido, serieIndice: serieAjuste })
+    : null
+  // El suelo prorrateado del bien común no es vendible por separado y su valor
+  // ya está dentro del precio de las gemelas: con él, el aditivo hunde el valor
+  // (caso V. del Monasterio 2577: 11.404 UF contra ventas reales de 14.350+).
+  const terrenoProrrateado = terrenoEsProrrateoBC(siiData)
+
+  if (comparativo) {
+    const { finalUf, lineas } = aplicarAjustes({ baseUf: comparativo.valor_uf, tipo, extras, answers, cfg: ajustesCfg })
+    precioM2Base = comparativo.uf_m2
+    const tc = comparativo.tasa_conjunto
+    const fmtPct = (x) => (x > 0 ? '+' : '') + String(x).replace('.', ',') + '%'
+    const fuenteAjuste = !comparativo.hubo_ajuste_fecha ? ''
+      : comparativo.fuente_ajuste === 'indice_mercado'
+        ? ` (cada venta llevada a hoy con la variación REAL del mercado en su período — `
+          + (indiceComunal
+            ? `índice de ${tipoObjetivo || 'propiedades'}s ${indiceComunal.banda_label} de ${comuna || 'la comuna'}, `
+              + `${indiceComunal.n_ventas.toLocaleString('es-CL')} ventas reales ${indiceComunal.desde.slice(0, 4)}–${indiceComunal.hasta.slice(0, 4)} (Data Inmobiliaria)`
+            : `índice de ${tipoObjetivo || 'mismo tipo'}s del sector`
+              + (serieTipo ? ` construido con ${serieTipo.n_ventas} ventas reales ${serieTipo.desde.slice(0, 4)}–${serieTipo.hasta.slice(0, 4)}` : ''))
+          + `: ajustes entre ${fmtPct(comparativo.ajuste_min_pct)} y ${fmtPct(comparativo.ajuste_max_pct)})`
+        : tc
+          ? ` (llevadas a hoy al ${tc.tasa_pct}% anual, la apreciación implícita del propio conjunto: `
+            + `${tc.n_recientes} ventas recientes contra ${tc.n_antiguas} antiguas separadas ${tc.anos} años)`
+          : ` (llevadas a hoy con tope de ${Math.round(CONJUNTO.apreciacionMaxAnual * 100)}% anual compuesto, sin índice del sector utilizable)`
+    const desglose = [{
+      concepto: 'Valor por comparación directa con unidades gemelas',
+      calculo: `${comparativo.n} ventas del mismo conjunto`
+        + ` de los últimos ${Math.round(comparativo.ventana_percentil_meses / 12)} años`
+        + (comparativo.muestra_recortada ? ` (de ${comparativo.n_total} gemelas encontradas)` : '')
+        + ` entre ${comparativo.uf_m2_min} y ${comparativo.uf_m2_max} UF/m²`
+        + fuenteAjuste
+        + `; en estado base es el percentil ${comparativo.percentil_usado} = ${comparativo.uf_m2} UF/m² x ${m2Construido} m²`,
+      valor_uf: comparativo.valor_uf,
+    }]
+    if (comparativo.n_descartadas > 0) {
+      desglose.push({
+        concepto: 'Ventas descartadas del conjunto',
+        calculo: `${comparativo.n_descartadas} venta(s) fuera del 60–140% de la mediana del conjunto (no son de mercado: relacionados, herencias o datos mal cargados)`,
+        valor_uf: 0,
+      })
+    }
+    valorDet = {
+      valor_uf: finalUf,
+      precio_m2: Math.round(finalUf / m2Construido),
+      confianza: confianzaPorN(comparativo.n),
+      metodo: 'comparativo directo: ventas de unidades gemelas del mismo conjunto',
+      desglose: [...desglose, ...lineas],
+    }
+  // ── CASAS sin gemelas: modelo ADITIVO (suelo × m² terreno + construcción) ──
   // El UF/m² construido de otras casas arrastra el valor de SUS terrenos: aplicarlo
   // directo sobrevalora las casas con sitio chico y subvalora las de sitio grande.
-  if (tipoObjetivo === 'casa' && sueloInfo && m2Terreno > 0 && m2Construido) {
+  } else if (tipoObjetivo === 'casa' && sueloInfo && m2Terreno > 0 && m2Construido && !terrenoProrrateado) {
     const { tier } = elegirTierConstruccion(comuna, sueloInfo.uf_m2)
     const estado = estadoConstruccion(anio, answers?.remodelacion)
     const cfgCosto = COSTO_CONSTRUCCION_TIERS[tier][estado]
@@ -808,6 +932,36 @@ export async function POST(request) {
     m2Util: m2UtilCalc,
     precioM2: precioM2Base || 50,
   })
+
+  // ── REGLA DE COHERENCIA ───────────────────────────────────────────────────
+  // El valor final NUNCA queda fuera del rango de ventas de unidades idénticas
+  // de los últimos 24 meses ajustadas por fecha. Si un modelo cae fuera, ganan
+  // los comparables. Se aplica sobre el TOTAL que ve el usuario (el frontend
+  // suma remodelación + características + jardín sobre valor_uf), porque es ese
+  // número el que no puede contradecir a las ventas reales.
+  let coherencia = null // 'piso' | 'techo' cuando la regla movió el valor
+  if (valorDet && rangoIdenticas && m2Construido) {
+    const extrasUf = (ajustesExtra.ajRemo || 0) + (ajustesExtra.ajCar || 0) + (ajustesExtra.ajJardin || 0)
+    const totalAntes = valorDet.valor_uf + extrasUf
+    const { min_uf, max_uf, n, meses } = rangoIdenticas
+    const totalCorregido = Math.min(max_uf, Math.max(min_uf, totalAntes))
+    if (totalCorregido !== totalAntes) {
+      const delta = totalCorregido - totalAntes
+      const haciaArriba = delta > 0
+      valorDet.desglose.push({
+        concepto: haciaArriba ? 'Piso por ventas de unidades idénticas' : 'Techo por ventas de unidades idénticas',
+        calculo: `el método daba ${Math.round(totalAntes).toLocaleString('es-CL')} UF, ${haciaArriba ? 'bajo el mínimo' : 'sobre el máximo'} de las `
+          + `${n} ventas de unidades idénticas de los últimos ${meses} meses `
+          + `(${min_uf.toLocaleString('es-CL')}–${max_uf.toLocaleString('es-CL')} UF: precios nominales `
+          + `${rangoIdenticas.min_nominal_uf.toLocaleString('es-CL')}–${rangoIdenticas.max_nominal_uf.toLocaleString('es-CL')} UF `
+          + `llevados a hoy con ${rangoIdenticas.carry_desc}): mandan los comparables`,
+        valor_uf: delta,
+      })
+      valorDet.valor_uf += delta
+      valorDet.precio_m2 = Math.round(valorDet.valor_uf / m2Construido)
+      coherencia = haciaArriba ? 'piso' : 'techo'
+    }
+  }
 
   // ── 2b. NORMATIVA REAL DEL PRC (módulo compartido, el mismo que usa Isidora) ──
   // Geocodifica la propiedad y obtiene su zona oficial del plan regulador. Sirve para
@@ -934,6 +1088,8 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
     answers?.remodelacion && answers.remodelacion !== 'ninguna'
       ? `Remodelación: ${answers.remodelacion}${answers.tiempo_remo ? ', hace '+answers.tiempo_remo : ''}`
       : 'Sin remodelación',
+    answers?.dormitorios ? `Dormitorios: ${answers.dormitorios}` : null,
+    answers?.banos ? `Baños: ${answers.banos}` : null,
     answers?.terraza_m2 > 0 ? `Terraza: ${answers.terraza_m2} m²` : null,
     answers?.estacionamientos > 0 ? `Estacionamientos: ${answers.estacionamientos}` : null,
     answers?.bodegas > 0 ? `Bodegas: ${answers.bodegas}` : null,
@@ -1073,13 +1229,13 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
 
       parsed.ajustes = ajustesExtra
       parsed.ventas_mapa = ventasMapa
-      parsed.punto = punto ? { lat: punto.lat, lng: punto.lng } : null
+      parsed.punto = punto ? { lat: punto.lat, lng: punto.lng, fuente: puntoFuente } : null
       parsed.sector = { composicion: sectorComposicion, indice_uf_m2: indiceSector, plusvalia_12m_pct: plusvalia12m }
       parsed.ventas_conjunto = ventasConjunto
       parsed.historial_propiedad = historialPropiedad
       parsed.ofertas_venta = ofertasVenta
       parsed.ofertas_arriendo = ofertasArriendo
-      parsed._diag = { ...(diag || {}), rest: diagRest, n_comparables: comparablesReales.length, n_suelo: sueloInfo ? sueloInfo.n : 0, metodo: valorDet ? (valorDet.metodo || 'mediana sector') : 'SIN valor determinístico (estimación referencial del LLM)' }
+      parsed._diag = { ...(diag || {}), rest: diagRest, n_comparables: comparablesReales.length, n_suelo: sueloInfo ? sueloInfo.n : 0, metodo: valorDet ? (valorDet.metodo || 'mediana sector') : 'SIN valor determinístico (estimación referencial del LLM)', coherencia, rango_identicas: rangoIdenticas, serie_ajuste: indiceComunal ? { fuente: indiceComunal.fuente, banda: indiceComunal.banda, banda_label: indiceComunal.banda_label, n_ventas: indiceComunal.n_ventas, desde: indiceComunal.desde, hasta: indiceComunal.hasta, generado: indiceComunal.generado, puntos: indiceComunal.puntos } : serieTipo ? { fuente: 'indice_local_mismo_tipo', n_ventas: serieTipo.n_ventas, desde: serieTipo.desde, hasta: serieTipo.hasta, variacion_total_pct: serieTipo.variacion_total_pct, puntos: serieTipo.puntos } : (indiceSectorMismoTipo ? { fuente: 'indice_sector_poligono_mismo_tipo', puntos: indiceSector } : { fuente: 'sin_serie_mismo_tipo (respaldo: tasa del conjunto)' }) }
       const _valorRef = parsed.valor_uf || null
       parsed.arriendo = arriendoMediana ? {
         uf_mes: arriendoMediana,
@@ -1100,7 +1256,7 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
         recomendacion_precio_venta: extractStr('recomendacion_precio_venta') || '',
         comparables: comparablesReales,
         ventas_mapa: ventasMapa,
-        punto: punto ? { lat: punto.lat, lng: punto.lng } : null,
+        punto: punto ? { lat: punto.lat, lng: punto.lng, fuente: puntoFuente } : null,
         sector: { composicion: sectorComposicion, indice_uf_m2: indiceSector, plusvalia_12m_pct: plusvalia12m },
         ventas_conjunto: ventasConjunto,
         historial_propiedad: historialPropiedad,

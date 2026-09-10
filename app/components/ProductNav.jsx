@@ -19,7 +19,9 @@
 export default function ProductNav({ hidden = false, active = 'tasar' }) {
   if (hidden) return null
 
-  const SHELL = process.env.NEXT_PUBLIC_SHELL_URL || ''
+  // Dominio definitivo del shell C2C (c2cprops.com). Se fija en código para
+  // no depender de NEXT_PUBLIC_SHELL_URL (quedó apuntando al vercel.app viejo).
+  const SHELL = 'https://c2cprops.com'
 
 const links = [
     { id: 'comprar', label: 'Comprar', href: `${SHELL}/comprar` },
