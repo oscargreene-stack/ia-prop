@@ -261,6 +261,7 @@ function ChatVendedor({ onBack }) {
   const inputRef = useRef(null)
   const tasRef = useRef(null)
   const mapSecRef = useRef(null) // sección del mapa/tabla de comparables (navegación rápida)
+  const pinTasacionRef = useRef(false) // true mientras el informe recién mostrado debe quedar arriba (no arrastrar al mapa)
   const histRef = useRef([])   // pila de snapshots para "volver atrás"
   const sugRef = useRef(null)  // {dorms, banos, n} sugeridos desde avisos cercanos
   const sugPromiseRef = useRef(null) // promesa de la consulta de avisos en curso
@@ -284,6 +285,7 @@ function ChatVendedor({ onBack }) {
     setSearchTab(s.searchTab || 'direccion'); setInputVal(''); setTyping(false)
     // limpiar restos de una tasación si se retrocede desde el resultado
     setVentasTasacion(null); setOfertasTasacion(null); setPuntoTasacion(null); setVistaTas('ventas'); setTasBody(null)
+    pinTasacionRef.current = false
   }
 
   // ── Dormitorios/baños sugeridos: avisos de portales a ≤150 m con superficie
@@ -313,10 +315,19 @@ function ChatVendedor({ onBack }) {
 
   // Al llegar la TASACIÓN, posicionar el chat en la tarjeta del VALOR (inicio),
   // no al fondo: el informe es largo y el precio quedaba fuera de pantalla.
+  // Los mensajes de cierre de Valentina (resumen, pregunta de publicar) que se
+  // agregan justo DESPUÉS del informe no deben arrastrar la vista hacia abajo:
+  // el mapa/plano vive en el mismo contenedor scrolleable, y cada mensaje nuevo
+  // hacía bottomRef.scrollIntoView, tirando la vista hasta el mapa apenas
+  // aparecía la tasación. Mientras pinTasacionRef esté activo, nos quedamos
+  // arriba (o volvemos a subir) en vez de seguir al fondo.
   useEffect(() => {
     const last = messages[messages.length - 1]
     if (last?.role === 'agent' && last?.content?.type === 'tasacion') {
+      pinTasacionRef.current = true
       setTimeout(() => { tasRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }) }, 200)
+    } else if (pinTasacionRef.current) {
+      // informe recién mostrado: no bajar al mapa solo porque llegó un mensaje de cierre
     } else {
       bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
     }
@@ -361,7 +372,7 @@ function ChatVendedor({ onBack }) {
     setTyping(true)
     setTimeout(() => { setTyping(false); setMessages(m => [...m, { role:'agent', content }]); res() }, delay)
   })
-  const addUser = (text) => setMessages(m => [...m, { role:'user', content:text }])
+  const addUser = (text) => { pinTasacionRef.current = false; setMessages(m => [...m, { role:'user', content:text }]) }
 
   // Inicio
   useEffect(() => {
