@@ -16,7 +16,7 @@ import {
   UFM2_MIN, UFM2_MAX, puntosSuelo, resumenSuelo, sueloPorTramo, sueloDeTramo,
   valorAditivoCasa, confianzaPorN, buscarVentasPoligono, COSTO_CONSTR_RESIDUAL, BANDA_M2, terrenoDe, sinOutliers, DOTACION_TIPICA_DEPTO,
   valorComparativoDirecto, rangoUnidadesIdenticas, terrenoEsProrrateoBC, CONJUNTO,
-  construirSerieMercado,
+  construirSerieMercado, factorFecha,
 } from '../../lib/tasacion-core.js'
 import { indiceMercado } from '../../lib/indice-mercado.js'
 import { COD_COMUNA, normalizaComuna } from '../../lib/comunas.js'
@@ -392,6 +392,29 @@ export async function POST(request) {
       const s24 = serie.filter(x => x.f >= d24.toISOString().slice(0, 10) && x.f < d12.toISOString().slice(0, 10)).map(x => x.r)
       if (s12.length >= 3 && s24.length >= 3) plusvalia12m = Math.round((mediana(s12) / mediana(s24) - 1) * 1000) / 10
 
+      // ── Índice para ajustar por FECHA el suelo residual (FIX 16-sep) ──────
+      // puntosSuelo() y el residual por ROL de más abajo usaban precios
+      // NOMINALES de ventas de hasta 5 años sin llevarlos a hoy (a diferencia
+      // del comparativo directo, que sí lo hace con factorFecha/serieAjuste
+      // más abajo). En un mercado al alza esto deprimía el suelo — caso
+      // Caribes 2238, Vitacura: 13.973 UF entregado vs. ~18.000 UF esperado.
+      // El índice "oficial" (indiceComunal/serieAjuste) se arma más abajo,
+      // después de tener historialPropiedad/ventasConjunto; acá se adelanta
+      // el mismo índice comunal (no depende de esos datos) con la serie
+      // trimestral del sector (indiceSector, ya calculada arriba, y sólo si
+      // es del MISMO TIPO) como respaldo — misma jerarquía, sin exigir que
+      // el resto del flujo se reordene.
+      const codComSuelo = siiData?.cod_comuna
+        || (rol ? parseInt(String(rol).split('-')[0], 10) : null)
+        || COD_COMUNA[normalizaComuna(comuna)] || null
+      const indiceComunalSuelo = (codComSuelo && tipoObjetivo)
+        ? indiceMercado({ codCom: codComSuelo, tipo: tipoObjetivo, m2: m2Construido })
+        : null
+      const serieIndiceSuelo = indiceComunalSuelo
+        ? indiceComunalSuelo.puntos
+        : (indiceSectorMismoTipo ? indiceSector : null)
+      const hoySuelo = new Date()
+
       // ── Valor de SUELO del sector (solo casas) — núcleo compartido ──
       // FILTRO REGULATORIO: si la comuna tiene zonas PRC cargadas, el suelo se
       // calcula SOLO con ventas de la MISMA zona (misma normativa) que la
@@ -411,12 +434,12 @@ export async function POST(request) {
               const zv = await zonaLocalEnPunto(parseFloat(v.lng), parseFloat(v.lat), comuna, bu)
               if (zv && String(zv) === String(zonaPRC)) mismaZona.push(v)
             }
-            const rz = puntosSuelo(mismaZona, mismaZona.filter(v => base.includes(v)))
+            const rz = puntosSuelo(mismaZona, mismaZona.filter(v => base.includes(v)), { serieIndice: serieIndiceSuelo, hoy: hoySuelo })
             if (rz.pts.length >= 3) { sueloPts = rz.pts; fuenteSuelo = rz.fuente; notaZona = ', misma zona PRC ' + zonaPRC }
           }
         } catch (e) {}
         if (sueloPts.length < 3) {
-          const rg = puntosSuelo(ventas, base)
+          const rg = puntosSuelo(ventas, base, { serieIndice: serieIndiceSuelo, hoy: hoySuelo })
           sueloPts = rg.pts; fuenteSuelo = rg.fuente
         }
         const general = resumenSuelo(sueloPts, fuenteSuelo)
@@ -648,9 +671,13 @@ export async function POST(request) {
   // las casas llegan por el REST por ROL. Con esas mismas casas se estima el
   // suelo (método residual) para no perder el desglose terreno + construcción.
   if (tipoObjetivo === 'casa' && !sueloInfo && comparablesReales.length >= 3) {
+    // FIX 16-sep: mismo ajuste por fecha que puntosSuelo() — c.precio_uf es
+    // nominal (hasta 5 años) y serieIndiceSuelo/hoySuelo ya se calcularon arriba.
     const pts = comparablesReales.map(c => {
-      const tt = parseFloat(c.m2_terreno), m2c = parseFloat(c.m2), uf = parseFloat(c.precio_uf)
-      if (!(tt > 0) || !(m2c > 0) || !(uf > 0)) return null
+      const tt = parseFloat(c.m2_terreno), m2c = parseFloat(c.m2), ufNom = parseFloat(c.precio_uf)
+      if (!(tt > 0) || !(m2c > 0) || !(ufNom > 0)) return null
+      const f = serieIndiceSuelo ? factorFecha(c.fecha, serieIndiceSuelo, hoySuelo) : 1
+      const uf = ufNom * f
       const rr = (uf - COSTO_CONSTR_RESIDUAL * m2c) / tt
       return (rr >= 0.3 && rr <= 250) ? { r: rr, lot: tt } : null
     }).filter(Boolean)
