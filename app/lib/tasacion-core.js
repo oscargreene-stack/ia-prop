@@ -220,12 +220,26 @@ export const TRAMOS_SITIO = [
 // Puntos de valor de suelo {r: UF/m² terreno, lot: m² sitio}:
 // (1) ventas de SITIOS (terreno sin construcción) del sector;
 // (2) si hay menos de 3, método residual sobre las ventas de casas:
-//     suelo = (precio − COSTO_CONSTR_RESIDUAL × m²constr) / m²terreno.
-export function puntosSuelo(ventas, casas) {
+//     suelo = (precio_hoy − COSTO_CONSTR_RESIDUAL × m²constr) / m²terreno.
+// FIX 16-sep: ambas ramas llevan el precio NOMINAL a hoy con la variación
+// real del mercado (factorFecha/serieIndice, mismo mecanismo que gemelasAjustadas)
+// antes de restar el costo de construcción o dividir por el terreno. Sin esto,
+// ventas de hasta MAX_ANOS_VENTA (5) años quedaban sin ajustar y además se les
+// restaba COSTO_CONSTR_RESIDUAL (costo de HOY) de un precio de AYER, deprimiendo
+// el suelo dos veces en un mercado al alza — caso detectado en Caribes 2238,
+// Vitacura (13.973 UF entregado vs. ~18.000 UF esperado por Oscar).
+export function puntosSuelo(ventas, casas, { serieIndice, hoy } = {}) {
+  const conIndice = serieUtilizable(serieIndice)
+  const aHoy = (v) => {
+    const uf = parseFloat(v.price)
+    if (!(uf > 0)) return null
+    const f = conIndice ? factorFecha(v.date_inscripcion || v.fecha, serieIndice, hoy) : 1
+    return uf * f
+  }
   const sitios = (ventas || []).filter((v) => clasificaTipo(v) === 'terreno' && String(v.unit || '').toUpperCase() === 'UF')
   const deSitios = sitios
     .map((v) => {
-      const t = terrenoDe(v), uf = parseFloat(v.price)
+      const t = terrenoDe(v), uf = aHoy(v)
       if (!(t > 0) || !(uf > 0)) return null
       const r = uf / t
       if (r < 0.3 || r > 250) return null
@@ -234,7 +248,7 @@ export function puntosSuelo(ventas, casas) {
     .filter((x) => x != null)
   const residual = (casas || [])
     .map((v) => {
-      const t = terrenoDe(v), c = parseFloat(v.superficie_construccion), uf = parseFloat(v.price)
+      const t = terrenoDe(v), c = parseFloat(v.superficie_construccion), uf = aHoy(v)
       if (!(t > 0) || !(c > 0) || !(uf > 0)) return null
       const land = (uf - COSTO_CONSTR_RESIDUAL * c) / t
       if (land < 0.3 || land > 250) return null
