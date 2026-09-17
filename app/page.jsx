@@ -266,6 +266,7 @@ function ChatVendedor({ onBack }) {
   const sugRef = useRef(null)  // {dorms, banos, n} sugeridos desde avisos cercanos
   const sugPromiseRef = useRef(null) // promesa de la consulta de avisos en curso
   const pubRef = useRef(null)  // {precio, conPrecio} cuando se llega desde Publicar (vender.c2cprops.com)
+  const lastTasacionDataRef = useRef(null) // ultimo finalData pasado a iniciarTasacion, para el boton "Si, reintentar"
 
   // ── Volver atrás: guarda un snapshot ANTES de procesar cada respuesta ──────
   const guardarPaso = () => {
@@ -537,7 +538,15 @@ function ChatVendedor({ onBack }) {
     addUser(opt.label)
     setInputMode(null)
 
-    if (stage === 'tipo') {
+    if (stage === 'tasando' && opt.id === 'retry') {
+      // FIX 17-sep: el boton "Si, reintentar" no tenia manejo -- stage se queda
+      // en 'tasando' cuando iniciarTasacion() tira error (ej. timeout 504 de
+      // /api/tasar), y no habia ninguna rama de handleOption para ese stage,
+      // asi que el click no hacia nada. Reintenta con los mismos datos que se
+      // usaron la vez anterior (guardados en lastTasacionDataRef).
+      if (lastTasacionDataRef.current) await iniciarTasacion(lastTasacionDataRef.current)
+      return
+    } else if (stage === 'tipo') {
       const newData = { ...data, tipo: opt.id }
       setData(newData)
       const nombre = opt.label.toLowerCase()
@@ -911,6 +920,7 @@ function ChatVendedor({ onBack }) {
   }
 
   const iniciarTasacion = async (finalData) => {
+    lastTasacionDataRef.current = finalData
     setVentasTasacion(null); setOfertasTasacion(null); setVistaTas('ventas')
     await addAgent('¡Perfecto! Calculando la tasación con datos reales del mercado…', 500)
     setMessages(m => [...m, { role:'agent', content:{ type:'loading', text:'Consultando transacciones reales del CBR, comparables y plan regulador…' }}])
