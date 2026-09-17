@@ -828,6 +828,18 @@ function ChatVendedor({ onBack }) {
         contribuciones_clp: c.contribuciones_clp,
         material: c.material,
         propietario: c.propietario,
+        // FIX 17-sep: sin esto, /api/tasar nunca recibe la coordenada del
+        // catastro (siiData?.latitud/longitud) y cae siempre al geocoder de
+        // Google sobre el texto de dirección -- exacto para una calle real,
+        // pero con búsqueda por ROL ese texto no es una dirección geocodificable
+        // y el punto resultante puede caer cientos de metros lejos, en la zona
+        // de plan regulador equivocada y con el polígono de comparables
+        // desplazado. Caso detectado: Caribes 2238, Vitacura (ROL 2335-38) --
+        // con este campo ausente, tasó como zona EP (Equipamiento) estando a
+        // ~800 m del punto real del catastro, cuando la propiedad es
+        // exclusivamente residencial.
+        latitud: c.latitud,
+        longitud: c.longitud,
       }))
 
       // Multiples resultados -> selector
