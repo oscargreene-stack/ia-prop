@@ -176,6 +176,16 @@ async function buscarPoligono(punto, metros, dbg, { maxPaginas = 4, msPrimera = 
   return { bloqueado: false, filas }
 }
 
+const claveFila = (r) => String(r.rol || (r.cod_com + '-' + r.cod_mz + '-' + r.cod_pr))
+function unirFilas(a, b) {
+  const vistos = new Set(a.map(claveFila))
+  return a.concat(b.filter(r => !vistos.has(claveFila(r))))
+}
+const coordFila = (r) => {
+  const lat = toCoord(r.lat, r.latitud), lng = toCoord(r.lng, r.longitud)
+  return (lat != null && lng != null) ? { lat, lng } : null
+}
+
 // Ubica un ROL. El proveedor no expone "buscar por ROL", pero
 // `propiedades/detalle` SÍ lo recibe y responde con filas georreferenciadas
 // (`latitud`/`longitud`/`distancia_metros`). Con esa coordenada se ancla el
@@ -257,22 +267,34 @@ async function buscarPorRol(rol, { comuna, punto: puntoIn, dbg }) {
       mensaje: `No pude ubicar el ROL ${rolTexto(rol)}. Búscala por dirección, o ingresa los m2 a mano.` })
   }
 
-  // El cuadrado se dimensiona con la distancia real del ancla (+150 m de holgura):
-  // más chico que eso deja el predio fuera, y más grande satura las páginas del
-  // proveedor. Menos páginas y timeouts más cortos que la ruta de dirección,
-  // porque ya se gastó una llamada al detalle y todo debe caber en maxDuration.
-  let resPoly
-  try {
-    resPoly = await buscarPoligono(punto, Math.min(700, Math.max(200, Math.round(margen) + 150)), dbg,
-      { maxPaginas: 3, msPrimera: 20000, msResto: 10000 })
-  } catch (e) {
-    if (dbg) dbg.poligonoErr = String((e && e.message) || e)
-    return fin({ candidatos: [], total: 0, _modo: 'servicio_no_disponible', mensaje: MSG_BLOQUEADO })
+  // Búsqueda ESCALONADA: cuadrado chico primero, y se agranda solo si el ROL
+  // no aparece. El proveedor corta en páginas de ~300 filas; en zonas densas
+  // (Las Condes junto a Vespucio: ~5.000 predios en ±200 m) un cuadrado grande
+  // deja fuera la unidad buscada. Caso real: ROL 15108-360-111, A. Vespucio 931
+  // DP 301 — el cuadrado de 200 m nunca la traía. Con margen 0 el punto ES el
+  // del predio (todas las unidades de un edificio comparten coordenada), así
+  // que ±25 m trae el edificio completo en una sola página.
+  const final = Math.min(700, Math.max(200, Math.round(margen) + 150))
+  const tramos = margen === 0 ? [25, 120] : [60, 150, final].filter((m, i, arr) => i === 0 || m > arr[i - 1])
+  let filas = []
+  let fila = null
+  for (const [i, metros] of tramos.entries()) {
+    let resPoly
+    try {
+      resPoly = await buscarPoligono(punto, metros, dbg,
+        { maxPaginas: i === tramos.length - 1 ? 3 : 2, msPrimera: 15000, msResto: 10000 })
+    } catch (e) {
+      if (dbg) dbg.poligonoErr = String((e && e.message) || e)
+      if (filas.length) break
+      return fin({ candidatos: [], total: 0, _modo: 'servicio_no_disponible', mensaje: MSG_BLOQUEADO })
+    }
+    if (resPoly.bloqueado) return fin({ candidatos: [], total: 0, _modo: 'servicio_no_disponible', mensaje: MSG_BLOQUEADO })
+    filas = unirFilas(filas, resPoly.filas)
+    fila = filas.find(f => esMismoRol(f, rol))
+    if (dbg) (dbg.rol_tramos = dbg.rol_tramos || []).push({ metros, filas: resPoly.filas.length, encontrado: !!fila })
+    if (fila) break
   }
-  const { bloqueado, filas } = resPoly
-  if (bloqueado) return fin({ candidatos: [], total: 0, _modo: 'servicio_no_disponible', mensaje: MSG_BLOQUEADO })
 
-  const fila = filas.find(f => esMismoRol(f, rol))
   if (!fila) {
     return fin({ candidatos: [], total: 0, _modo: 'rol_no_encontrado', rol: rolTexto(rol), punto,
       mensaje: `No encontré el ROL ${rolTexto(rol)} en el catastro. Revisa el número o búscala por dirección.` })
@@ -361,9 +383,41 @@ export async function POST(request) {
     if (dbg) dbg.poligonoErr = String((e && e.message) || e)
   }
 
-  // 3) Mapear -> candidatos, ordenar por cercanía, priorizar calle / número / unidad
   const palabras = palabrasCalle(dirLimpia)
   const numero = (norm(dirLimpia).match(/(\d{2,6})/) || [])[1] || ''
+  const reNumero = numero ? new RegExp('\\b0*' + numero + '\\b') : null
+  const u = unidad ? escRe(unidad) : ''
+  // Con prefijo explícito ("DP 403", "CASA 21", "OF 12") el match es fuerte.
+  const reFuerte = unidad ? new RegExp('\\b(?:DP|DEPTO|DPTO|DEPT|D|OF|OFIC|OFICINA|LC|LOC|LOCAL|CS|CASA)\\.?\\s*0*' + u + '\\b', 'i') : null
+
+  // 2b) ¿La unidad pedida quedó fuera por la paginación del proveedor? En zonas
+  // densas el cuadrado de ±120 m trae más predios de los que caben en las
+  // páginas que leemos (A. Vespucio 931, Las Condes: ~1.450 predios vs 1.200
+  // leídos → salían DP 101/102/201/202 pero no la DP 301). Todas las unidades
+  // de un edificio comparten la coordenada del bien común: un cuadrado de
+  // ±20 m sobre esa coordenada trae el edificio completo en una página.
+  if (unidad && !resultados.some(r => { const d = String(r.direccion_sii || ''); return reFuerte.test(d) && (!reNumero || reNumero.test(d)) })) {
+    const delEdificio = resultados.filter(r => {
+      const d = String(r.direccion_sii || '')
+      return (!reNumero || reNumero.test(d)) && (!palabras.length || coincideCalle(palabras, d))
+    })
+    const anclas = []
+    for (const r of delEdificio) {
+      const c = coordFila(r)
+      if (c && !anclas.some(a => distM(a, c.lat, c.lng) < 10)) anclas.push(c)
+    }
+    const pasadas = anclas.length ? anclas.slice(0, 3).map(c => ({ c, m: 20 })) : [{ c: punto, m: 60 }]
+    if (dbg) dbg.segunda_pasada = pasadas.map(p => ({ ...p.c, metros: p.m }))
+    for (const p of pasadas) {
+      try {
+        const r2 = await buscarPoligono(p.c, p.m, null, { maxPaginas: 2, msPrimera: 15000, msResto: 10000 })
+        if (!r2.bloqueado) resultados = unirFilas(resultados, r2.filas)
+      } catch (e) { if (dbg) dbg.segundaErr = String((e && e.message) || e) }
+      if (resultados.some(r => reFuerte.test(String(r.direccion_sii || '')))) break
+    }
+  }
+
+  // 3) Mapear -> candidatos, ordenar por cercanía, priorizar calle / número / unidad
   let cands = resultados.map(r => aCandidato(r, comuna, punto)).filter(c => c.m2_construido && c.m2_construido > 0)
 
   // La CALLE manda sobre el número: si hay predios del nombre pedido, el resto
@@ -374,9 +428,8 @@ export async function POST(request) {
     if (dbg) dbg.calle = { palabras, matches: mismaCalle.length, de: cands.length }
     if (mismaCalle.length) cands = mismaCalle
   }
-  if (numero) {
-    const re = new RegExp('\\b0*' + numero + '\\b')
-    const exactos = cands.filter(c => re.test(c.direccion))
+  if (reNumero) {
+    const exactos = cands.filter(c => reNumero.test(c.direccion))
     if (exactos.length) cands = exactos
   }
   cands.sort((a, b) => a._dist - b._dist)
@@ -387,10 +440,8 @@ export async function POST(request) {
   // unidad pedida quedaba fuera del corte (caso real: casa 21 de V. del
   // Monasterio 2577, donde salían la 18, 12, 27, 15, 8, 5, 11 y 26).
   if (unidad) {
-    const u = escRe(unidad)
-    // Con prefijo explícito ("DP 403", "CASA 21", "OF 12") el match es fuerte:
-    // si lo hay, devolvemos solo esa (el flujo sigue directo, sin selector).
-    const reFuerte = new RegExp('\\b(?:DP|DEPTO|DPTO|DEPT|D|OF|OFIC|OFICINA|LC|LOC|LOCAL|CS|CASA)\\.?\\s*0*' + u + '\\b', 'i')
+    // Match fuerte (reFuerte, arriba): si lo hay, devolvemos solo esa
+    // (el flujo sigue directo, sin selector).
     // El SII también la escribe sin prefijo ("2577 - 21"): sirve para rankear,
     // no para descartar (ese guión a veces es el número de la copropiedad).
     const reDebil = new RegExp('-\\s*0*' + u + '\\b', 'i')
