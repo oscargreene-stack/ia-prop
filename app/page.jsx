@@ -531,6 +531,31 @@ function ChatVendedor({ onBack }) {
     }
   }
 
+  // Datos del catastro confirmados (tal cual, o con los m² construidos corregidos):
+  // inferir/preguntar el tipo y seguir con el flujo.
+  const confirmarDatosSII = async (d0, prefijo = 'Perfecto, datos confirmados ✓') => {
+    let d = d0
+    if (!d.tipo) {
+      // Solo se infiere si la dirección SII trae marcador de unidad; si no, se pregunta.
+      const t = inferirTipo(d.siiData)
+      if (t) {
+        d = { ...d, tipo: t }
+        setData(d)
+        const NOM = { casa: 'una casa', departamento: 'un departamento', oficina: 'una oficina', comercial: 'una propiedad comercial', terreno: 'un terreno' }
+        await addAgent(`${prefijo} — según el catastro, tu propiedad es **${(NOM[t] || t).replace(/^un[a]? /, '')}**.`, 400)
+      } else {
+        await addAgent(`${prefijo}\n\n¿Qué tipo de propiedad es?${pistaTipo(d.siiData)}`, 400)
+        setInputMode('options')
+        setOptions(TIPOS)
+        setStage('tipo_post_sii')
+        return
+      }
+    } else {
+      await addAgent(prefijo, 400)
+    }
+    await continuarTrasSII(d)
+  }
+
   // Handler opciones
   const handleOption = async (opt) => {
     if (opt.disabled) return
@@ -604,26 +629,35 @@ function ChatVendedor({ onBack }) {
 
     } else if (stage === 'confirmar_sii') {
       if (opt.id === 'si') {
-        let d = data
-        if (!d.tipo) {
-          // Solo se infiere si la dirección SII trae marcador de unidad; si no, se pregunta.
-          const t = inferirTipo(d.siiData)
-          if (t) {
-            d = { ...d, tipo: t }
-            setData(d)
-            const NOM = { casa: 'una casa', departamento: 'un departamento', oficina: 'una oficina', comercial: 'una propiedad comercial', terreno: 'un terreno' }
-            await addAgent(`Perfecto, datos confirmados ✓ — según el catastro, tu propiedad es **${(NOM[t] || t).replace(/^un[a]? /, '')}**.`, 400)
-          } else {
-            await addAgent(`Perfecto, datos confirmados ✓\n\n¿Qué tipo de propiedad es?${pistaTipo(d.siiData)}`, 400)
-            setInputMode('options')
-            setOptions(TIPOS)
-            setStage('tipo_post_sii')
-            return
-          }
+        await confirmarDatosSII(data)
+      } else {
+        // Casas: es común que tengan más m² construidos que los del catastro
+        // (ampliaciones sin recepción municipal). Se permite corregir SOLO los
+        // m² construidos; los m² de terreno quedan siempre los del catastro.
+        const tipoProp = data.tipo || inferirTipo(data.siiData)
+        if (!tipoProp || tipoProp === 'casa') {
+          await addAgent('¿Qué quieres corregir?\n\nSi la casa tiene ampliaciones que no están recepcionadas, puedes indicar los **m² construidos reales**. Los m² de terreno se mantienen según el catastro.', 400)
+          setInputMode('options')
+          setOptions([
+            { id:'corr_m2', label: tipoProp === 'casa' ? 'Los m² construidos' : 'Los m² construidos (solo casas)', icon:'📐' },
+            { id:'corr_dir', label:'Es otra propiedad / la dirección', icon:'📍' },
+          ])
+          setStage('que_corregir')
         } else {
-          await addAgent('Perfecto, datos confirmados ✓', 400)
+          await addAgent('Sin problema. Ingresa la dirección correcta:', 400)
+          setSearchTab('direccion')
+          setInputVal(''); setDeptoVal('')
+          setInputMode('search_form')
+          setStage('direccion')
         }
-        await continuarTrasSII(d)
+      }
+
+    } else if (stage === 'que_corregir') {
+      if (opt.id === 'corr_m2') {
+        const m2Cat = parseFloat(data.siiData?.m2_construido) || 0
+        await addAgent(`¿Cuántos **m² construidos** tiene realmente la casa?${m2Cat > 0 ? ` (el catastro registra ${m2Cat.toLocaleString('es-CL')} m²)` : ''}\n\nIncluye las ampliaciones, aunque no estén recepcionadas.`, 400)
+        setInputMode('text'); setPlaceholder(m2Cat > 0 ? `Ej: ${Math.round(m2Cat * 1.3)}` : 'Ej: 180')
+        setStage('corregir_m2_construido')
       } else {
         await addAgent('Sin problema. Ingresa la dirección correcta:', 400)
         setSearchTab('direccion')
@@ -765,6 +799,31 @@ function ChatVendedor({ onBack }) {
         setInputMode('text'); setStage('ingresar_terreno'); return
       }
       await nextStep(nd, 0); return
+
+    } else if (stage === 'corregir_m2_construido') {
+      // Corrección de m² construidos (casas). El terreno NO se toca.
+      const m2Real = parseFloat(val.replace(/\./g, '').replace(',', '.').replace(/[^0-9.]/g, ''))
+      if (!m2Real || m2Real <= 0 || m2Real > 5000) {
+        await addAgent('Por favor ingresa un número válido de m² construidos (ej: 180).', 300)
+        setInputMode('text'); return
+      }
+      addUser(`${m2Real.toLocaleString('es-CL')} m² construidos`)
+      const m2Cat = parseFloat(data.siiData?.m2_construido) || 0
+      const terreno = parseFloat(data.siiData?.m2_terreno) || 0
+      const siiCorr = {
+        ...data.siiData,
+        m2_construido: m2Real,
+        m2_util: m2Real,
+        m2_construido_catastro: data.siiData?.m2_construido_catastro ?? (m2Cat || null),
+      }
+      const nd = { ...data, siiData: siiCorr }
+      setData(nd)
+      const detalle = [
+        m2Cat > 0 ? `el catastro registra ${m2Cat.toLocaleString('es-CL')} m²` : null,
+        terreno > 0 ? `terreno: ${terreno.toLocaleString('es-CL')} m² (según catastro)` : null,
+      ].filter(Boolean).join(' · ')
+      await confirmarDatosSII(nd, `Anotado: **${m2Real.toLocaleString('es-CL')} m² construidos** ✓${detalle ? `\n(${detalle})` : ''}`)
+      return
 
     } else if (stage === 'ingresar_terreno') {
       const m2Corregido = parseFloat(val.replace(/[^0-9.]/g, ''))
