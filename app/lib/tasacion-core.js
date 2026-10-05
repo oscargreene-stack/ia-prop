@@ -260,8 +260,15 @@ export function puntosSuelo(ventas, casas, { serieIndice, hoy } = {}) {
 }
 
 // Resumen estadístico del suelo (null si hay menos de 3 puntos).
+// FIX 05-oct: se descartan outliers (misma regla de tasador que el resto del
+// núcleo: sinOutliers) antes de calcular mediana/percentiles de suelo, tanto
+// a nivel global (resumenSuelo) como dentro de cada tramo (sueloPorTramo).
+// Sin esto, una o dos ventas de terreno atípicas podían distorsionar el
+// valor de suelo reportado, igual que ocurría en la mediana sectorial de
+// comparables (ver fix en route.js).
 export function resumenSuelo(pts, fuente) {
-  const list = (pts || []).map((p) => p.r)
+  const ptsFiltrados = sinOutliers(pts || [], (p) => p.r)
+  const list = ptsFiltrados.map((p) => p.r)
   if (list.length < 3) return null
   return {
     uf_m2_mediana: r1(mediana(list)),
@@ -275,7 +282,8 @@ export function resumenSuelo(pts, fuente) {
 // UF/m² de suelo por tramo de tamaño de sitio (proxy de la normativa del sector).
 export function sueloPorTramo(pts) {
   return TRAMOS_SITIO.map((tr) => {
-    const vals = (pts || []).filter((p) => p.lot >= tr.min && p.lot < tr.max).map((p) => p.r)
+    const valsRaw = (pts || []).filter((p) => p.lot >= tr.min && p.lot < tr.max).map((p) => p.r)
+    const vals = sinOutliers(valsRaw, (x) => x)
     if (vals.length < 3) return null
     return { rango: tr.label, uf_m2_mediana: r1(mediana(vals)), uf_m2_p25: r1(percentil(vals, 25)), uf_m2_p75: r1(percentil(vals, 75)), n: vals.length }
   }).filter(Boolean)
