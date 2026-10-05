@@ -34,6 +34,7 @@ const FLUJOS = {
       {id:'baja',label:'Sí — terminaciones básicas',icon:'🔧'},{id:'ninguna',label:'No tiene',icon:'—'}]},
     { id:'tiempo_remo', msg:'¿Hace cuánto fue la remodelación?', tipo:'options', condicional:'remodelacion!ninguna', opts:[
       {id:'reciente',label:'Menos de 3 años',icon:'🆕'},{id:'hace3',label:'3 a 5 años',icon:'📅'},{id:'hace5',label:'Más de 5 años',icon:'⏳'}]},
+    { id: 'm2_ampliados', msg: '¿La remodelación agregó m² útiles que hoy NO están en el catastro del SII (ampliación, cierre de terraza, segundo piso, pieza, etc)? ¿Cuántos m² agregó? (escribe 0 si no agregó)', tipo:'text', condicional:'remodelacion!ninguna', placeholder:'Ej: 0 / 8 / 15 / 30' },
     { id:'caracteristicas', msg:'¿Tiene alguna característica especial? Selecciona todo lo que aplique:', tipo:'multi', opts:[
       {id:'piscina',label:'Piscina',icon:'🏊'},{id:'quincho',label:'Quincho / BBQ',icon:'🔥'},
       {id:'vista',label:'Vista panorámica',icon:'🏔️'},{id:'jardin',label:'Jardín grande',icon:'🌳'},
@@ -60,6 +61,7 @@ const FLUJOS = {
     { id:'remodelacion', msg:'¿El departamento tiene alguna remodelación?', tipo:'options', opts:[
       {id:'alta',label:'Sí — alta calidad',icon:'⭐'},{id:'media',label:'Sí — calidad media',icon:'✨'},
       {id:'baja',label:'Sí — básica',icon:'🔧'},{id:'ninguna',label:'No tiene',icon:'—'}]},
+    { id: 'm2_ampliados', msg: '¿La remodelación agregó m² útiles que hoy NO están en el catastro del SII (ampliación, cierre de terraza, segundo piso, pieza, etc)? ¿Cuántos m² agregó? (escribe 0 si no agregó)', tipo:'text', condicional:'remodelacion!ninguna', placeholder:'Ej: 0 / 8 / 15 / 30' },
     { id:'caracteristicas', msg:'¿Tiene alguna de estas características?', tipo:'multi', opts:[
       {id:'vista_despejada',label:'Vista despejada',icon:'👁️'},{id:'piscina_edificio',label:'Piscina edificio',icon:'🏊'},
       {id:'gimnasio',label:'Gimnasio',icon:'💪'},{id:'conserje',label:'Conserje 24/7',icon:'🔐'},
@@ -204,7 +206,8 @@ const AJUSTES_CARACT = {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 function calcAjustes(data) {
   // Usar m² útiles para remodelación (lo que el dueño remodeló), m² construidos para base
-  const m2Util  = parseFloat(data.siiData?.m2_util || data.siiData?.m2_construido) || 60
+  const m2AmpliadosCalc = parseFloat(data.m2_ampliados) || 0
+  const m2Util  = (parseFloat(data.siiData?.m2_util || data.siiData?.m2_construido) || 60) + m2AmpliadosCalc
   const m2Total = parseFloat(data.siiData?.m2_construido) || m2Util
   const ajRemo = (AJUSTE_REMO[data.remodelacion] || 0) * m2Util * (AJUSTE_TIEMPO[data.tiempo_remo] || 1)
   const caract = [
@@ -932,7 +935,7 @@ function ChatVendedor({ onBack }) {
         body: JSON.stringify({
           siiData: finalData.siiData,
           form:{ direccion: finalData.direccion, depto:'', comuna: finalData.comuna || '' },
-          answers:{ remodelacion: finalData.remodelacion || 'ninguna', tiempo_remo: finalData.tiempo_remo || 'reciente', conservacion:'bueno', terraza_m2: parseInt(finalData.terraza_m2)||0, estacionamientos: parseInt(finalData.estacionamientos)||0, bodegas: parseInt(finalData.bodega)||0, m2_util: finalData.siiData?.m2_util || null, dormitorios: finalData.dormitorios || null, banos: finalData.banos || null },
+          answers:{ remodelacion: finalData.remodelacion || 'ninguna', tiempo_remo: finalData.tiempo_remo || 'reciente', conservacion:'bueno', terraza_m2: parseInt(finalData.terraza_m2)||0, estacionamientos: parseInt(finalData.estacionamientos)||0, bodegas: parseInt(finalData.bodega)||0, m2_ampliados: parseFloat(finalData.m2_ampliados)||0, m2_util: finalData.siiData?.m2_util || null, dormitorios: finalData.dormitorios || null, banos: finalData.banos || null },
           extras: { ...finalData, tipo: finalData.tipo, piso: finalData.piso, orientacion: finalData.orientacion, jardin_m2: finalData.jardin_m2, precio_idea: finalData.precio_idea },
         })
       })

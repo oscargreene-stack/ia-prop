@@ -186,6 +186,8 @@ export async function POST(request) {
   // ── Superficies confirmadas del SII ──────────────────────────────────────
   const m2Construido = siiData?.m2_construido ? parseFloat(siiData.m2_construido) : null
   const m2Terreno = siiData?.m2_terreno ? parseFloat(siiData.m2_terreno) : null
+  // m² agregados por una remodelación que NO están catastrados en el SII (ver Valentina, pregunta m2_ampliados)
+  const m2Ampliados = parseFloat(answers?.m2_ampliados) || 0
 
   // Si no hay datos SII: no tasamos
   if (!m2Construido && !m2Terreno) {
@@ -875,17 +877,21 @@ export async function POST(request) {
     const estado = estadoConstruccion(anio, answers?.remodelacion)
     const cfgCosto = COSTO_CONSTRUCCION_TIERS[tier][estado]
     const costoUfM2 = Math.round((cfgCosto.min + cfgCosto.max) / 2)
+    const m2ConstruidoEfectivo = m2Construido + m2Ampliados
     const { terreno_uf, construccion_uf, total_uf } = valorAditivoCasa({ sueloUfM2: sueloInfo.uf_m2, m2Terreno, costoUfM2, m2Construido })
-    precioM2Base = Math.round(total_uf / m2Construido)
-    const { finalUf, lineas } = aplicarAjustes({ baseUf: total_uf, tipo, extras, answers, cfg: ajustesCfg })
+    const amplioUf = m2Ampliados > 0 ? Math.round(costoUfM2 * m2Ampliados) : 0
+    const total_uf_efectivo = total_uf + amplioUf
+    precioM2Base = Math.round(total_uf_efectivo / m2ConstruidoEfectivo)
+    const { finalUf, lineas } = aplicarAjustes({ baseUf: total_uf_efectivo, tipo, extras, answers, cfg: ajustesCfg })
     valorDet = {
       valor_uf: finalUf,
-      precio_m2: Math.round(finalUf / m2Construido),
+      precio_m2: Math.round(finalUf / m2ConstruidoEfectivo),
       confianza: confianzaPorN(sueloInfo.n),
       metodo: 'aditivo: suelo + construcción (núcleo compartido con Isidora)',
       desglose: [
         { concepto: 'Valor del terreno', calculo: sueloInfo.uf_m2 + ' UF/m² de suelo x ' + m2Terreno + ' m² (' + sueloInfo.fuente + ', ' + sueloInfo.n + ' referencias, ' + sueloInfo.tramo + ')', valor_uf: terreno_uf },
         { concepto: 'Valor de la construcción', calculo: costoUfM2 + ' UF/m² (' + cfgCosto.label.toLowerCase() + ') x ' + m2Construido + ' m² construidos', valor_uf: construccion_uf },
+        ...(amplioUf > 0 ? [{ concepto: 'm² ampliados sin regularizar (no catastrados en el SII)', calculo: costoUfM2 + ' UF/m² x ' + m2Ampliados + ' m² ampliados', valor_uf: amplioUf }] : []),
         ...lineas,
       ],
     }
@@ -906,10 +912,12 @@ export async function POST(request) {
     const ufm2List = sinOutliers(ufm2ListRaw, (x) => x)
     if (ufm2List.length) {
       const medianaUfM2 = Math.round(mediana(ufm2List))
+      const m2ConstruidoEfectivo = m2Construido + m2Ampliados
+      const amplioUf2 = m2Ampliados > 0 ? Math.round(medianaUfM2 * m2Ampliados) : 0
       const baseUf = Math.round(medianaUfM2 * m2Construido)
       precioM2Base = medianaUfM2
 
-      const { finalUf, lineas } = aplicarAjustes({ baseUf, tipo, extras, answers, cfg: ajustesCfg })
+      const { finalUf, lineas } = aplicarAjustes({ baseUf: baseUf + amplioUf2, tipo, extras, answers, cfg: ajustesCfg })
 
       const descartados = ufm2ListRaw.length - ufm2List.length
       const calculoTexto = descartados > 0
@@ -918,11 +926,12 @@ export async function POST(request) {
 
       const desglose = [
         { concepto: 'Valor base por comparables CBR', calculo: calculoTexto, valor_uf: baseUf },
+        ...(amplioUf2 > 0 ? [{ concepto: 'm² ampliados sin regularizar (no catastrados en el SII)', calculo: medianaUfM2 + ' UF/m² x ' + m2Ampliados + ' m² ampliados', valor_uf: amplioUf2 }] : []),
         ...lineas,
       ]
       valorDet = {
         valor_uf: finalUf,
-        precio_m2: Math.round(finalUf / m2Construido),
+        precio_m2: Math.round(finalUf / m2ConstruidoEfectivo),
         confianza: confianzaPorN(ufm2List.length),
         desglose,
       }
@@ -969,7 +978,7 @@ export async function POST(request) {
 
   // Ajustes que el frontend suma sobre el valor base (remodelación, características,
   // jardín), calculados desde la config editable. El jardín usa el precio real por m².
-  const m2UtilCalc = parseFloat(answers?.m2_util || siiData?.m2_util || m2Construido) || 60
+  const m2UtilCalc = (parseFloat(answers?.m2_util || siiData?.m2_util || m2Construido) || 60) + m2Ampliados
   const ajustesExtra = calcAjustesExtra({
     cfg: ajustesCfg, answers, extras,
     m2Util: m2UtilCalc,
