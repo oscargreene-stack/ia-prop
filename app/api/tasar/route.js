@@ -892,7 +892,18 @@ export async function POST(request) {
     } else if (comparablesReales.length > 0 && m2Construido) {
     // Mediana sobre TODO el universo comparable del sector (la misma que ve
     // Isidora en /api/zona), no solo sobre las 12 más cercanas que se muestran.
-    const ufm2List = (ufm2SectorList.length >= 3 ? ufm2SectorList : comparablesReales.map(c => c.uf_m2)).filter(x => x > 0)
+    const ufm2ListRaw = (ufm2SectorList.length >= 3 ? ufm2SectorList : comparablesReales.map(c => c.uf_m2)).filter(x => x > 0)
+    // FIX 05-oct: recorta outliers (regla de tasador ya usada en el flujo de
+    // gemelas: fuera del 60%-175% de la mediana del grupo, solo si la muestra
+    // es >=6 y quedan >=5 tras el filtro) antes de calcular la mediana del
+    // sector. Sin esto, un par de ventas atípicas (muy por debajo o por
+    // encima del resto) arrastraban la mediana sectorial lejos de lo que
+    // realmente transan las propiedades comparables. Caso detectado: El
+    // Quisco 3098, depto 201, Las Condes: dos ventas a 43 UF/m2 (vs. ventas
+    // del propio edificio en 68-119 UF/m2) hundían la mediana sectorial a 72
+    // UF/m2 sobre 51 "ventas reales", muy por debajo de cualquier venta real
+    // del edificio.
+    const ufm2List = sinOutliers(ufm2ListRaw, (x) => x)
     if (ufm2List.length) {
       const medianaUfM2 = Math.round(mediana(ufm2List))
       const baseUf = Math.round(medianaUfM2 * m2Construido)
@@ -900,8 +911,13 @@ export async function POST(request) {
 
       const { finalUf, lineas } = aplicarAjustes({ baseUf, tipo, extras, answers, cfg: ajustesCfg })
 
+      const descartados = ufm2ListRaw.length - ufm2List.length
+      const calculoTexto = descartados > 0
+        ? `mediana ${medianaUfM2} UF/m2 x ${m2Construido} m2 (${ufm2List.length} ventas reales del sector tras descartar ${descartados} atípica(s), de ${ufm2ListRaw.length} totales)`
+        : `mediana ${medianaUfM2} UF/m2 x ${m2Construido} m2 (${ufm2List.length} ventas reales del sector)`
+
       const desglose = [
-        { concepto: 'Valor base por comparables CBR', calculo: `mediana ${medianaUfM2} UF/m2 x ${m2Construido} m2 (${ufm2List.length} ventas reales del sector)`, valor_uf: baseUf },
+        { concepto: 'Valor base por comparables CBR', calculo: calculoTexto, valor_uf: baseUf },
         ...lineas,
       ]
       valorDet = {
