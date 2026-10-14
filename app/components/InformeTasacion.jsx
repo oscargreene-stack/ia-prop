@@ -50,6 +50,13 @@ export default function InformeTasacion({ data }) {
           </div>
         </div>
 
+        {Array.isArray(r.alertas) && r.alertas.length > 0 && (
+          <div style={{ marginTop: 12, border: '1px solid #e0a800', background: '#fff8e1', borderRadius: 8, padding: '8px 12px', fontSize: 12, color: '#6b5200' }}>
+            <b>Revisar antes de usar:</b>
+            {r.alertas.map((a, i) => <div key={i}>{a.mensaje}</div>)}
+          </div>
+        )}
+
         <div style={{ display: 'flex', gap: 10, marginTop: 16, textAlign: 'center' }}>
           <div style={{ flex: 1, border: '1px solid #ddd', borderRadius: 8, padding: '10px 6px' }}>
             <div style={{ fontSize: 11, color: '#777' }}>Rango mínimo</div>
