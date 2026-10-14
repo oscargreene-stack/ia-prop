@@ -1029,6 +1029,12 @@ function ChatVendedor({ onBack }) {
           <div className="tasacion-valor">{fmtUF(valorFinal)}</div>
           <div className="tasacion-rango">Rango estimado: {fmtUF(rangoMin)} — {fmtUF(rangoMax)}</div>
           <div className={`conf-badge ${cc}`}>Confianza {resultado.confianza}</div>
+          {Array.isArray(resultado.alertas) && resultado.alertas.length > 0 && (
+            <div style={{ marginTop: 10, border: '1px solid #e0a800', background: 'rgba(224,168,0,0.12)', borderRadius: 8, padding: '8px 12px', fontSize: 13, color: '#e8c35a' }}>
+              <b>Revisar antes de usar:</b>
+              {resultado.alertas.map((a, i) => <div key={i}>{a.mensaje}</div>)}
+            </div>
+          )}
           {content.siiData?.rol && (
             <div className="tasacion-rol">ROL SII: {rolCorto(content.siiData.rol)}</div>
           )}
