@@ -1410,7 +1410,7 @@ function ChatVendedor({ onBack }) {
                 <div className="search-row">
                   <div className="search-field" style={{flex:1}}>
                     <div className="search-field-label">Dirección Completa<span>*</span></div>
-                    <input id="places-input" value={inputVal} onChange={e => { setInputVal(e.target.value); setPlacesResult(null) }}
+                    <input key="input-direccion" id="places-input" value={inputVal} onChange={e => { setInputVal(e.target.value); setPlacesResult(null) }}
                       placeholder="Ej. Lo Fontecilla 267" autoFocus
                       onKeyDown={e => { if (e.key==='Enter') handleSearchForm() }} />
                   </div>
@@ -1427,8 +1427,11 @@ function ChatVendedor({ onBack }) {
                 <div className="search-row">
                   <div className="search-field" style={{flex:1}}>
                     <div className="search-field-label">ROL SII<span>*</span></div>
-                    <input value={inputVal} onChange={e => setInputVal(e.target.value)}
-                      placeholder="Ej. 1234-56" autoFocus
+                    {/* FIX 14-oct: key distinta para que React NO reutilice el input de
+                        dirección (que tiene enganchado el autocompletado de Google):
+                        al buscar por ROL aparecían sugerencias de calles. */}
+                    <input key="input-rol" value={inputVal} onChange={e => setInputVal(e.target.value)}
+                      placeholder="Ej. 1234-56" autoFocus autoComplete="off"
                       onKeyDown={e => { if (e.key==='Enter') handleSearchForm() }} />
                   </div>
                 </div>
