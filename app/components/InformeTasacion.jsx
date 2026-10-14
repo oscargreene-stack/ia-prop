@@ -14,7 +14,20 @@ export default function InformeTasacion({ data }) {
   const key = process.env.NEXT_PUBLIC_GOOGLE_PLACES_KEY || ''
   const punto = r.punto
   const hoy = new Date().toLocaleDateString('es-CL', { day: '2-digit', month: 'long', year: 'numeric' })
-  const dirTxt = [df.direccion, df.depto ? (String(df.tipo).toLowerCase() === 'oficina' ? 'Of. ' : 'Depto ') + df.depto : null, df.comuna].filter(Boolean).join(', ') || sii.direccion || 'Propiedad tasada'
+  // FIX 14-oct: si se buscó por ROL, df.direccion es el ROL ("3044-4") y el
+  // encabezado mostraba el ROL en vez de la dirección. Con búsqueda por ROL (o
+  // sin dirección escrita) manda la dirección del catastro SII, que ya incluye
+  // la unidad (PC, depto, casa).
+  const esRol = (x) => /^\s*\d{1,6}\s*-\s*\d{1,6}(\s*-\s*\d+)?\s*$/.test(String(x || ''))
+  const capitaliza = (x) => String(x || '').toLowerCase().replace(/\s+/g, ' ').trim()
+    .replace(/(^|\s)([a-záéíóúñü])/g, (m, a, b) => a + b.toUpperCase())
+    .replace(/\b(Pc|Dp|Dpto|Bd|Of|Lc|Cs)\b/g, (m) => m.toUpperCase())
+    .replace(/ (Del|De|La|Las|Los|El|Y) /g, (m) => m.toLowerCase())
+  const comunaTxt = df.comuna ? capitaliza(df.comuna) : null
+  const dirSii = sii.direccion ? capitaliza(sii.direccion) : ''
+  const dirTxt = (!df.direccion || esRol(df.direccion)) && dirSii
+    ? [dirSii, comunaTxt && !dirSii.includes(comunaTxt) ? comunaTxt : null].filter(Boolean).join(', ')
+    : [df.direccion, df.depto ? (String(df.tipo).toLowerCase() === 'oficina' ? 'Of. ' : 'Depto ') + df.depto : null, df.comuna].filter(Boolean).join(', ') || sii.direccion || 'Propiedad tasada'
   const S = {
     sec: { marginTop: 18, breakInside: 'avoid' },
     h2: { fontSize: 13, fontWeight: 700, color: '#8a6d2f', borderBottom: '2px solid #caa15a', paddingBottom: 4, marginBottom: 8, textTransform: 'uppercase', letterSpacing: 0.5 },
