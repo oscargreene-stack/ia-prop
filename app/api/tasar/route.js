@@ -17,6 +17,7 @@ import {
   valorAditivoCasa, confianzaPorN, buscarVentasPoligono, COSTO_CONSTR_RESIDUAL, BANDA_M2, terrenoDe, sinOutliers, DOTACION_TIPICA_DEPTO,
   valorComparativoDirecto, rangoUnidadesIdenticas, terrenoEsProrrateoBC, CONJUNTO,
   construirSerieMercado, factorFecha,
+  plusvaliaSerie, plusvaliaVentas, plusvaliaContradiceIndice, controlAvaluoFiscal, bajarConfianza,
 } from '../../lib/tasacion-core.js'
 import { indiceMercado } from '../../lib/indice-mercado.js'
 import { COD_COMUNA, normalizaComuna } from '../../lib/comunas.js'
@@ -387,12 +388,9 @@ export async function POST(request) {
         .map(q => ({ trimestre: q, uf_m2: Math.round(mediana(porTrim[q]) * 10) / 10, n: porTrim[q].length }))
         .filter(x => x.n >= 3)
       if (trims.length >= 2) { indiceSector = trims.slice(-8); indiceSectorMismoTipo = true }
-      const hoyD = new Date()
-      const d12 = new Date(hoyD); d12.setFullYear(hoyD.getFullYear() - 1)
-      const d24 = new Date(hoyD); d24.setFullYear(hoyD.getFullYear() - 2)
-      const s12 = serie.filter(x => x.f >= d12.toISOString().slice(0, 10)).map(x => x.r)
-      const s24 = serie.filter(x => x.f >= d24.toISOString().slice(0, 10) && x.f < d12.toISOString().slice(0, 10)).map(x => x.r)
-      if (s12.length >= 3 && s24.length >= 3) plusvalia12m = Math.round((mediana(s12) / mediana(s24) - 1) * 1000) / 10
+      // FIX 14-oct: con frescura (dato <=6 meses), >=3 ventas por período y
+      // tope de ±25% (sobre eso no es plusvalía, es ruido de muestra).
+      plusvalia12m = plusvaliaVentas(serie)
 
       // ── Índice para ajustar por FECHA el suelo residual (FIX 16-sep) ──────
       // puntosSuelo() y el residual por ROL de más abajo usaban precios
@@ -620,9 +618,12 @@ export async function POST(request) {
             serieMercado = serieM
             indiceSector = serieM.slice(-8)
             indiceSectorMismoTipo = false
-            const ult = serieM[serieM.length - 1]
-            const hace12 = serieM[Math.max(0, serieM.length - 13)]
-            if (ult && hace12 && hace12.uf_m2 > 0) plusvalia12m = Math.round((ult.uf_m2 / hace12.uf_m2 - 1) * 1000) / 10
+            // FIX 14-oct: antes comparaba con "el punto 12 posiciones atrás"
+            // suponiendo un dato por mes; con 6 puntos sueltos tomaba el
+            // primero (1 venta, 14 meses antes) y publicaba +64,7% en El
+            // Arrayán. Ahora: fechas reales (9-15 meses), >=3 ventas por
+            // punto, último dato <=6 meses y tope ±25%. Si no se cumple, null.
+            plusvalia12m = plusvaliaSerie(serieM)
           }
         }
         diagRest.extras = { historial: historialPropiedad.length, conjunto: ventasConjunto.length, mercado_meses: merc.length, estacionamiento_uf: valorEstacionamientoUf, bodega_uf: valorBodegaUf }
@@ -852,13 +853,21 @@ export async function POST(request) {
         + (comparativo.muestra_recortada ? ` (de ${comparativo.n_total} gemelas encontradas)` : '')
         + ` entre ${comparativo.uf_m2_min} y ${comparativo.uf_m2_max} UF/m²`
         + fuenteAjuste
-        + `; en estado base es el percentil ${comparativo.percentil_usado} = ${comparativo.uf_m2} UF/m² x ${m2Construido} m²`,
+        + (comparativo.percentil_usado === 50
+          ? `; con menos de ${CONJUNTO.minParaPercentil} gemelas se usa la mediana = ${comparativo.uf_m2} UF/m² x ${m2Construido} m²`
+          : `; en estado base es el percentil ${comparativo.percentil_usado} = ${comparativo.uf_m2} UF/m² x ${m2Construido} m²`),
       valor_uf: comparativo.valor_uf,
     }]
     if (comparativo.n_descartadas > 0) {
+      const nRev = comparativo.n_descartadas_reventa || 0
+      const nAt = comparativo.n_descartadas - nRev
+      const partes = []
+      if (nRev > 0) partes.push(`${nRev} reventa(s) sospechosa(s): la misma unidad vendida dos veces en menos de ${CONJUNTO.reventaMeses} meses con más de ${Math.round(CONJUNTO.reventaDifMax * 100)}% de diferencia`
+        + ` (${(comparativo.descartadas || []).filter(g => g.motivo === 'reventa').map(g => Math.round(g.uf).toLocaleString('es-CL') + ' UF en ' + String(g.fecha).slice(0, 7)).join(', ')})`)
+      if (nAt > 0) partes.push(`${nAt} venta(s) fuera del 60–140% de la mediana del conjunto`)
       desglose.push({
         concepto: 'Ventas descartadas del conjunto',
-        calculo: `${comparativo.n_descartadas} venta(s) fuera del 60–140% de la mediana del conjunto (no son de mercado: relacionados, herencias o datos mal cargados)`,
+        calculo: partes.join('; ') + ' (no son de mercado: relacionados, herencias, derechos o datos mal cargados)',
         valor_uf: 0,
       })
     }
@@ -1015,6 +1024,28 @@ export async function POST(request) {
     }
   }
 
+  // ── CONTROL CONTRA AVALÚO FISCAL (FIX 14-oct) ─────────────────────────────
+  // Sobre el TOTAL que ve el usuario. Fuera de 1,0×–2,0× el avalúo: se marca
+  // "revisar" y la confianza baja un escalón (no se toca el valor).
+  const alertas = []
+  let controlAvaluo = null
+  if (valorDet && avaluo) {
+    const extrasUf = (ajustesExtra.ajRemo || 0) + (ajustesExtra.ajCar || 0) + (ajustesExtra.ajJardin || 0)
+    controlAvaluo = controlAvaluoFiscal({ valorUf: valorDet.valor_uf + extrasUf, avaluoUf: avaluo })
+    if (controlAvaluo?.revisar) {
+      valorDet.confianza = bajarConfianza(valorDet.confianza)
+      alertas.push({ tipo: 'avaluo_fiscal', mensaje: controlAvaluo.mensaje, ratio: controlAvaluo.ratio })
+    }
+  }
+
+  // ── PLUSVALÍA vs ÍNDICE DE AJUSTE (FIX 14-oct) ─────────────────────────────
+  // Si la plusvalía del sector contradice el índice con que se llevaron las
+  // ventas a hoy, no se publica ni se narra: el informe no puede decir "+64%"
+  // y a la vez ajustar los comparables a la baja.
+  if (plusvalia12m != null && serieAjuste && plusvaliaContradiceIndice(plusvalia12m, serieAjuste)) {
+    plusvalia12m = null
+  }
+
   // ── 2b. NORMATIVA REAL DEL PRC (módulo compartido, el mismo que usa Isidora) ──
   // Geocodifica la propiedad y obtiene su zona oficial del plan regulador. Sirve para
   // que Valentina deje de INVENTAR el plan_regulador: la zona real manda sobre el LLM.
@@ -1037,7 +1068,7 @@ export async function POST(request) {
   // Datos reales del sector para que la narración los use (no los invente)
   const sectorTexto = (plusvalia12m != null || arriendoMediana || ofertaVentaMediana)
     ? '\n\nDATOS REALES DEL SECTOR (úsalos en tu análisis):'
-      + (plusvalia12m != null ? '\n- Plusvalía del sector últimos 12 meses (mediana UF/m²): ' + plusvalia12m + '%' : '')
+      + (plusvalia12m != null ? '\n- Plusvalía del sector últimos 12 meses (mediana UF/m², dato referencial): ' + plusvalia12m + '%. Puedes mencionarla UNA vez como dato de contexto; NO la uses como argumento de venta ni para justificar el precio.' : '')
       + (arriendoMediana ? '\n- Arriendo de referencia para esta tipología: ' + arriendoMediana + ' UF/mes (' + arriendoN + ' ofertas vigentes del sector)' : '')
       + (ofertaVentaMediana ? '\n- Mediana de OFERTAS de venta activas de tipología similar en el sector: ' + ofertaVentaMediana + ' UF (los precios de oferta suelen estar 5-10% sobre el cierre)' : '')
     : ''
@@ -1055,6 +1086,10 @@ VALOR DETERMINÍSTICO (AUTORITATIVO):
 - COPIA exactamente valor_uf, precio_m2, confianza y desglose tal como se te entregan. NO los recalcules ni los modifiques.
 - Tu trabajo es NARRAR: análisis, factores positivos/negativos, plan regulador y recomendación de precio, todo COHERENTE con ese valor final. La prosa NO puede contradecir el número (no menciones un valor distinto al entregado).
 - Si NO se te entrega un valor determinístico (no hubo datos suficientes del sector): entrega valor_uf y precio_m2 con tus rangos de referencia por comuna, SIEMPRE con confianza "Baja", y el desglose debe contener UNA SOLA línea: { "concepto": "Estimación referencial (sin ventas suficientes en el sector)", "calculo": "rango de mercado de la comuna", "valor_uf": <el valor> }. PROHIBIDO inventar líneas de valor de terreno, UF/m² de suelo, factores de depreciación, ajustes de ubicación o descuentos: esos números SOLO pueden venir del sistema.
+
+PLUSVALÍA Y TENDENCIA DEL MERCADO:
+- Solo puedes citar una cifra de plusvalía si viene en "DATOS REALES DEL SECTOR". Si no viene, NO menciones ningún porcentaje de plusvalía, apreciación, "momentum" ni "dinamismo" del sector.
+- Nunca afirmes que el sector se está apreciando si el desglose indica que las ventas se ajustaron a la baja o sin variación.
 
 PLAN REGULADOR:
 - Si se te entrega una "NORMATIVA OFICIAL DEL PLAN REGULADOR", úsala EXACTAMENTE (zona, nombre, uso de suelo, predial mínimo). NO inventes una zona distinta.
@@ -1280,6 +1315,9 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
       }
 
       parsed.ajustes = ajustesExtra
+      parsed.alertas = alertas
+      parsed.revisar = alertas.length > 0
+      parsed.control_avaluo = controlAvaluo
       parsed.ventas_mapa = ventasMapa
       parsed.punto = punto ? { lat: punto.lat, lng: punto.lng, fuente: puntoFuente } : null
       parsed.sector = { composicion: sectorComposicion, indice_uf_m2: indiceSector, plusvalia_12m_pct: plusvalia12m }
@@ -1316,6 +1354,7 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
         ofertas_arriendo: ofertasArriendo,
         arriendo: arriendoMediana ? { uf_mes: arriendoMediana, n_ofertas: arriendoN, rentabilidad_pct: null, retorno_anos: null } : null,
         ajustes: ajustesExtra,
+        alertas, revisar: alertas.length > 0, control_avaluo: controlAvaluo,
         desglose: valorDet?.desglose ?? [], factores_positivos: [], factores_negativos: [], plan_regulador: null
       }
       if (fallback.valor_uf) return Response.json(fallback)
