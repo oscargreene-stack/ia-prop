@@ -440,6 +440,14 @@ export const CONJUNTO = {
   mesesPercentil: 96,
   anosMinCalibrar: 1.5, // separación mínima entre cohortes para leer una tasa
   minPorCohorte: 2,     // ventas mínimas a cada lado para calibrar con el conjunto
+  // FIX 14-oct (caso Refugios del Arrayán PC 3, ROL 15-3044-4): la casa PC-80
+  // se vendió en 23.989 UF (feb-25) y en 16.123 UF (dic-25): -33% en 10 meses.
+  // Una de las dos no es de mercado (derechos, relacionados) y con 4 gemelas
+  // arrastraba la tasación a 16.914 UF, bajo el avalúo fiscal.
+  reventaMeses: 18,     // misma unidad vendida dos veces dentro de esta ventana...
+  reventaDifMax: 0.25,  // ...con más de 25% de diferencia: se descarta la sospechosa
+  // Con pocas gemelas el p32 cae entre las dos más bajas: se usa la mediana.
+  minParaPercentil: 6,
 }
 
 // Percentil del rango de gemelas que representa la unidad EN ESTADO BASE, sin
@@ -649,17 +657,65 @@ export function ventasGemelas({ ventas, m2Objetivo, meses = CONJUNTO.mesesMax, h
     .filter(Boolean)
 }
 
-// Descarta las que no son de mercado: bajo el 60% o sobre el 140% de la mediana
-// del propio conjunto. Devuelve las descartadas para poder explicarlas.
+// ── REVENTAS SOSPECHOSAS ────────────────────────────────────────────────────
+// La misma unidad (mismo ROL) vendida dos veces en menos de
+// CONJUNTO.reventaMeses con más de CONJUNTO.reventaDifMax de diferencia en
+// UF/m²: una de las dos no es de mercado. Se descarta la que más se aleja de la
+// mediana del RESTO de las gemelas (sin ese par); si no hay resto, la más baja.
+export function descartarReventasSospechosas(gemelas) {
+  const lista = gemelas || []
+  const porRol = {}
+  lista.forEach((g, i) => {
+    const rol = String(g.rol || '').trim()
+    if (rol) (porRol[rol] = porRol[rol] || []).push(i)
+  })
+  const fuera = new Set()
+  for (const idxs of Object.values(porRol)) {
+    if (idxs.length < 2) continue
+    const orden = [...idxs].sort((a, b) => (lista[a].fecha < lista[b].fecha ? -1 : 1))
+    for (let k = 1; k < orden.length; k++) {
+      const a = orden[k - 1], b = orden[k]
+      if (fuera.has(a) || fuera.has(b)) continue
+      const ga = lista[a], gb = lista[b]
+      const meses = anosEntre(ga.fecha, gb.fecha) * 12
+      if (!(meses >= 0) || meses > CONJUNTO.reventaMeses) continue
+      const hi = Math.max(ga.uf_m2, gb.uf_m2), lo = Math.min(ga.uf_m2, gb.uf_m2)
+      if (!(hi > 0) || (hi - lo) / hi <= CONJUNTO.reventaDifMax) continue
+      const resto = lista.filter((_, i) => i !== a && i !== b && !fuera.has(i)).map((g) => g.uf_m2).filter((x) => x > 0)
+      let malo
+      if (resto.length) {
+        const ref = mediana(resto)
+        malo = Math.abs(Math.log(ga.uf_m2 / ref)) >= Math.abs(Math.log(gb.uf_m2 / ref)) ? a : b
+      } else {
+        malo = ga.uf_m2 <= gb.uf_m2 ? a : b
+      }
+      fuera.add(malo)
+    }
+  }
+  const limpias = [], descartadas = []
+  lista.forEach((g, i) => (fuera.has(i)
+    ? descartadas.push({ ...g, motivo: 'reventa' })
+    : limpias.push(g)))
+  return { limpias, descartadas }
+}
+
+// Descarta las que no son de mercado: primero las reventas sospechosas (misma
+// unidad, <18 meses, >25% de diferencia) y luego las que caen bajo el 60% o
+// sobre el 140% de la mediana del propio conjunto. Devuelve las descartadas
+// (con `motivo`) para poder explicarlas.
 export function sinOutliersConjunto(gemelas) {
-  const vals = (gemelas || []).map((g) => g.uf_m2).filter((x) => x > 0)
-  if (vals.length < 3) return { limpias: gemelas || [], descartadas: [] }
+  const rev = descartarReventasSospechosas(gemelas)
+  const base = rev.limpias.length >= CONJUNTO.minVentas ? rev : { limpias: gemelas || [], descartadas: [] }
+  const vals = base.limpias.map((g) => g.uf_m2).filter((x) => x > 0)
+  if (vals.length < 3) return base
   const med = mediana(vals)
-  if (!(med > 0)) return { limpias: gemelas || [], descartadas: [] }
+  if (!(med > 0)) return base
   const lo = med * CONJUNTO.outlierMin, hi = med * CONJUNTO.outlierMax
   const limpias = [], descartadas = []
-  for (const g of gemelas) (g.uf_m2 >= lo && g.uf_m2 <= hi ? limpias : descartadas).push(g)
-  return limpias.length >= CONJUNTO.minVentas ? { limpias, descartadas } : { limpias: gemelas, descartadas: [] }
+  for (const g of base.limpias) (g.uf_m2 >= lo && g.uf_m2 <= hi ? limpias : descartadas).push(g)
+  return limpias.length >= CONJUNTO.minVentas
+    ? { limpias, descartadas: [...base.descartadas, ...descartadas.map((g) => ({ ...g, motivo: 'atipica' }))] }
+    : base
 }
 
 // ── APRECIACIÓN IMPLÍCITA DEL PROPIO CONJUNTO ───────────────────────────────
@@ -807,6 +863,9 @@ export function valorComparativoDirecto({ ventas, m2Objetivo, serieIndice, hoy, 
   // usan todas las gemelas: quedarse sin comparables es peor que estirar años.
   const pool = enVentana.length >= CONJUNTO.minVentas ? enVentana : ajustadas
   const lista = pool.map((g) => g.uf_m2_ajustado)
+  // FIX 14-oct: con menos de CONJUNTO.minParaPercentil gemelas el percentil de
+  // estado no es legible (el p32 cae entre las dos más bajas): manda la mediana.
+  if (lista.length < CONJUNTO.minParaPercentil) pctl = 50
   // Se redondea ANTES de multiplicar: el informe muestra "percentil 32 =
   // <uf_m2> UF/m² x <m²>" y ese producto tiene que dar el valor que se publica.
   const ufM2 = r1(percentilInterp(lista, pctl))
@@ -827,6 +886,8 @@ export function valorComparativoDirecto({ ventas, m2Objetivo, serieIndice, hoy, 
     ajuste_min_pct: pool.length ? Math.min(...pool.map((g) => g.ajuste_pct)) : 0,
     ajuste_max_pct: pool.length ? Math.max(...pool.map((g) => g.ajuste_pct)) : 0,
     n_descartadas: descartadas.length,
+    n_descartadas_reventa: descartadas.filter((g) => g.motivo === 'reventa').length,
+    descartadas,
     ventas: pool,
     ventas_todas: ajustadas,
     hubo_ajuste_fecha: pool.some((g) => g.factor_fecha !== 1),
@@ -844,4 +905,101 @@ export function terrenoEsProrrateoBC(siiData) {
   if (origen === 'bien_comun') return true
   if (origen === 'sii') return false
   return !!(siiData?.es_copropiedad ?? siiData?.copropiedad)
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// PLUSVALÍA 12 MESES ROBUSTA (FIX 14-oct)
+// ═══════════════════════════════════════════════════════════════════════════
+// Antes se comparaba el último punto de la serie con "el punto 12 posiciones
+// atrás", suponiendo un dato por mes. En El Arrayán la serie tenía 6 puntos
+// sueltos (oct-24…dic-25), así que comparó dic-25 (56 UF/m²) con el PRIMER
+// punto, oct-24 (34 UF/m², UNA venta): +64,7% "en 12 meses" — falso, y además
+// con el último dato 10 meses vencido. Reglas:
+//  · fechas reales, no posiciones: el punto de comparación debe estar entre
+//    9 y 15 meses antes del último (el más cercano a 12);
+//  · ≥3 ventas en cada punto;
+//  · el último punto no puede tener más de 6 meses respecto de hoy;
+//  · si el resultado supera ±25% no es creíble en un año: no se muestra.
+export const PLUSVALIA = { minN: 3, frescuraMeses: 6, ventanaMin: 9, ventanaMax: 15, topeAbs: 25 }
+
+const mesesEntre = (a, b) => anosEntre(a, b) * 12
+
+// serie: [{ trimestre|fecha: 'YYYY-MM[-DD]', uf_m2, n }]
+export function plusvaliaSerie(serie, hoy = null) {
+  const pts = (serie || [])
+    .map((p) => ({ f: String(p.fecha || p.trimestre || '').slice(0, 10), uf_m2: parseFloat(p.uf_m2), n: parseInt(p.n) || 0 }))
+    .filter((p) => /^\d{4}-\d{2}/.test(p.f) && p.uf_m2 > 0 && p.n >= PLUSVALIA.minN)
+    .sort((a, b) => (a.f < b.f ? -1 : 1))
+  if (pts.length < 2) return null
+  const ult = pts[pts.length - 1]
+  const hoyStr = hoy || new Date().toISOString().slice(0, 10)
+  if (mesesEntre(ult.f, hoyStr) > PLUSVALIA.frescuraMeses) return null
+  let mejor = null
+  for (const p of pts.slice(0, -1)) {
+    const m = mesesEntre(p.f, ult.f)
+    if (m < PLUSVALIA.ventanaMin || m > PLUSVALIA.ventanaMax) continue
+    if (!mejor || Math.abs(m - 12) < Math.abs(mesesEntre(mejor.f, ult.f) - 12)) mejor = p
+  }
+  if (!mejor) return null
+  const pct = Math.round((ult.uf_m2 / mejor.uf_m2 - 1) * 1000) / 10
+  if (!isFinite(pct) || Math.abs(pct) > PLUSVALIA.topeAbs) return null
+  return pct
+}
+
+// ventas: [{ f: 'YYYY-MM-DD', r: UF/m² }] — mediana de los últimos 12 meses
+// contra la de los 12 anteriores, con las mismas reglas de n, frescura y tope.
+export function plusvaliaVentas(ventas, hoy = null) {
+  const hoyD = hoy ? new Date(hoy + 'T00:00:00Z') : new Date()
+  const iso = (d) => d.toISOString().slice(0, 10)
+  const d12 = new Date(hoyD); d12.setUTCFullYear(hoyD.getUTCFullYear() - 1)
+  const d24 = new Date(hoyD); d24.setUTCFullYear(hoyD.getUTCFullYear() - 2)
+  const vs = (ventas || []).filter((x) => x && x.r > 0 && /^\d{4}-\d{2}-\d{2}$/.test(x.f))
+  const s12 = vs.filter((x) => x.f >= iso(d12))
+  const s24 = vs.filter((x) => x.f >= iso(d24) && x.f < iso(d12))
+  if (s12.length < PLUSVALIA.minN || s24.length < PLUSVALIA.minN) return null
+  const ultima = s12.map((x) => x.f).sort().pop()
+  if (mesesEntre(ultima, iso(hoyD)) > PLUSVALIA.frescuraMeses) return null
+  const pct = Math.round((mediana(s12.map((x) => x.r)) / mediana(s24.map((x) => x.r)) - 1) * 1000) / 10
+  if (!isFinite(pct) || Math.abs(pct) > PLUSVALIA.topeAbs) return null
+  return pct
+}
+
+// ¿La plusvalía del sector contradice el índice con que se ajustaron las
+// ventas por fecha? (distinto signo con magnitud relevante, o >10 pp de
+// diferencia). Si contradice, no se publica ni se narra.
+export function plusvaliaContradiceIndice(plusPct, serieIndice, hoy = null) {
+  if (plusPct == null || !serieUtilizable(serieIndice)) return false
+  const hoyD = hoy ? new Date(hoy + 'T00:00:00Z') : new Date()
+  const hace12 = new Date(hoyD); hace12.setUTCFullYear(hoyD.getUTCFullYear() - 1)
+  const f = factorFecha(hace12.toISOString().slice(0, 10), serieIndice, hoy)
+  if (!(f > 0)) return false
+  const idxPct = (f - 1) * 100
+  const signoOpuesto = Math.sign(idxPct) !== Math.sign(plusPct) && Math.abs(plusPct) >= 3 && Math.abs(idxPct) >= 1
+  return signoOpuesto || Math.abs(plusPct - idxPct) > 10
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONTROL CONTRA AVALÚO FISCAL (FIX 14-oct)
+// ═══════════════════════════════════════════════════════════════════════════
+// Valor comercial < 1,0× o > 2,0× el avalúo fiscal: la tasación se marca
+// "revisar" y la confianza baja un escalón. No se corrige el valor: se avisa.
+export const AVALUO = { min: 1.0, max: 2.0 }
+
+export function controlAvaluoFiscal({ valorUf, avaluoUf }) {
+  if (!(valorUf > 0) || !(avaluoUf > 0)) return null
+  const ratio = Math.round((valorUf / avaluoUf) * 100) / 100
+  const fueraRango = ratio < AVALUO.min || ratio > AVALUO.max
+  const fmt = (x) => String(x).replace('.', ',')
+  return {
+    ratio,
+    revisar: fueraRango,
+    mensaje: !fueraRango ? null
+      : ratio < AVALUO.min
+        ? `El valor estimado queda bajo el avalúo fiscal (${fmt(ratio)} veces). Es poco habitual: revisar comparables antes de usarlo.`
+        : `El valor estimado supera ${fmt(AVALUO.max)} veces el avalúo fiscal (${fmt(ratio)} veces). Revisar comparables antes de usarlo.`,
+  }
+}
+
+export function bajarConfianza(c) {
+  return c === 'Alta' ? 'Media' : 'Baja'
 }
