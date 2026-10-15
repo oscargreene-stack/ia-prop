@@ -322,16 +322,24 @@ export function sueloDeTramo(tramos, lotM2) {
   return hit && hit.n >= MIN_REFS_SUELO ? hit : null
 }
 
-// ── Banda de mercado de CASAS SIMILARES (FIX 15-oct) ───────────────────────
-// El aditivo de casas no tenía control contra las ventas reales: lo que daba
-// suelo + construcción se publicaba aunque quedara bajo casi todas las ventas
-// del barrio. Casas similares = ±30% de m² construidos y ±30% de m² de
-// terreno, precio llevado a hoy con el mismo índice del suelo, sin atípicas.
-// Con ≥4, el valor aditivo se acota al rango p25–p75 de esos precios.
-export const BANDA_CASA = { tol: 0.30, minN: 4, pBajo: 25, pAlto: 75 }
-export function bandaMercadoCasa({ comparables, m2Construido, m2Terreno, serieIndice, hoy }) {
-  if (!(m2Construido > 0) || !(m2Terreno > 0)) return null
-  const tol = BANDA_CASA.tol
+// ── MÉTODO COMPARATIVO HOMOLOGADO PARA CASAS (FIX 15-oct, v2) ──────────────
+// El aditivo (suelo + construcción) pierde la MICROLOCALIZACIÓN: el suelo sale
+// de la mediana de un sector de ~1 km y todas las ventas pesan igual. Caso La
+// Llavería 1779 (Vitacura): las 2 casas similares más cercanas (121 y 376 m),
+// homologadas a su terreno y m², valen ~13.900 UF; las de 600-700 m, ~10.500.
+// El aditivo daba ~10.700 UF; un corredor del sector la valora en 11.500-12.500.
+//
+// Método de tasador: (1) casas similares (±30% m² construidos y terreno),
+// precio llevado a hoy con el índice; (2) HOMOLOGACIÓN: a cada una se le suma
+// o resta la diferencia de terreno (× UF/m² de suelo) y de m² construidos
+// (× costo de construcción) respecto de la propiedad; (3) sin atípicas;
+// (4) promedio PONDERADO POR CERCANÍA con peso 1/√distancia (suave: la venta
+// a 100 m pesa ~2,6× la de 700 m, no 7×; distancia mínima 100 m).
+// Con ≥4 casas manda este valor; el aditivo queda como respaldo y referencia.
+export const COMPARATIVO_CASA = { tol: 0.30, minN: 4, distMinM: 100 }
+export function comparativoCasas({ comparables, m2Construido, m2Terreno, sueloUfM2, costoUfM2, serieIndice, hoy }) {
+  if (!(m2Construido > 0) || !(m2Terreno > 0) || !(sueloUfM2 > 0) || !(costoUfM2 > 0)) return null
+  const { tol, minN, distMinM } = COMPARATIVO_CASA
   const cerca = (x, obj) => x >= obj * (1 - tol) && x <= obj * (1 + tol)
   const conIndice = serieUtilizable(serieIndice)
   const lista = (comparables || [])
@@ -340,17 +348,31 @@ export function bandaMercadoCasa({ comparables, m2Construido, m2Terreno, serieIn
       if (!(m2 > 0) || !(t > 0) || !(uf > 0)) return null
       if (!cerca(m2, m2Construido) || !cerca(t, m2Terreno)) return null
       const f = conIndice ? factorFecha(c.fecha, serieIndice, hoy) : 1
-      return { direccion: c.direccion, uf_hoy: Math.round(uf * f) }
+      const ufHoy = uf * f
+      const ajTerreno = (m2Terreno - t) * sueloUfM2
+      const ajConstr = (m2Construido - m2) * costoUfM2
+      const d = parseFloat(c.distancia_m)
+      return {
+        direccion: c.direccion,
+        distancia_m: d >= 0 ? Math.round(d) : null,
+        uf_hoy: Math.round(ufHoy),
+        uf_homologado: Math.round(ufHoy + ajTerreno + ajConstr),
+      }
     })
     .filter(Boolean)
-  const limpias = sinOutliers(lista, (x) => x.uf_hoy)
-  if (limpias.length < BANDA_CASA.minN) return null
-  const ufs = limpias.map((x) => x.uf_hoy)
+  const limpias = sinOutliers(lista, (x) => x.uf_homologado)
+  if (limpias.length < minN) return null
+  const pesos = limpias.map((x) => 1 / Math.sqrt(Math.max(distMinM, x.distancia_m ?? 1000)))
+  const sumP = pesos.reduce((a, b) => a + b, 0)
+  const ponderado = limpias.reduce((acc, x, i) => acc + x.uf_homologado * pesos[i], 0) / sumP
+  const ufs = limpias.map((x) => x.uf_homologado)
   return {
-    p_bajo: Math.round(percentilInterp(ufs, BANDA_CASA.pBajo)),
-    p_alto: Math.round(percentilInterp(ufs, BANDA_CASA.pAlto)),
+    valor_uf: Math.round(ponderado),
     mediana: Math.round(mediana(ufs)),
+    min: Math.min(...ufs),
+    max: Math.max(...ufs),
     n: limpias.length,
+    detalle: limpias.map((x, i) => ({ ...x, peso_pct: Math.round((pesos[i] / sumP) * 100) })),
   }
 }
 
