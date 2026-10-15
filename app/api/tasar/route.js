@@ -14,7 +14,7 @@ import {
   poligono, distanciaM, mediana, percentil,
   clasificaTipo, TIPO_OBJETIVO, cutoffVentasStr, esVentaReciente, enBandaM2,
   UFM2_MIN, UFM2_MAX, puntosSuelo, resumenSuelo, sueloPorTramo, sueloDeTramo,
-  valorAditivoCasa, confianzaPorN, buscarVentasPoligono, COSTO_CONSTR_RESIDUAL, costoResidualDe, MIN_REFS_SUELO, bandaMercadoCasa, BANDA_CASA, BANDA_M2, terrenoDe, sinOutliers, DOTACION_TIPICA_DEPTO,
+  valorAditivoCasa, confianzaPorN, buscarVentasPoligono, COSTO_CONSTR_RESIDUAL, costoResidualDe, MIN_REFS_SUELO, comparativoCasas, BANDA_M2, terrenoDe, sinOutliers, DOTACION_TIPICA_DEPTO,
   valorComparativoDirecto, rangoUnidadesIdenticas, terrenoEsProrrateoBC, CONJUNTO,
   construirSerieMercado, factorFecha,
   plusvaliaSerie, plusvaliaVentas, plusvaliaContradiceIndice, controlAvaluoFiscal, bajarConfianza,
@@ -908,31 +908,30 @@ export async function POST(request) {
     const { terreno_uf, construccion_uf, total_uf } = valorAditivoCasa({ sueloUfM2: sueloInfo.uf_m2, m2Terreno, costoUfM2, m2Construido })
     const amplioUf = m2Ampliados > 0 ? Math.round(costoUfM2 * m2Ampliados) : 0
     const total_uf_efectivo = total_uf + amplioUf
-    // FIX 15-oct: el aditivo no puede contradecir a las ventas de casas
-    // similares del sector (±30% m² construidos y de terreno, llevadas a hoy).
-    const banda = bandaMercadoCasa({ comparables: comparablesReales, m2Construido: m2ConstruidoEfectivo, m2Terreno, serieIndice: serieIndiceSuelo, hoy: hoySuelo })
+    // FIX 15-oct (v2): con ≥4 casas similares manda el MÉTODO COMPARATIVO
+    // homologado y ponderado por cercanía (núcleo: comparativoCasas). El
+    // aditivo de arriba queda como desglose de referencia y como respaldo.
+    const comp = comparativoCasas({ comparables: comparablesReales, m2Construido: m2ConstruidoEfectivo, m2Terreno, sueloUfM2: sueloInfo.uf_m2, costoUfM2, serieIndice: serieIndiceSuelo, hoy: hoySuelo })
     let baseAditivo = total_uf_efectivo
     const lineasBanda = []
-    if (banda) {
-      const acotado = Math.min(banda.p_alto, Math.max(banda.p_bajo, total_uf_efectivo))
-      if (acotado !== total_uf_efectivo) {
-        const sube = acotado > total_uf_efectivo
-        lineasBanda.push({
-          concepto: sube ? 'Ajuste al rango de ventas de casas similares (piso)' : 'Ajuste al rango de ventas de casas similares (techo)',
-          calculo: `suelo + construcción daba ${total_uf_efectivo.toLocaleString('es-CL')} UF, ${sube ? 'bajo' : 'sobre'} el rango de ${banda.n} ventas de casas similares del sector (±${Math.round(BANDA_CASA.tol * 100)}% m² construidos y terreno, llevadas a hoy): ${banda.p_bajo.toLocaleString('es-CL')}–${banda.p_alto.toLocaleString('es-CL')} UF`,
-          valor_uf: acotado - total_uf_efectivo,
-        })
-        baseAditivo = acotado
-      }
+    if (comp) {
+      const delta = comp.valor_uf - total_uf_efectivo
+      const fmt = (x) => x.toLocaleString('es-CL')
+      lineasBanda.push({
+        concepto: 'Ajuste por comparación directa con casas similares del sector',
+        calculo: `${comp.n} ventas de casas similares (±30% m² construidos y terreno), llevadas a hoy y homologadas a ${m2Terreno} m² de terreno y ${m2ConstruidoEfectivo} m² construidos (rango ${fmt(comp.min)}–${fmt(comp.max)} UF), promedio ponderado por cercanía: ${fmt(comp.valor_uf)} UF. Suelo + construcción daba ${fmt(total_uf_efectivo)} UF`,
+        valor_uf: delta,
+      })
+      baseAditivo = comp.valor_uf
     }
     precioM2Base = Math.round(baseAditivo / m2ConstruidoEfectivo)
     const { finalUf, lineas } = aplicarAjustes({ baseUf: baseAditivo, tipo, extras, answers, cfg: ajustesCfg })
     valorDet = {
       valor_uf: finalUf,
       precio_m2: Math.round(finalUf / m2ConstruidoEfectivo),
-      confianza: confianzaPorN(sueloInfo.n),
-      metodo: 'aditivo: suelo + construcción (núcleo compartido con Isidora)' + (lineasBanda.length ? ', acotado a ventas de casas similares' : ''),
-      banda_mercado: banda || null,
+      confianza: comp ? confianzaPorN(Math.max(comp.n, sueloInfo.n)) : confianzaPorN(sueloInfo.n),
+      metodo: comp ? 'comparativo homologado de casas similares, ponderado por cercanía (aditivo como referencia)' : 'aditivo: suelo + construcción (núcleo compartido con Isidora)',
+      comparativo_casas: comp || null,
       desglose: [
         { concepto: 'Valor del terreno', calculo: sueloInfo.uf_m2 + ' UF/m² de suelo x ' + m2Terreno + ' m² (' + sueloInfo.fuente + ', ' + sueloInfo.n + ' referencias, ' + sueloInfo.tramo + ')', valor_uf: terreno_uf },
         { concepto: 'Valor de la construcción', calculo: costoUfM2 + ' UF/m² (' + cfgCosto.label.toLowerCase() + ') x ' + m2Construido + ' m² construidos', valor_uf: construccion_uf },
