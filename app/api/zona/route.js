@@ -215,7 +215,8 @@ export async function POST(request) {
 
       // (1)+(2) Puntos de valor de suelo desde el núcleo compartido:
       // ventas de sitios o, si no alcanzan, método residual sobre las casas.
-      const { pts: sueloPts, fuente: fuenteSuelo } = puntosSuelo(ventas, filtradas)
+      // FIX 15-oct: descontar la construcción de cada venta con la tabla de la comuna
+      const { pts: sueloPts, fuente: fuenteSuelo } = puntosSuelo(ventas, filtradas, { tier: comuna ? elegirTierConstruccion(comuna, null).tier : null })
       const suelo = resumenSuelo(sueloPts, fuenteSuelo)
 
       // Suelo por TRAMO de tamaño de sitio (núcleo compartido): sitios grandes
