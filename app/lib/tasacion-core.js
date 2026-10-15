@@ -57,6 +57,29 @@ export function elegirTierConstruccion(comuna, sueloMediana) {
 // Costo medio usado para el método residual de suelo (cuando no hay ventas de sitios).
 export const COSTO_CONSTR_RESIDUAL = 32 // UF/m² (≈ "buena")
 
+// FIX 15-oct (caso La Llavería 1779, Vitacura — 10.228 UF entregado, ventas
+// del sector ~12.000 UF): el residual restaba 32 UF/m² ("buena") a TODAS las
+// casas vendidas, pero a la casa tasada le sumaba su construcción según su
+// antigüedad (19 UF/m², "a refaccionar"). En un barrio de casas de los 60-70
+// eso deprime el suelo y castiga la antigüedad dos veces. Ahora a cada venta
+// se le descuenta la construcción con LA MISMA tabla (tier de la comuna +
+// estado por su año) que se usa para la propiedad tasada. Sin año conocido:
+// "regular". Sin tier (llamadas antiguas): COSTO_CONSTR_RESIDUAL, como antes.
+export function costoResidualDe(v, tier) {
+  const tabla = tier ? COSTO_CONSTRUCCION_TIERS[tier] : null
+  if (!tabla) return COSTO_CONSTR_RESIDUAL
+  const y = parseInt(v?.ano_construccion ?? v?.anio_construccion ?? v?.ano ?? '', 10)
+  const anioValido = y >= 1850 && y <= new Date().getFullYear() + 1
+  const cfg = tabla[anioValido ? estadoConstruccion(y, null) : 'regular']
+  return Math.round((cfg.min + cfg.max) / 2)
+}
+
+// Mínimo de referencias para usar un subconjunto del suelo (misma zona PRC o
+// tramo de tamaño de sitio). Con 3 ventas bastaba que fueran las 3 más baratas
+// del barrio para hundir el valor del terreno (La Llavería 1779: 27,6 UF/m²
+// con 3 ventas vs ~30-34 con las 8-9 casas del sector).
+export const MIN_REFS_SUELO = 6
+
 // Estado de construcción de una casa específica, por antigüedad y remodelación.
 // (La remodelación en UF se suma aparte; acá solo define el rango de costo.)
 export function estadoConstruccion(anio, remodelacion) {
@@ -228,7 +251,7 @@ export const TRAMOS_SITIO = [
 // restaba COSTO_CONSTR_RESIDUAL (costo de HOY) de un precio de AYER, deprimiendo
 // el suelo dos veces en un mercado al alza — caso detectado en Caribes 2238,
 // Vitacura (13.973 UF entregado vs. ~18.000 UF esperado por Oscar).
-export function puntosSuelo(ventas, casas, { serieIndice, hoy } = {}) {
+export function puntosSuelo(ventas, casas, { serieIndice, hoy, tier } = {}) {
   const conIndice = serieUtilizable(serieIndice)
   const aHoy = (v) => {
     const uf = parseFloat(v.price)
@@ -250,7 +273,7 @@ export function puntosSuelo(ventas, casas, { serieIndice, hoy } = {}) {
     .map((v) => {
       const t = terrenoDe(v), c = parseFloat(v.superficie_construccion), uf = aHoy(v)
       if (!(t > 0) || !(c > 0) || !(uf > 0)) return null
-      const land = (uf - COSTO_CONSTR_RESIDUAL * c) / t
+      const land = (uf - costoResidualDe(v, tier) * c) / t
       if (land < 0.3 || land > 250) return null
       return { r: land, lot: t }
     })
@@ -294,7 +317,63 @@ export function sueloDeTramo(tramos, lotM2) {
   if (!(lotM2 > 0)) return null
   const tr = TRAMOS_SITIO.find((t) => lotM2 >= t.min && lotM2 < t.max)
   if (!tr) return null
-  return (tramos || []).find((s) => s.rango === tr.label) || null
+  const hit = (tramos || []).find((s) => s.rango === tr.label) || null
+  // FIX 15-oct: un tramo con pocas ventas no manda; se usa el suelo general.
+  return hit && hit.n >= MIN_REFS_SUELO ? hit : null
+}
+
+// ── MÉTODO COMPARATIVO HOMOLOGADO PARA CASAS (FIX 15-oct, v2) ──────────────
+// El aditivo (suelo + construcción) pierde la MICROLOCALIZACIÓN: el suelo sale
+// de la mediana de un sector de ~1 km y todas las ventas pesan igual. Caso La
+// Llavería 1779 (Vitacura): las 2 casas similares más cercanas (121 y 376 m),
+// homologadas a su terreno y m², valen ~13.900 UF; las de 600-700 m, ~10.500.
+// El aditivo daba ~10.700 UF; un corredor del sector la valora en 11.500-12.500.
+//
+// Método de tasador: (1) casas similares (±30% m² construidos y terreno),
+// precio llevado a hoy con el índice; (2) HOMOLOGACIÓN: a cada una se le suma
+// o resta la diferencia de terreno (× UF/m² de suelo) y de m² construidos
+// (× costo de construcción) respecto de la propiedad; (3) sin atípicas;
+// (4) promedio PONDERADO POR CERCANÍA con peso 1/√distancia (suave: la venta
+// a 100 m pesa ~2,6× la de 700 m, no 7×; distancia mínima 100 m).
+// Con ≥4 casas manda este valor; el aditivo queda como respaldo y referencia.
+export const COMPARATIVO_CASA = { tol: 0.30, minN: 4, distMinM: 100 }
+export function comparativoCasas({ comparables, m2Construido, m2Terreno, sueloUfM2, costoUfM2, serieIndice, hoy }) {
+  if (!(m2Construido > 0) || !(m2Terreno > 0) || !(sueloUfM2 > 0) || !(costoUfM2 > 0)) return null
+  const { tol, minN, distMinM } = COMPARATIVO_CASA
+  const cerca = (x, obj) => x >= obj * (1 - tol) && x <= obj * (1 + tol)
+  const conIndice = serieUtilizable(serieIndice)
+  const lista = (comparables || [])
+    .map((c) => {
+      const m2 = parseFloat(c.m2), t = parseFloat(c.m2_terreno), uf = parseFloat(c.precio_uf)
+      if (!(m2 > 0) || !(t > 0) || !(uf > 0)) return null
+      if (!cerca(m2, m2Construido) || !cerca(t, m2Terreno)) return null
+      const f = conIndice ? factorFecha(c.fecha, serieIndice, hoy) : 1
+      const ufHoy = uf * f
+      const ajTerreno = (m2Terreno - t) * sueloUfM2
+      const ajConstr = (m2Construido - m2) * costoUfM2
+      const d = parseFloat(c.distancia_m)
+      return {
+        direccion: c.direccion,
+        distancia_m: d >= 0 ? Math.round(d) : null,
+        uf_hoy: Math.round(ufHoy),
+        uf_homologado: Math.round(ufHoy + ajTerreno + ajConstr),
+      }
+    })
+    .filter(Boolean)
+  const limpias = sinOutliers(lista, (x) => x.uf_homologado)
+  if (limpias.length < minN) return null
+  const pesos = limpias.map((x) => 1 / Math.sqrt(Math.max(distMinM, x.distancia_m ?? 1000)))
+  const sumP = pesos.reduce((a, b) => a + b, 0)
+  const ponderado = limpias.reduce((acc, x, i) => acc + x.uf_homologado * pesos[i], 0) / sumP
+  const ufs = limpias.map((x) => x.uf_homologado)
+  return {
+    valor_uf: Math.round(ponderado),
+    mediana: Math.round(mediana(ufs)),
+    min: Math.min(...ufs),
+    max: Math.max(...ufs),
+    n: limpias.length,
+    detalle: limpias.map((x, i) => ({ ...x, peso_pct: Math.round((pesos[i] / sumP) * 100) })),
+  }
 }
 
 // ── Total aditivo de una casa (terreno + construcción) ──────────────────────
@@ -985,10 +1064,16 @@ export function plusvaliaContradiceIndice(plusPct, serieIndice, hoy = null) {
 // "revisar" y la confianza baja un escalón. No se corrige el valor: se avisa.
 export const AVALUO = { min: 1.0, max: 2.0 }
 
-export function controlAvaluoFiscal({ valorUf, avaluoUf }) {
+// FIX 15-oct: en comunas premium el avalúo fiscal subvalora mucho el suelo; una
+// casa antigua donde el terreno es el 80% del valor se transa normalmente a
+// 2,2–2,6 veces el avalúo. El tope de 2,0 marcaba "revisar" casos sanos.
+export const AVALUO_MAX_POR_TIER = { premium: 2.6, alta: 2.3, estandar: 2.0 }
+
+export function controlAvaluoFiscal({ valorUf, avaluoUf, tier }) {
   if (!(valorUf > 0) || !(avaluoUf > 0)) return null
   const ratio = Math.round((valorUf / avaluoUf) * 100) / 100
-  const fueraRango = ratio < AVALUO.min || ratio > AVALUO.max
+  const maxR = AVALUO_MAX_POR_TIER[tier] || AVALUO.max
+  const fueraRango = ratio < AVALUO.min || ratio > maxR
   const fmt = (x) => String(x).replace('.', ',')
   return {
     ratio,
@@ -996,7 +1081,7 @@ export function controlAvaluoFiscal({ valorUf, avaluoUf }) {
     mensaje: !fueraRango ? null
       : ratio < AVALUO.min
         ? `El valor estimado queda bajo el avalúo fiscal (${fmt(ratio)} veces). Es poco habitual: revisar comparables antes de usarlo.`
-        : `El valor estimado supera ${fmt(AVALUO.max)} veces el avalúo fiscal (${fmt(ratio)} veces). Revisar comparables antes de usarlo.`,
+        : `El valor estimado supera ${fmt(maxR)} veces el avalúo fiscal (${fmt(ratio)} veces). Revisar comparables antes de usarlo.`,
   }
 }
 

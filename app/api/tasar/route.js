@@ -14,7 +14,7 @@ import {
   poligono, distanciaM, mediana, percentil,
   clasificaTipo, TIPO_OBJETIVO, cutoffVentasStr, esVentaReciente, enBandaM2,
   UFM2_MIN, UFM2_MAX, puntosSuelo, resumenSuelo, sueloPorTramo, sueloDeTramo,
-  valorAditivoCasa, confianzaPorN, buscarVentasPoligono, COSTO_CONSTR_RESIDUAL, BANDA_M2, terrenoDe, sinOutliers, DOTACION_TIPICA_DEPTO,
+  valorAditivoCasa, confianzaPorN, buscarVentasPoligono, COSTO_CONSTR_RESIDUAL, costoResidualDe, MIN_REFS_SUELO, comparativoCasas, BANDA_M2, terrenoDe, sinOutliers, DOTACION_TIPICA_DEPTO,
   valorComparativoDirecto, rangoUnidadesIdenticas, terrenoEsProrrateoBC, CONJUNTO,
   construirSerieMercado, factorFecha,
   plusvaliaSerie, plusvaliaVentas, plusvaliaContradiceIndice, controlAvaluoFiscal, bajarConfianza,
@@ -245,6 +245,14 @@ export async function POST(request) {
   let arriendoMediana = null
   let arriendoN = 0
   let sueloInfo = null
+  // FIX 15-oct: declaradas aquí (antes vivían dentro del bloque del polígono y
+  // el residual por ROL de 1b-bis las leía fuera de su alcance: ReferenceError
+  // → error 500 en casas cuyo polígono no daba suelo).
+  let serieIndiceSuelo = null
+  const hoySuelo = new Date()
+  // Tier de costo de construcción de la comuna: el MISMO para descontar la
+  // construcción de las ventas (residual) y para valorizar la propiedad.
+  const tierSuelo = elegirTierConstruccion(form?.comuna || '', null).tier
   let ufm2SectorList = []
   let diag = null
   let proveedorBloqueado = false // 402/403 de DataInmobiliaria (plan expirado)
@@ -410,10 +418,9 @@ export async function POST(request) {
       const indiceComunalSuelo = (codComSuelo && tipoObjetivo)
         ? indiceMercado({ codCom: codComSuelo, tipo: tipoObjetivo, m2: m2Construido })
         : null
-      const serieIndiceSuelo = indiceComunalSuelo
+      serieIndiceSuelo = indiceComunalSuelo
         ? indiceComunalSuelo.puntos
         : (indiceSectorMismoTipo ? indiceSector : null)
-      const hoySuelo = new Date()
 
       // ── Valor de SUELO del sector (solo casas) — núcleo compartido ──
       // FILTRO REGULATORIO: si la comuna tiene zonas PRC cargadas, el suelo se
@@ -434,12 +441,13 @@ export async function POST(request) {
               const zv = await zonaLocalEnPunto(parseFloat(v.lng), parseFloat(v.lat), comuna, bu)
               if (zv && String(zv) === String(zonaPRC)) mismaZona.push(v)
             }
-            const rz = puntosSuelo(mismaZona, mismaZona.filter(v => base.includes(v)), { serieIndice: serieIndiceSuelo, hoy: hoySuelo })
-            if (rz.pts.length >= 3) { sueloPts = rz.pts; fuenteSuelo = rz.fuente; notaZona = ', misma zona PRC ' + zonaPRC }
+            const rz = puntosSuelo(mismaZona, mismaZona.filter(v => base.includes(v)), { serieIndice: serieIndiceSuelo, hoy: hoySuelo, tier: tierSuelo })
+            // FIX 15-oct: la zona PRC manda solo con ventas suficientes (antes 3).
+            if (rz.pts.length >= MIN_REFS_SUELO) { sueloPts = rz.pts; fuenteSuelo = rz.fuente; notaZona = ', misma zona PRC ' + zonaPRC }
           }
         } catch (e) {}
         if (sueloPts.length < 3) {
-          const rg = puntosSuelo(ventas, base, { serieIndice: serieIndiceSuelo, hoy: hoySuelo })
+          const rg = puntosSuelo(ventas, base, { serieIndice: serieIndiceSuelo, hoy: hoySuelo, tier: tierSuelo })
           sueloPts = rg.pts; fuenteSuelo = rg.fuente
         }
         const general = resumenSuelo(sueloPts, fuenteSuelo)
@@ -450,7 +458,7 @@ export async function POST(request) {
           sueloInfo = {
             uf_m2: usar.uf_m2_mediana,
             n: delTramo ? delTramo.n : general.n_comparables,
-            fuente: (fuenteSuelo === 'ventas_terreno' ? 'ventas reales de sitios' : 'residual sobre ventas de casas') + notaZona,
+            fuente: (fuenteSuelo === 'ventas_terreno' ? 'ventas reales de sitios' : 'residual sobre ventas de casas, descontando la construcción de cada una según su antigüedad') + notaZona,
             tramo: delTramo ? delTramo.rango : 'todos los tamaños de sitio',
           }
         }
@@ -681,7 +689,7 @@ export async function POST(request) {
       if (!(tt > 0) || !(m2c > 0) || !(ufNom > 0)) return null
       const f = serieIndiceSuelo ? factorFecha(c.fecha, serieIndiceSuelo, hoySuelo) : 1
       const uf = ufNom * f
-      const rr = (uf - COSTO_CONSTR_RESIDUAL * m2c) / tt
+      const rr = (uf - costoResidualDe(c, tierSuelo) * m2c) / tt
       return (rr >= 0.3 && rr <= 250) ? { r: rr, lot: tt } : null
     }).filter(Boolean)
     const general = resumenSuelo(pts, 'residual_casas')
@@ -739,7 +747,7 @@ export async function POST(request) {
     if (mon.includes('CLP') || mon.includes('PESO')) return pr / UF_CLP
     return pr
   }
-  let ofertasVenta = [], ofertasArriendo = [], ofertaVentaMediana = null
+  let ofertasVenta = [], ofertasArriendo = [], ofertaVentaMediana = null, ofertaVentaUfM2 = null, ofertaVentaN = 0
   try {
     const lista = (await fetchOfertas('venta')).map(v => {
       let uf = enUF(v); if (uf == null) return null
@@ -750,8 +758,18 @@ export async function POST(request) {
       return { dir: limpiaTxt(v.direccion) || limpiaTxt(v.titulo) || null, m2: m2o, uf: Math.round(uf), uf_m2: m2o ? Math.round(uf / m2o) : null, fecha: String(v.fecha_publicacion || '').slice(0, 10) || null, url: v.url || null }
     }).filter(Boolean).sort((a, b) => ((a.fecha || '') < (b.fecha || '') ? 1 : -1))
     ofertasVenta = lista.slice(0, 12)
-    const medV = mediana(lista.map(o => o.uf).filter(x => x > 0))
-    if (lista.length >= 3 && medV) ofertaVentaMediana = Math.round(medV)
+    // FIX 15-oct: la mediana del PRECIO TOTAL mezclaba casas de 80 a 220 m²
+    // (banda 0,4–2,2×) y el informe la comparaba con una casa de 104 m²
+    // ("ofertas 56% sobre el cierre"). Ahora: UF/m² de avisos de tamaño
+    // similar (±30%) llevado a los m² de esta propiedad.
+    const similares = m2Construido
+      ? lista.filter(o => o.m2 && o.uf_m2 && o.m2 >= m2Construido * 0.7 && o.m2 <= m2Construido * 1.3)
+      : []
+    if (similares.length >= 3) {
+      ofertaVentaUfM2 = Math.round(mediana(similares.map(o => o.uf_m2)))
+      ofertaVentaMediana = Math.round(ofertaVentaUfM2 * m2Construido)
+      ofertaVentaN = similares.length
+    }
   } catch (e) { console.error('Ofertas venta tasar:', e.message) }
   try {
     const lista = (await fetchOfertas('arriendo')).map(v => {
@@ -890,17 +908,35 @@ export async function POST(request) {
     const { terreno_uf, construccion_uf, total_uf } = valorAditivoCasa({ sueloUfM2: sueloInfo.uf_m2, m2Terreno, costoUfM2, m2Construido })
     const amplioUf = m2Ampliados > 0 ? Math.round(costoUfM2 * m2Ampliados) : 0
     const total_uf_efectivo = total_uf + amplioUf
-    precioM2Base = Math.round(total_uf_efectivo / m2ConstruidoEfectivo)
-    const { finalUf, lineas } = aplicarAjustes({ baseUf: total_uf_efectivo, tipo, extras, answers, cfg: ajustesCfg })
+    // FIX 15-oct (v2): con ≥4 casas similares manda el MÉTODO COMPARATIVO
+    // homologado y ponderado por cercanía (núcleo: comparativoCasas). El
+    // aditivo de arriba queda como desglose de referencia y como respaldo.
+    const comp = comparativoCasas({ comparables: comparablesReales, m2Construido: m2ConstruidoEfectivo, m2Terreno, sueloUfM2: sueloInfo.uf_m2, costoUfM2, serieIndice: serieIndiceSuelo, hoy: hoySuelo })
+    let baseAditivo = total_uf_efectivo
+    const lineasBanda = []
+    if (comp) {
+      const delta = comp.valor_uf - total_uf_efectivo
+      const fmt = (x) => x.toLocaleString('es-CL')
+      lineasBanda.push({
+        concepto: 'Ajuste por comparación directa con casas similares del sector',
+        calculo: `${comp.n} ventas de casas similares (±30% m² construidos y terreno), llevadas a hoy y homologadas a ${m2Terreno} m² de terreno y ${m2ConstruidoEfectivo} m² construidos (rango ${fmt(comp.min)}–${fmt(comp.max)} UF), promedio ponderado por cercanía: ${fmt(comp.valor_uf)} UF. Suelo + construcción daba ${fmt(total_uf_efectivo)} UF`,
+        valor_uf: delta,
+      })
+      baseAditivo = comp.valor_uf
+    }
+    precioM2Base = Math.round(baseAditivo / m2ConstruidoEfectivo)
+    const { finalUf, lineas } = aplicarAjustes({ baseUf: baseAditivo, tipo, extras, answers, cfg: ajustesCfg })
     valorDet = {
       valor_uf: finalUf,
       precio_m2: Math.round(finalUf / m2ConstruidoEfectivo),
-      confianza: confianzaPorN(sueloInfo.n),
-      metodo: 'aditivo: suelo + construcción (núcleo compartido con Isidora)',
+      confianza: comp ? confianzaPorN(Math.max(comp.n, sueloInfo.n)) : confianzaPorN(sueloInfo.n),
+      metodo: comp ? 'comparativo homologado de casas similares, ponderado por cercanía (aditivo como referencia)' : 'aditivo: suelo + construcción (núcleo compartido con Isidora)',
+      comparativo_casas: comp || null,
       desglose: [
         { concepto: 'Valor del terreno', calculo: sueloInfo.uf_m2 + ' UF/m² de suelo x ' + m2Terreno + ' m² (' + sueloInfo.fuente + ', ' + sueloInfo.n + ' referencias, ' + sueloInfo.tramo + ')', valor_uf: terreno_uf },
         { concepto: 'Valor de la construcción', calculo: costoUfM2 + ' UF/m² (' + cfgCosto.label.toLowerCase() + ') x ' + m2Construido + ' m² construidos', valor_uf: construccion_uf },
         ...(amplioUf > 0 ? [{ concepto: 'm² ampliados sin regularizar (no catastrados en el SII)', calculo: costoUfM2 + ' UF/m² x ' + m2Ampliados + ' m² ampliados', valor_uf: amplioUf }] : []),
+        ...lineasBanda,
         ...lineas,
       ],
     }
@@ -1031,7 +1067,7 @@ export async function POST(request) {
   let controlAvaluo = null
   if (valorDet && avaluo) {
     const extrasUf = (ajustesExtra.ajRemo || 0) + (ajustesExtra.ajCar || 0) + (ajustesExtra.ajJardin || 0)
-    controlAvaluo = controlAvaluoFiscal({ valorUf: valorDet.valor_uf + extrasUf, avaluoUf: avaluo })
+    controlAvaluo = controlAvaluoFiscal({ valorUf: valorDet.valor_uf + extrasUf, avaluoUf: avaluo, tier: tierSuelo })
     if (controlAvaluo?.revisar) {
       valorDet.confianza = bajarConfianza(valorDet.confianza)
       alertas.push({ tipo: 'avaluo_fiscal', mensaje: controlAvaluo.mensaje, ratio: controlAvaluo.ratio })
@@ -1070,7 +1106,8 @@ export async function POST(request) {
     ? '\n\nDATOS REALES DEL SECTOR (úsalos en tu análisis):'
       + (plusvalia12m != null ? '\n- Plusvalía del sector últimos 12 meses (mediana UF/m², dato referencial): ' + plusvalia12m + '%. Puedes mencionarla UNA vez como dato de contexto; NO la uses como argumento de venta ni para justificar el precio.' : '')
       + (arriendoMediana ? '\n- Arriendo de referencia para esta tipología: ' + arriendoMediana + ' UF/mes (' + arriendoN + ' ofertas vigentes del sector)' : '')
-      + (ofertaVentaMediana ? '\n- Mediana de OFERTAS de venta activas de tipología similar en el sector: ' + ofertaVentaMediana + ' UF (los precios de oferta suelen estar 5-10% sobre el cierre)' : '')
+      + (ofertaVentaMediana ? '\n- OFERTAS de venta activas de tamaño similar (±30% de m², ' + ofertaVentaN + ' avisos): mediana ' + ofertaVentaUfM2 + ' UF/m², equivalente a ' + ofertaVentaMediana + ' UF para los ' + m2Construido + ' m² de esta propiedad (los precios de oferta suelen estar 5-10% sobre el cierre). Si comparas ofertas con el valor, usa SOLO esta cifra; NO compares con el precio total de casas más grandes.' : '')
+      + (arriendoMediana && valorDet?.valor_uf ? '\n- Rentabilidad bruta anual (arriendo x 12 / valor final): ' + (Math.round(((arriendoMediana * 12) / valorDet.valor_uf) * 1000) / 10) + '%. Si mencionas rentabilidad, usa EXACTAMENTE esta cifra.' : '')
     : ''
 
   // ── 3. Armar prompt: el LLM SOLO narra ─────────────────────────────────────
