@@ -13,11 +13,11 @@ import {
   COSTO_CONSTRUCCION_TIERS, elegirTierConstruccion, estadoConstruccion,
   poligono, distanciaM, mediana, percentil,
   clasificaTipo, TIPO_OBJETIVO, cutoffVentasStr, esVentaReciente, enBandaM2,
-  UFM2_MIN, UFM2_MAX, puntosSuelo, resumenSuelo, sueloPorTramo, sueloDeTramo,
-  valorAditivoCasa, confianzaPorN, buscarVentasPoligono, COSTO_CONSTR_RESIDUAL, costoResidualDe, MIN_REFS_SUELO, comparativoCasas, BANDA_M2, terrenoDe, sinOutliers, DOTACION_TIPICA_DEPTO,
+  UFM2_MIN, UFM2_MAX, puntosSuelo, resumenSuelo, sueloPorTramo, sueloDeTramo, sueloParaSitio,
+  valorAditivoCasa, confianzaPorN, buscarVentasPoligono, COSTO_CONSTR_RESIDUAL, costoResidualDe, MIN_REFS_SUELO, comparativoCasas, COMPARATIVO_CASA, BANDA_M2, terrenoDe, sinOutliers, DOTACION_TIPICA_DEPTO,
   valorComparativoDirecto, rangoUnidadesIdenticas, terrenoEsProrrateoBC, CONJUNTO,
   construirSerieMercado, factorFecha,
-  plusvaliaSerie, plusvaliaVentas, plusvaliaContradiceIndice, controlAvaluoFiscal, bajarConfianza,
+  plusvaliaSerie, plusvaliaVentas, plusvaliaContradiceIndice, controlAvaluoFiscal, bajarConfianza, controlRentabilidad,
 } from '../../lib/tasacion-core.js'
 import { indiceMercado } from '../../lib/indice-mercado.js'
 import { COD_COMUNA, normalizaComuna } from '../../lib/comunas.js'
@@ -452,14 +452,16 @@ export async function POST(request) {
         }
         const general = resumenSuelo(sueloPts, fuenteSuelo)
         if (general) {
-          const tramos = sueloPorTramo(sueloPts)
-          const delTramo = m2Terreno > 0 ? sueloDeTramo(tramos, m2Terreno) : null
-          const usar = delTramo || general
+          // FIX 30-oct: suelo homologado por TAMAÑO de sitio (tramo → banda →
+          // general), ver sueloParaSitio en el núcleo.
+          const sel = sueloParaSitio({ pts: sueloPts, lotM2: m2Terreno, general })
           sueloInfo = {
-            uf_m2: usar.uf_m2_mediana,
-            n: delTramo ? delTramo.n : general.n_comparables,
+            uf_m2: sel.usar.uf_m2_mediana,
+            n: sel.n,
             fuente: (fuenteSuelo === 'ventas_terreno' ? 'ventas reales de sitios' : 'residual sobre ventas de casas, descontando la construcción de cada una según su antigüedad') + notaZona,
-            tramo: delTramo ? delTramo.rango : 'todos los tamaños de sitio',
+            tramo: sel.tramo,
+            origen: sel.origen,
+            general_uf_m2: general.uf_m2_mediana,
           }
         }
       }
@@ -694,14 +696,14 @@ export async function POST(request) {
     }).filter(Boolean)
     const general = resumenSuelo(pts, 'residual_casas')
     if (general) {
-      const tramos = sueloPorTramo(pts)
-      const delTramo = m2Terreno > 0 ? sueloDeTramo(tramos, m2Terreno) : null
-      const usar = delTramo || general
+      const sel = sueloParaSitio({ pts, lotM2: m2Terreno, general })
       sueloInfo = {
-        uf_m2: usar.uf_m2_mediana,
-        n: delTramo ? delTramo.n : general.n_comparables,
+        uf_m2: sel.usar.uf_m2_mediana,
+        n: sel.n,
         fuente: 'residual sobre ventas de casas cercanas (búsqueda por ROL)',
-        tramo: delTramo ? delTramo.rango : 'todos los tamaños de sitio',
+        tramo: sel.tramo,
+        origen: sel.origen,
+        general_uf_m2: general.uf_m2_mediana,
       }
     }
   }
@@ -917,11 +919,21 @@ export async function POST(request) {
     if (comp) {
       const delta = comp.valor_uf - total_uf_efectivo
       const fmt = (x) => x.toLocaleString('es-CL')
+      const bandaTxt = comp.banda_terreno === 'ancha'
+        ? `±30% m² construidos y terreno de ${fmt(Math.round(m2Terreno * COMPARATIVO_CASA.terrenoAnchoMin))}–${fmt(Math.round(m2Terreno * COMPARATIVO_CASA.terrenoAnchoMax))} m²`
+        : '±30% m² construidos y terreno'
       lineasBanda.push({
         concepto: 'Ajuste por comparación directa con casas similares del sector',
-        calculo: `${comp.n} ventas de casas similares (±30% m² construidos y terreno), llevadas a hoy y homologadas a ${m2Terreno} m² de terreno y ${m2ConstruidoEfectivo} m² construidos (rango ${fmt(comp.min)}–${fmt(comp.max)} UF), promedio ponderado por cercanía: ${fmt(comp.valor_uf)} UF. Suelo + construcción daba ${fmt(total_uf_efectivo)} UF`,
+        calculo: `${comp.n} ventas de casas similares (${bandaTxt}), llevadas a hoy y homologadas a ${m2Terreno} m² de terreno y ${m2ConstruidoEfectivo} m² construidos (rango ${fmt(comp.min)}–${fmt(comp.max)} UF), promedio ponderado por cercanía: ${fmt(comp.valor_uf)} UF. Suelo + construcción daba ${fmt(total_uf_efectivo)} UF`,
         valor_uf: delta,
       })
+      if (comp.n_descartadas > 0) {
+        lineasBanda.push({
+          concepto: 'Ventas descartadas por atípicas',
+          calculo: comp.descartadas.map(d => `${d.direccion}: ${fmt(d.uf)} UF (${d.detalle})`).join('; ') + ' — no son de mercado (relacionados, herencias, derechos o datos mal cargados)',
+          valor_uf: 0,
+        })
+      }
       baseAditivo = comp.valor_uf
     }
     precioM2Base = Math.round(baseAditivo / m2ConstruidoEfectivo)
@@ -933,7 +945,7 @@ export async function POST(request) {
       metodo: comp ? 'comparativo homologado de casas similares, ponderado por cercanía (aditivo como referencia)' : 'aditivo: suelo + construcción (núcleo compartido con Isidora)',
       comparativo_casas: comp || null,
       desglose: [
-        { concepto: 'Valor del terreno', calculo: sueloInfo.uf_m2 + ' UF/m² de suelo x ' + m2Terreno + ' m² (' + sueloInfo.fuente + ', ' + sueloInfo.n + ' referencias, ' + sueloInfo.tramo + ')', valor_uf: terreno_uf },
+        { concepto: 'Valor del terreno', calculo: sueloInfo.uf_m2 + ' UF/m² de suelo x ' + m2Terreno + ' m² (' + sueloInfo.fuente + ', ' + sueloInfo.n + ' referencias, ' + sueloInfo.tramo + (sueloInfo.origen === 'banda' && sueloInfo.general_uf_m2 ? '; mediana general del sector ' + sueloInfo.general_uf_m2 + ' UF/m², no aplicable a un sitio de este tamaño' : '') + ')', valor_uf: terreno_uf },
         { concepto: 'Valor de la construcción', calculo: costoUfM2 + ' UF/m² (' + cfgCosto.label.toLowerCase() + ') x ' + m2Construido + ' m² construidos', valor_uf: construccion_uf },
         ...(amplioUf > 0 ? [{ concepto: 'm² ampliados sin regularizar (no catastrados en el SII)', calculo: costoUfM2 + ' UF/m² x ' + m2Ampliados + ' m² ampliados', valor_uf: amplioUf }] : []),
         ...lineasBanda,
@@ -1074,6 +1086,18 @@ export async function POST(request) {
     }
   }
 
+  // ── CONTROL POR RENTABILIDAD DE ARRIENDO (FIX 30-oct) ─────────────────────
+  // Sobre el TOTAL que ve el usuario. Una casa cuyo arriendo de mercado rinde
+  // menos de 2,5% bruto anual sobre el valor tasado está, casi siempre, tasada
+  // alta (Sendero del Mirador: 2,3% sobre 57.288 UF). Solo alerta: no mueve el
+  // valor, pero deja constancia del valor implícito por renta para revisar.
+  let controlRenta = null
+  if (valorDet && arriendoMediana && tipoObjetivo) {
+    const extrasUf = (ajustesExtra.ajRemo || 0) + (ajustesExtra.ajCar || 0) + (ajustesExtra.ajJardin || 0)
+    controlRenta = controlRentabilidad({ valorUf: valorDet.valor_uf + extrasUf, arriendoUfMes: arriendoMediana, tipo: tipoObjetivo })
+    if (controlRenta?.revisar) alertas.push({ tipo: 'rentabilidad', mensaje: controlRenta.mensaje, ratio: controlRenta.rentabilidad_pct })
+  }
+
   // ── PLUSVALÍA vs ÍNDICE DE AJUSTE (FIX 14-oct) ─────────────────────────────
   // Si la plusvalía del sector contradice el índice con que se llevaron las
   // ventas a hoy, no se publica ni se narra: el informe no puede decir "+64%"
@@ -1097,17 +1121,44 @@ export async function POST(request) {
   const notaPredial = esSubMinimo
     ? `\nNOTA OBLIGATORIA: el terreno (${m2Terreno} m²) es menor al predial mínimo (${prcZona.predial_min} m²), pero el predio YA está subdividido e inscrito: SÍ puede demolerse y construirse una vivienda nueva. Menciona solo que no es apto para proyecto inmobiliario (subdividir o más de una vivienda). NO digas que no se puede demoler o reconstruir.`
     : ''
-  const normativaTexto = prcZona
-    ? `\n\nNORMATIVA OFICIAL DEL PLAN REGULADOR (AUTORITATIVA — úsala tal cual en plan_regulador y en tu análisis, NO la inventes):\n${JSON.stringify({ zona: prcZona.zona, nombre_zona: prcZona.nombre, uso_suelo: prcZona.uso, densidad: prcZona.densidad, superficie_predial_minima_m2: prcZona.predial_min, constructibilidad: prcZona.constructibilidad, fuente: prcZona.fuente }, null, 2)}${notaPredial}`
+  // FIX 30-oct: la SUBDIVISIÓN la decide el sistema, no el LLM. Caso Sendero
+  // del Mirador 6781 (2.000 m², predial mínimo 1.000 m²): el plan regulador
+  // decía "no apta para subdivisión" y el potencial de desarrollo, dos
+  // secciones más abajo, "permitiría subdividir y construir 2 viviendas".
+  // Regla: lotes = floor(terreno / predial mínimo); subdividible si ≥ 2
+  // (sujeto a emplazamiento de lo construido y aprobación DOM).
+  const lotesPosibles = (prcZona && !prcZona.no_subdivisible && prcZona.predial_min > 0 && m2Terreno > 0)
+    ? Math.floor(m2Terreno / prcZona.predial_min)
+    : null
+  const subdivisionTexto = lotesPosibles == null
+    ? (prcZona?.no_subdivisible ? 'Zona no subdivisible.' : '')
+    : lotesPosibles >= 2
+      ? `Con ${m2Terreno.toLocaleString('es-CL')} m² y predial mínimo de ${prcZona.predial_min.toLocaleString('es-CL')} m² admite hasta ${lotesPosibles} lotes (subdivisión sujeta al emplazamiento de la construcción existente y a aprobación de la DOM).`
+      : `No admite subdivisión: con ${m2Terreno.toLocaleString('es-CL')} m² no caben 2 lotes de ${prcZona.predial_min.toLocaleString('es-CL')} m² (predial mínimo).`
+  const notaSubdivision = subdivisionTexto
+    ? `\nSUBDIVISIÓN (CALCULADA POR EL SISTEMA — úsala tal cual, NO la contradigas): ${subdivisionTexto}`
     : ''
+  const normativaTexto = prcZona
+    ? `\n\nNORMATIVA OFICIAL DEL PLAN REGULADOR (AUTORITATIVA — úsala tal cual en plan_regulador y en tu análisis, NO la inventes):\n${JSON.stringify({ zona: prcZona.zona, nombre_zona: prcZona.nombre, uso_suelo: prcZona.uso, densidad: prcZona.densidad, superficie_predial_minima_m2: prcZona.predial_min, constructibilidad: prcZona.constructibilidad, fuente: prcZona.fuente }, null, 2)}${notaPredial}${notaSubdivision}`
+    : ''
+
+  // FIX 30-oct: el valor que VE el cliente es valor_uf + remodelación +
+  // características + jardín (el frontend los suma). El LLM recibía solo el
+  // base y la prosa decía "56.908 UF" mientras el titular decía "57.288 UF"
+  // (caso Sendero del Mirador: +380 UF de piscina/jardín). La narración,
+  // la rentabilidad y la recomendación de precio se calculan sobre el TOTAL.
+  const extrasUfTotal = (ajustesExtra.ajRemo || 0) + (ajustesExtra.ajCar || 0) + (ajustesExtra.ajJardin || 0)
+  const valorTotalCliente = valorDet ? valorDet.valor_uf + extrasUfTotal : null
+  const m2Narrativa = m2Construido ? m2Construido + m2Ampliados : null
+  const rentabilidadPct = (arriendoMediana && valorTotalCliente) ? Math.round(((arriendoMediana * 12) / valorTotalCliente) * 1000) / 10 : null
 
   // Datos reales del sector para que la narración los use (no los invente)
   const sectorTexto = (plusvalia12m != null || arriendoMediana || ofertaVentaMediana)
     ? '\n\nDATOS REALES DEL SECTOR (úsalos en tu análisis):'
       + (plusvalia12m != null ? '\n- Plusvalía del sector últimos 12 meses (mediana UF/m², dato referencial): ' + plusvalia12m + '%. Puedes mencionarla UNA vez como dato de contexto; NO la uses como argumento de venta ni para justificar el precio.' : '')
       + (arriendoMediana ? '\n- Arriendo de referencia para esta tipología: ' + arriendoMediana + ' UF/mes (' + arriendoN + ' ofertas vigentes del sector)' : '')
-      + (ofertaVentaMediana ? '\n- OFERTAS de venta activas de tamaño similar (±30% de m², ' + ofertaVentaN + ' avisos): mediana ' + ofertaVentaUfM2 + ' UF/m², equivalente a ' + ofertaVentaMediana + ' UF para los ' + m2Construido + ' m² de esta propiedad (los precios de oferta suelen estar 5-10% sobre el cierre). Si comparas ofertas con el valor, usa SOLO esta cifra; NO compares con el precio total de casas más grandes.' : '')
-      + (arriendoMediana && valorDet?.valor_uf ? '\n- Rentabilidad bruta anual (arriendo x 12 / valor final): ' + (Math.round(((arriendoMediana * 12) / valorDet.valor_uf) * 1000) / 10) + '%. Si mencionas rentabilidad, usa EXACTAMENTE esta cifra.' : '')
+      + (ofertaVentaMediana ? '\n- OFERTAS de venta activas de tamaño similar (±30% de m², ' + ofertaVentaN + ' avisos): mediana ' + ofertaVentaUfM2 + ' UF/m², equivalente a ' + ofertaVentaMediana + ' UF para los ' + m2Construido + ' m² de esta propiedad (los precios de oferta suelen estar 5-10% sobre el cierre). Si comparas ofertas con el valor, usa SOLO esta cifra; NO calcules tú una mediana de ofertas ni compares con el precio total de casas más grandes o más chicas.' : '')
+      + (rentabilidadPct != null ? '\n- Rentabilidad bruta anual (arriendo x 12 / valor total): ' + rentabilidadPct + '%. Si mencionas rentabilidad, usa EXACTAMENTE esta cifra.' : '')
     : ''
 
   // ── 3. Armar prompt: el LLM SOLO narra ─────────────────────────────────────
@@ -1190,13 +1241,18 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
     : '\n\nNOTA: No se encontraron comparables reales en el CBR para este segmento. Usa tus referencias de mercado con confianza Media.'
 
   // Fix #3: el valor final determinístico se entrega al LLM como autoritativo.
+  const extrasTexto = extrasUfTotal > 0
+    ? ` A ese base el sistema le suma ${extrasUfTotal} UF de ajustes del propietario (`
+      + [ajustesExtra.ajRemo > 0 ? `remodelación ${ajustesExtra.ajRemo} UF` : null, ajustesExtra.ajCar > 0 ? `características ${ajustesExtra.ajCar} UF` : null, ajustesExtra.ajJardin > 0 ? `jardín ${ajustesExtra.ajJardin} UF` : null].filter(Boolean).join(', ')
+      + `), de modo que el VALOR TOTAL que ve el cliente es ${valorTotalCliente} UF (${Math.round(valorTotalCliente / m2Narrativa)} UF/m²).`
+    : ''
   const valorTexto = valorDet
     ? `\n\nVALOR FINAL (AUTORITATIVO — cópialo tal cual, no recalcules):\n${JSON.stringify({
         valor_uf: valorDet.valor_uf,
         precio_m2: valorDet.precio_m2,
         confianza: valorDet.confianza,
         desglose: valorDet.desglose,
-      }, null, 2)}\nTu análisis, factores y recomendación deben ser coherentes con este valor.`
+      }, null, 2)}\nEn el JSON copia valor_uf y precio_m2 tal cual.${extrasTexto}\nEN LA PROSA (analisis, factores, recomendacion_precio_venta) menciona SIEMPRE el valor total de ${valorTotalCliente} UF y ${Math.round(valorTotalCliente / m2Narrativa)} UF/m²; NUNCA cites un valor distinto. La recomendación de precio de venta debe partir de ese total: el precio de publicación sugerido va entre el total y un 5-8% sobre él (margen de negociación), NUNCA por debajo ni más de 10% por encima.`
     : ''
 
   const detalles = [
@@ -1296,7 +1352,11 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
       // La normativa OFICIAL del PRC manda sobre lo que invente el LLM (zona, uso, predial).
       // Se mantiene densidad_max del LLM (la usa el cálculo de potencial); el resto es oficial.
       if (prcZona) {
-        const prevObs = (parsed.plan_regulador && parsed.plan_regulador.observaciones) || ''
+        // Lo que el LLM haya dicho sobre subdivisión se reemplaza por el cálculo del sistema.
+        const prevObsRaw = (parsed.plan_regulador && parsed.plan_regulador.observaciones) || ''
+        const prevObs = subdivisionTexto
+          ? prevObsRaw.split(/(?<=\.)\s+/).filter(s => !/subdivi/i.test(s)).join(' ').trim() + ' ' + subdivisionTexto
+          : prevObsRaw
         // Predio menor al predial mínimo: el mínimo rige para NUEVAS subdivisiones.
         // Un predio ya inscrito mantiene sus derechos (demoler y reponer UNA vivienda);
         // solo queda inhabilitado para proyecto inmobiliario. Texto fijo, sin dramatismo.
@@ -1334,18 +1394,37 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
           const cL = comuna.toLowerCase()
           densidadHabHa = ['vitacura','las condes','lo barnechea','la reina'].some(c => cL.includes(c)) ? 60 : 120
         }
-        const unidades = Math.floor((densidadHabHa / 10000) * m2Terreno / 4)
-        if (unidades >= 2) {
+        const unidadesDensidad = Math.floor((densidadHabHa / 10000) * m2Terreno / 4)
+        // FIX 30-oct: la densidad NO manda sola — el predial mínimo acota el
+        // número de lotes y una zona no subdivisible no admite proyecto.
+        const unidades = lotesPosibles != null ? Math.min(unidadesDensidad, lotesPosibles) : unidadesDensidad
+        const fmtM2 = m2Terreno.toLocaleString('es-CL')
+        if (prcZona?.no_subdivisible) {
+          parsed.potencial_desarrollo = { aplica: false, motivo: 'Zona no subdivisible según el plan regulador.' }
+        } else if (unidades >= 2) {
+          const limitaPredial = lotesPosibles != null && lotesPosibles < unidadesDensidad
+          const adicionales = unidades - 1
           parsed.potencial_desarrollo = {
             aplica: true,
             m2_terreno: m2Terreno,
             densidad_max_hab_ha: densidadHabHa,
             unidades_estimadas: unidades,
-            descripcion: `El terreno de ${m2Terreno.toLocaleString('es-CL')} m² permite, según la densidad del plan regulador (${densidadHabHa} hab/ha), construir aproximadamente ${unidades} viviendas (${densidadHabHa} ÷ 10.000 × ${m2Terreno} ÷ 4 personas/hogar). ${unidades >= 4 ? 'Esto significa que es posible demoler la construcción actual y desarrollar un proyecto de ' + unidades + ' viviendas, multiplicando significativamente el valor del terreno. Un comprador desarrollador puede valorar este predio muy por encima del valor como vivienda individual.' : 'El terreno permitiría subdividir y construir hasta ' + unidades + ' viviendas adicionales, aumentando su potencial de valorización.'}`,
-            advertencia: `Cálculo referencial basado en la densidad del plan regulador. Los m² mínimos de subdivisión, factibilidad real y condiciones específicas deben verificarse con un arquitecto y la DOM de ${comuna}.`
+            lotes_por_predial_minimo: lotesPosibles,
+            descripcion: `El terreno de ${fmtM2} m² admite, según la densidad del plan regulador (${densidadHabHa} hab/ha), hasta ${unidadesDensidad} viviendas (${densidadHabHa} ÷ 10.000 × ${m2Terreno} ÷ 4 personas/hogar)`
+              + (lotesPosibles != null ? `, y según el predial mínimo de ${prcZona.predial_min.toLocaleString('es-CL')} m², hasta ${lotesPosibles} lotes` : '')
+              + `. ${limitaPredial ? 'Manda el predial mínimo: ' : ''}en total ${unidades} viviendas, es decir ${adicionales} adicional${adicionales > 1 ? 'es' : ''} a la existente. `
+              + (unidades >= 4
+                ? `Es posible demoler la construcción actual y desarrollar un proyecto de ${unidades} viviendas, lo que puede elevar significativamente el valor del terreno para un comprador desarrollador.`
+                : `La subdivisión está sujeta al emplazamiento de la construcción existente dentro del predio: si la casa actual no deja un lote libre de ${lotesPosibles != null ? prcZona.predial_min.toLocaleString('es-CL') + ' m²' : 'la superficie mínima'}, el potencial solo se materializa demoliendo.`),
+            advertencia: `Cálculo referencial basado en la densidad y el predial mínimo del plan regulador. La factibilidad real (emplazamiento, accesos, condiciones específicas) debe verificarse con un arquitecto y la DOM de ${comuna}.`
           }
         } else {
-          parsed.potencial_desarrollo = { aplica: false }
+          parsed.potencial_desarrollo = {
+            aplica: false,
+            motivo: lotesPosibles != null && lotesPosibles < 2
+              ? `No admite subdivisión: con ${fmtM2} m² no caben 2 lotes de ${prcZona.predial_min.toLocaleString('es-CL')} m² (predial mínimo).`
+              : 'La densidad del plan regulador no admite más de una vivienda en este terreno.',
+          }
         }
       } else if (!parsed.potencial_desarrollo) {
         parsed.potencial_desarrollo = { aplica: false }
@@ -1355,6 +1434,7 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
       parsed.alertas = alertas
       parsed.revisar = alertas.length > 0
       parsed.control_avaluo = controlAvaluo
+      parsed.control_renta = controlRenta
       parsed.ventas_mapa = ventasMapa
       parsed.punto = punto ? { lat: punto.lat, lng: punto.lng, fuente: puntoFuente } : null
       parsed.sector = { composicion: sectorComposicion, indice_uf_m2: indiceSector, plusvalia_12m_pct: plusvalia12m }
@@ -1363,7 +1443,9 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
       parsed.ofertas_venta = ofertasVenta
       parsed.ofertas_arriendo = ofertasArriendo
       parsed._diag = { ...(diag || {}), rest: diagRest, n_comparables: comparablesReales.length, n_suelo: sueloInfo ? sueloInfo.n : 0, metodo: valorDet ? (valorDet.metodo || 'mediana sector') : 'SIN valor determinístico (estimación referencial del LLM)', coherencia, rango_identicas: rangoIdenticas, serie_ajuste: indiceComunal ? { fuente: indiceComunal.fuente, banda: indiceComunal.banda, banda_label: indiceComunal.banda_label, n_ventas: indiceComunal.n_ventas, desde: indiceComunal.desde, hasta: indiceComunal.hasta, generado: indiceComunal.generado, puntos: indiceComunal.puntos } : serieTipo ? { fuente: 'indice_local_mismo_tipo', n_ventas: serieTipo.n_ventas, desde: serieTipo.desde, hasta: serieTipo.hasta, variacion_total_pct: serieTipo.variacion_total_pct, puntos: serieTipo.puntos } : (indiceSectorMismoTipo ? { fuente: 'indice_sector_poligono_mismo_tipo', puntos: indiceSector } : { fuente: 'sin_serie_mismo_tipo (respaldo: tasa del conjunto)' }) }
-      const _valorRef = parsed.valor_uf || null
+      // Rentabilidad sobre el TOTAL que ve el cliente (base + ajustes).
+      const _valorRef = valorTotalCliente || parsed.valor_uf || null
+      parsed.valor_total_uf = valorTotalCliente
       parsed.arriendo = arriendoMediana ? {
         uf_mes: arriendoMediana,
         n_ofertas: arriendoN,
