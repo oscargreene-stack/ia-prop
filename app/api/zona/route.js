@@ -29,7 +29,7 @@ import {
   COSTO_CONSTRUCCION_TIERS, elegirTierConstruccion,
   poligono, centroide, mediana, percentil, r1,
   clasificaTipo, TIPO_OBJETIVO, cutoffVentasStr, esVentaReciente, enBandaM2,
-  UFM2_MIN, UFM2_MAX, puntosSuelo, resumenSuelo, sueloPorTramo, sueloDeTramo,
+  UFM2_MIN, UFM2_MAX, puntosSuelo, resumenSuelo, sueloPorTramo, sueloDeTramo, sueloParaSitio,
   confianzaPorN, buscarVentasPoligono, terrenoDe, sinOutliers,
 } from '../../lib/tasacion-core.js'
 
@@ -234,7 +234,10 @@ export async function POST(request) {
       if (suelo) {
         const cM2 = m2obj > 0 ? m2obj : construidoTipo
         const tM2 = m2terrInput > 0 ? m2terrInput : terrenoTipo
-        const sueloUsar = (m2terrInput > 0 ? sueloDeTramo(suelo_por_tramo, m2terrInput) : null) || suelo
+        // FIX 30-oct: tramo → banda alrededor del sitio → general (núcleo:
+        // sueloParaSitio), misma regla que Valentina para no sobrevalorar sitios grandes.
+        const selSuelo = m2terrInput > 0 ? sueloParaSitio({ pts: sueloPts, lotM2: m2terrInput, general: suelo }) : null
+        const sueloUsar = (selSuelo && selSuelo.usar) || suelo
         if (cM2 > 0 && tM2 > 0) {
           const por_estado = {}
           for (const [k, cfg] of Object.entries(costoConstr)) {
@@ -243,7 +246,7 @@ export async function POST(request) {
             const med2 = Math.round(sueloUsar.uf_m2_mediana * tM2 + ((cfg.min + cfg.max) / 2) * cM2)
             por_estado[k] = { label: cfg.label, uf_min: min, uf_med: med2, uf_max: max }
           }
-          total_ejemplo = { terreno_m2: tM2, construido_m2: cM2, suelo_uf_m2_usado: sueloUsar.uf_m2_mediana, por_estado }
+          total_ejemplo = { terreno_m2: tM2, construido_m2: cM2, suelo_uf_m2_usado: sueloUsar.uf_m2_mediana, suelo_referencias: selSuelo ? selSuelo.tramo : 'todos los tamaños de sitio', por_estado }
         }
       }
 
