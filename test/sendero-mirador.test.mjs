@@ -9,7 +9,7 @@
 // Datos REALES del informe (ventas CBR, sección 8), fechas 2025-02 a 2026-04.
 import {
   puntosSuelo, resumenSuelo, sueloPorTramo, sueloDeTramo, sueloParaSitio,
-  sueloPorBandaSitio, comparativoCasas, valorAditivoCasa, costoResidualDe,
+  sueloPorBandaSitio, sueloResidualComparables, comparativoCasas, valorAditivoCasa, costoResidualDe,
   controlRentabilidad, COMPARATIVO_CASA, MIN_REFS_SUELO,
 } from '../app/lib/tasacion-core.js'
 
@@ -26,15 +26,19 @@ const COMPARABLES = [
 ]
 
 // Las mismas ventas en el shape crudo del CBR (para el suelo residual), más
-// 9 casas en sitios de 500–1.000 m² que reproducen la mediana general alta
-// (≈17,8 UF/m²) que el informe aplicó al sitio de 2.000 m².
+// 12 ventas REALES del barrio (CBR, <600 m): casas de 300-450 m² en sitios de
+// ~1.000 m² que dominan el pool del polígono y dan residual de 18-22 UF/m².
+// Son las que, en el preview del 30-oct, mantenían el suelo en 17,8 aunque se
+// acotara por tamaño de sitio con una banda que bajaba a 0,5× (1.000 m²).
 const cbr = (c, ano) => ({ price: c.precio_uf, superficie_construccion: c.m2, superficie_total_terreno: c.m2_terreno, ano_construccion: ano, date_inscripcion: c.fecha + '-15', unit: 'UF', cod_destino: 'H', copropiedad: false })
-const CASAS_GRANDES = COMPARABLES.map((c, i) => cbr(c, [1995, 2001, 1983, 1998, 2008][i]))
-const CASAS_CHICAS = [
-  [320, 600, 1990, 20400], [280, 520, 1985, 18700], [350, 700, 1998, 23300], [300, 560, 1992, 19900],
-  [410, 820, 2003, 31700], [260, 500, 1988, 16800], [380, 760, 2000, 25900], [330, 640, 1995, 21400], [295, 600, 1991, 20500],
-].map(([m2, t, ano, uf]) => ({ price: uf, superficie_construccion: m2, superficie_total_terreno: t, ano_construccion: ano, date_inscripcion: '2025-09-15', unit: 'UF', cod_destino: 'H', copropiedad: false }))
-const TODAS = [...CASAS_GRANDES, ...CASAS_CHICAS]
+const CASAS_GRANDES = COMPARABLES.map((c, i) => cbr(c, [1991, 2005, 1983, 1990, 1994][i]))
+const CASAS_MIL = [
+  // [m2 constr, m2 sitio, año, UF] — ventas CBR reales 2023-2026
+  [326, 1003, 1987, 21000], [358, 1071, 1989, 29000], [460, 1007, 1987, 31000], [324, 1002, 1985, 27700],
+  [336, 1003, 1983, 27000], [319, 1002, 1987, 31000], [356, 1003, 2001, 31873], [377, 1000, 1983, 24424],
+  [385, 1002, 1984, 29450], [404, 1005, 1983, 31000], [403, 1028, 1992, 31450], [375, 1001, 1986, 27500],
+].map(([m2, t, ano, uf]) => ({ price: uf, superficie_construccion: m2, superficie_total_terreno: t, ano_construccion: ano, date_inscripcion: '2025-06-15', unit: 'UF', cod_destino: 'H', copropiedad: false }))
+const TODAS = [...CASAS_GRANDES, ...CASAS_MIL]
 
 let fail = 0
 const ok = (name, cond, extra) => {
@@ -46,20 +50,22 @@ const entre = (x, lo, hi) => x >= lo && x <= hi
 console.log('\n1) SUELO — mediana general vs homologada por tamaño de sitio')
 const { pts, fuente } = puntosSuelo(TODAS, TODAS, { tier: TIER })
 const general = resumenSuelo(pts, fuente)
-ok('13 referencias residuales (Agua del Padre queda fuera: suelo negativo)', pts.length === 13, { n: pts.length })
-ok('la mediana general del sector es alta (≈17–19 UF/m², sitios chicos)', entre(general.uf_m2_mediana, 16, 20), general)
+ok('16 referencias residuales (Agua del Padre queda fuera: suelo negativo)', pts.length === 16, { n: pts.length })
+ok('la mediana general del sector es alta (≈17–21 UF/m²: dominan los sitios de 1.000)', entre(general.uf_m2_mediana, 16, 22), general)
 const delTramo = sueloDeTramo(sueloPorTramo(pts), TERRENO)
 ok('el tramo >1.200 m² no reúne ' + MIN_REFS_SUELO + ' referencias (antes caía a la general)', delTramo == null, delTramo)
 const banda = sueloPorBandaSitio(pts, TERRENO)
-ok('la banda 0,5×–2,5× del sitio (1.000–5.000 m²) reúne las 4 casas grandes de mercado', banda && banda.n === 4 && banda.banda === 'estrecha', banda)
-ok('suelo homologado 10–16 UF/m² (lo que dan las ventas en sitios comparables)', banda && entre(banda.uf_m2_mediana, 10, 16), banda)
+ok('la banda 0,7×–2× (1.400–4.000 m²) no junta 4 ni los "≥1.400"; manda el tercio de sitios más grandes', banda && banda.banda === 'mayores', banda)
+ok('ese suelo NO repite el 17,8 de los sitios de 1.000 (queda ≤ 14)', banda && banda.uf_m2_mediana <= 14, banda)
 const sel = sueloParaSitio({ pts, lotM2: TERRENO, general })
 ok('sueloParaSitio prefiere la banda a la general', sel.origen === 'banda' && sel.usar.uf_m2_mediana === banda.uf_m2_mediana, sel)
-const selChico = sueloParaSitio({ pts, lotM2: 600, general })
-ok('un sitio de 600 m² sigue leyendo el tramo 500–800 (sin cambios)', selChico.origen === 'tramo', selChico)
+const selMil = sueloParaSitio({ pts, lotM2: 1000, general })
+ok('un sitio de 1.000 m² lee el tramo 800–1.200 (12 refs, ≈18–22 UF/m²)', selMil.origen === 'tramo' && entre(selMil.usar.uf_m2_mediana, 17, 23), selMil)
+const sc = sueloResidualComparables({ comparables: COMPARABLES, m2Terreno: TERRENO, tier: TIER })
+ok('suelo residual sobre las 4 casas comparables (Agua del Padre fuera): 11–14 UF/m²', sc && sc.n === 4 && entre(sc.uf_m2_mediana, 11, 14), sc)
 
 console.log('\n2) COMPARATIVO DE CASAS SIMILARES')
-const SUELO = banda.uf_m2_mediana
+const SUELO = sc.uf_m2_mediana // el que usa la ruta: residual sobre los propios comparables
 const compViejo = (() => {
   // Con ±30% de terreno (regla anterior) solo Parque A. Rabat calificaba.
   const n = COMPARABLES.filter(c => c.m2 >= M2 * 0.7 && c.m2 <= M2 * 1.3 && c.m2_terreno >= TERRENO * 0.7 && c.m2_terreno <= TERRENO * 1.3).length
@@ -70,7 +76,7 @@ const comp = comparativoCasas({ comparables: COMPARABLES, m2Construido: M2, m2Te
 ok('ahora el comparativo se arma (banda de terreno ancha)', comp && comp.banda_terreno === 'ancha', comp)
 ok('Agua del Padre 6815 (26 UF/m²) se descarta como atípica en bruto', comp && comp.n_descartadas === 1 && /AGUA DEL PADRE/.test(comp.descartadas[0].direccion), comp && comp.descartadas)
 ok('quedan las 4 ventas de mercado (Raimapu, Rabat, Antilhue, El Faisán)', comp && comp.n === 4, comp && comp.detalle.map(d => d.direccion))
-ok('ninguna homologación supera el 50% del precio', comp && comp.detalle.every(d => Math.abs(d.aj_terreno) + Math.abs(d.aj_constr) <= d.uf_hoy * COMPARATIVO_CASA.maxHomologacionPct), comp && comp.detalle)
+ok('ninguna homologación supera el 60% del precio', comp && comp.detalle.every(d => Math.abs(d.aj_terreno) + Math.abs(d.aj_constr) <= d.uf_hoy * COMPARATIVO_CASA.maxHomologacionPct), comp && comp.detalle)
 ok('valor comparativo 44.000–50.000 UF (58–66 UF/m²)', comp && entre(comp.valor_uf, 44000, 50000), comp)
 
 console.log('\n3) VALOR FINAL — misma cadena que /api/tasar (aditivo de referencia + comparativo)')
@@ -100,6 +106,10 @@ ok('con 4 similares en ±30% de terreno manda la banda estrecha (E queda fuera)'
 console.log('\n6) SITIO MÁS GRANDE QUE TODAS LAS REFERENCIAS')
 const selEnorme = sueloParaSitio({ pts, lotM2: 12000, general })
 ok('un sitio de 12.000 m² lee las referencias más grandes, no la mediana general', selEnorme.origen === 'banda' && selEnorme.usar.banda === 'mayores' && selEnorme.usar.uf_m2_mediana < general.uf_m2_mediana, selEnorme)
+
+console.log('\n7) POR QUÉ EL SUELO DEBE SALIR DE LOS COMPARABLES')
+const comp178 = comparativoCasas({ comparables: COMPARABLES, m2Construido: M2, m2Terreno: TERRENO, sueloUfM2: 17.8, costoUfM2: COSTO })
+ok('con el suelo del pool (17,8) la homologación supera el 60% del precio y el comparativo NO se arma', comp178 == null, comp178)
 
 console.log('')
 if (fail) { console.log(`${fail} TEST(S) DE SENDERO DEL MIRADOR FALLARON`); process.exit(1) }

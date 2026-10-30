@@ -334,12 +334,18 @@ export function sueloDeTramo(tramos, lotM2) {
 // directos (601-783 m²) cerraron a 52-57 UF/m² (≈ 40.000-44.000 UF).
 //
 // Regla de tasador: el suelo se lee de referencias de sitios de tamaño
-// COMPARABLE al tasado. Si el tramo fijo no tiene masa suficiente, se usa una
-// banda alrededor del sitio (0,5×–2,5×); si tampoco, una banda ancha
-// (0,33×–4×); y si el sitio es más grande que todas las referencias, las
-// referencias más grandes disponibles (tercio superior). Solo si nada de eso
-// reúne MIN_REFS_BANDA_SUELO referencias se vuelve a la mediana general.
-export const BANDA_SUELO = { min: 0.5, max: 2.5, minAncha: 0.33, maxAncha: 4, minRefs: 4 }
+// COMPARABLE al tasado. El efecto del tamaño NO es lineal: verificado con las
+// 60 ventas CBR a <900 m de Sendero del Mirador, los sitios de ~1.000 m² dan
+// 18-22 UF/m² de residual y los de 1.800-4.200 m² dan 4-18 (mediana ~12). Una
+// banda que baje a 0,5× (1.000 m²) queda dominada por el barrio de sitios de
+// 1.000 y reproduce el mismo 17,8 (así falló la primera versión de este fix).
+// Jerarquía: (1) banda 0,7×–2× del sitio; (2) si el sitio es más grande que la
+// mediana de las referencias, SOLO referencias de tamaño igual o mayor
+// (≥0,7×) — nunca se tasa un sitio grande con sitios chicos; si es más chico,
+// solo referencias ≤1,5×; (3) sitio grande sin referencias de su tamaño: el
+// tercio de sitios más grandes del sector. Si nada reúne MIN_REFS_BANDA_SUELO,
+// se vuelve a la mediana general.
+export const BANDA_SUELO = { min: 0.7, max: 2.0, maxChico: 1.5, minRefs: 4 }
 export const MIN_REFS_BANDA_SUELO = BANDA_SUELO.minRefs
 
 function resumenDeLista(valsRaw, rango, fuenteBanda) {
@@ -354,17 +360,19 @@ export function sueloPorBandaSitio(pts, lotM2) {
   if (!lista.length) return null
   const fmtM2 = (x) => Math.round(x).toLocaleString('es-CL')
   const enBanda = (lo, hi) => lista.filter((p) => p.lot >= lotM2 * lo && p.lot <= lotM2 * hi).map((p) => p.r)
-  // 1) banda estrecha alrededor del sitio tasado
+  // 1) banda alrededor del sitio tasado
   const estrecha = resumenDeLista(enBanda(BANDA_SUELO.min, BANDA_SUELO.max),
     `sitios de ${fmtM2(lotM2 * BANDA_SUELO.min)}–${fmtM2(lotM2 * BANDA_SUELO.max)} m² (tamaño comparable al tasado)`, 'estrecha')
   if (estrecha) return estrecha
-  // 2) banda ancha
-  const ancha = resumenDeLista(enBanda(BANDA_SUELO.minAncha, BANDA_SUELO.maxAncha),
-    `sitios de ${fmtM2(lotM2 * BANDA_SUELO.minAncha)}–${fmtM2(lotM2 * BANDA_SUELO.maxAncha)} m²`, 'ancha')
-  if (ancha) return ancha
-  // 3) sitio más grande que (casi) todas las referencias: mandan las más grandes
+  // 2) sitio grande: solo referencias de tamaño igual o mayor; sitio chico: solo menores o similares
   const lotMediana = mediana(lista.map((p) => p.lot))
-  if (lotM2 > lotMediana * 1.5) {
+  const esGrande = lotM2 > lotMediana
+  const lateral = esGrande
+    ? resumenDeLista(enBanda(BANDA_SUELO.min, Infinity), `sitios de ${fmtM2(lotM2 * BANDA_SUELO.min)} m² o más (igual o mayores que el tasado)`, 'mayores_o_iguales')
+    : resumenDeLista(enBanda(0, BANDA_SUELO.maxChico), `sitios de hasta ${fmtM2(lotM2 * BANDA_SUELO.maxChico)} m² (igual o menores que el tasado)`, 'menores_o_iguales')
+  if (lateral) return lateral
+  // 3) sitio más grande que (casi) todas las referencias: mandan las más grandes
+  if (esGrande) {
     const porTamano = [...lista].sort((a, b) => b.lot - a.lot)
     const top = porTamano.slice(0, Math.max(MIN_REFS_BANDA_SUELO, Math.ceil(porTamano.length / 3)))
     const minLot = top[top.length - 1].lot
@@ -372,6 +380,43 @@ export function sueloPorBandaSitio(pts, lotM2) {
     if (grandes) return grandes
   }
   return null
+}
+
+// ── SUELO RESIDUAL SOBRE LAS CASAS COMPARABLES (FIX 30-oct, v2) ─────────────
+// El suelo con que se HOMOLOGAN los comparables debe salir de esos mismos
+// comparables (casas de tamaño similar, las más cercanas), no de un pool del
+// polígono con casas de otro tamaño: el residual carga a la construcción un
+// costo fijo (28-40 UF/m²) y el error de ese supuesto es distinto para una casa
+// de 300 m² que para una de 760. Con las 4 casas comparables de Sendero del
+// Mirador (583-783 m²) el residual da 11,7-16,4 (mediana ~12); con el pool del
+// polígono (casas de 300-450 m² en sitios de 1.000) daba 17,8. Cuando hay al
+// menos MIN_REFS_SUELO_COMPARABLES puntos, este suelo manda sobre el del
+// polígono; si no, se mantiene la jerarquía por tamaño de sitio.
+export const MIN_REFS_SUELO_COMPARABLES = 4
+export function sueloResidualComparables({ comparables, m2Terreno, tier, serieIndice, hoy }) {
+  const conIndice = serieUtilizable(serieIndice)
+  const pts = (comparables || [])
+    .map((c) => {
+      const t = parseFloat(c.m2_terreno), m2 = parseFloat(c.m2), uf = parseFloat(c.precio_uf)
+      if (!(t > 0) || !(m2 > 0) || !(uf > 0)) return null
+      if (m2Terreno > 0 && (t < m2Terreno * 0.4 || t > m2Terreno * 2.5)) return null
+      const f = conIndice ? factorFecha(c.fecha, serieIndice, hoy) : 1
+      const r = (uf * f - costoResidualDe(c, tier) * m2) / t
+      if (r < 0.3 || r > 250) return null
+      return { r, lot: t, direccion: c.direccion }
+    })
+    .filter(Boolean)
+  const limpios = sinOutliers(pts, (p) => p.r)
+  if (limpios.length < MIN_REFS_SUELO_COMPARABLES) return null
+  const vals = limpios.map((p) => p.r)
+  return {
+    uf_m2_mediana: r1(mediana(vals)),
+    uf_m2_p25: r1(percentil(vals, 25)),
+    uf_m2_p75: r1(percentil(vals, 75)),
+    n: limpios.length,
+    rango: `las ${limpios.length} casas comparables de tamaño similar (sitios de ${Math.round(Math.min(...limpios.map((p) => p.lot))).toLocaleString('es-CL')}–${Math.round(Math.max(...limpios.map((p) => p.lot))).toLocaleString('es-CL')} m²)`,
+    detalle: limpios.map((p) => ({ direccion: p.direccion, lot: Math.round(p.lot), uf_m2: r1(p.r) })),
+  }
 }
 
 // Suelo a usar para un sitio dado: tramo fijo (≥ MIN_REFS_SUELO) → banda
@@ -410,7 +455,9 @@ export function sueloParaSitio({ pts, lotM2, general }) {
 //     (±30%, igual que antes — si junta minN, nada cambia respecto de los
 //     casos ya validados); si no alcanza, banda ancha con la homologación
 //     por suelo. Se descarta la venta cuya homologación (terreno +
-//     construcción) supera el 50% de su precio: ya no es comparable.
+//     construcción) supera el 60% de su precio: ya no es comparable (60 y no
+//     50: con 50, Raimapu 6645 quedaba fuera por un pelo y el comparativo de
+//     Sendero del Mirador se caía a 3 ventas).
 // (b) Antes de homologar se descartan las ventas ATÍPICAS EN BRUTO: UF/m²
 //     construido fuera del 60–175% de la mediana del grupo (desde 4 ventas,
 //     conservando 3). La venta del mismo conjunto a 26 UF/m² (Agua del Padre
@@ -420,7 +467,7 @@ export function sueloParaSitio({ pts, lotM2, general }) {
 export const COMPARATIVO_CASA = {
   tol: 0.30, minN: 4, distMinM: 100,
   terrenoAnchoMin: 0.4, terrenoAnchoMax: 2.5, // banda de terreno del 2º paso
-  maxHomologacionPct: 0.50,                   // tope del ajuste total / precio
+  maxHomologacionPct: 0.60,                   // tope del ajuste total / precio
   atipicaMin: 0.60, atipicaMax: 1.75, minParaAtipicas: 4, conservar: 3,
 }
 export function comparativoCasas({ comparables, m2Construido, m2Terreno, sueloUfM2, costoUfM2, serieIndice, hoy }) {

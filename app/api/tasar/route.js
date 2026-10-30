@@ -13,7 +13,7 @@ import {
   COSTO_CONSTRUCCION_TIERS, elegirTierConstruccion, estadoConstruccion,
   poligono, distanciaM, mediana, percentil,
   clasificaTipo, TIPO_OBJETIVO, cutoffVentasStr, esVentaReciente, enBandaM2,
-  UFM2_MIN, UFM2_MAX, puntosSuelo, resumenSuelo, sueloPorTramo, sueloDeTramo, sueloParaSitio,
+  UFM2_MIN, UFM2_MAX, puntosSuelo, resumenSuelo, sueloPorTramo, sueloDeTramo, sueloParaSitio, sueloResidualComparables,
   valorAditivoCasa, confianzaPorN, buscarVentasPoligono, COSTO_CONSTR_RESIDUAL, costoResidualDe, MIN_REFS_SUELO, comparativoCasas, COMPARATIVO_CASA, BANDA_M2, terrenoDe, sinOutliers, DOTACION_TIPICA_DEPTO,
   valorComparativoDirecto, rangoUnidadesIdenticas, terrenoEsProrrateoBC, CONJUNTO,
   construirSerieMercado, factorFecha,
@@ -679,6 +679,29 @@ export async function POST(request) {
     } catch (e) { console.error('Enriquecer terrenos catastro:', e.message) }
   }
 
+  // ── 1b-pre. SUELO DESDE LAS PROPIAS CASAS COMPARABLES (FIX 30-oct, v2) ───
+  // Verificado en el preview de Sendero del Mirador: el pool del polígono (20
+  // casas, mayoría de 300-450 m² en sitios de 1.000) daba 17,8 UF/m² incluso
+  // acotado por tamaño de sitio, mientras las 4 casas comparables de tamaño
+  // similar (583-783 m², las más cercanas) dan ~12. El suelo que homologa a
+  // los comparables sale de los comparables. Con ≥4 puntos manda; el del
+  // polígono queda como referencia en el desglose.
+  if (tipoObjetivo === 'casa' && m2Terreno > 0 && comparablesReales.length >= 3) {
+    const sc = sueloResidualComparables({ comparables: comparablesReales, m2Terreno, tier: tierSuelo, serieIndice: serieIndiceSuelo, hoy: hoySuelo })
+    if (sc) {
+      const previo = sueloInfo ? sueloInfo.uf_m2 : null
+      sueloInfo = {
+        uf_m2: sc.uf_m2_mediana,
+        n: sc.n,
+        fuente: 'residual sobre las casas comparables más cercanas de tamaño similar, descontando la construcción de cada una según su antigüedad',
+        tramo: sc.rango,
+        origen: 'comparables',
+        general_uf_m2: previo,
+        detalle: sc.detalle,
+      }
+    }
+  }
+
   // ── 1b-bis. Suelo residual desde los comparables REST (casas sin polígono) ──
   // busqueda_poligono hoy solo georreferencia unidades en copropiedad, así que
   // las casas llegan por el REST por ROL. Con esas mismas casas se estima el
@@ -945,7 +968,7 @@ export async function POST(request) {
       metodo: comp ? 'comparativo homologado de casas similares, ponderado por cercanía (aditivo como referencia)' : 'aditivo: suelo + construcción (núcleo compartido con Isidora)',
       comparativo_casas: comp || null,
       desglose: [
-        { concepto: 'Valor del terreno', calculo: sueloInfo.uf_m2 + ' UF/m² de suelo x ' + m2Terreno + ' m² (' + sueloInfo.fuente + ', ' + sueloInfo.n + ' referencias, ' + sueloInfo.tramo + (sueloInfo.origen === 'banda' && sueloInfo.general_uf_m2 ? '; mediana general del sector ' + sueloInfo.general_uf_m2 + ' UF/m², no aplicable a un sitio de este tamaño' : '') + ')', valor_uf: terreno_uf },
+        { concepto: 'Valor del terreno', calculo: sueloInfo.uf_m2 + ' UF/m² de suelo x ' + m2Terreno + ' m² (' + sueloInfo.fuente + ', ' + sueloInfo.n + ' referencias, ' + sueloInfo.tramo + (sueloInfo.origen === 'banda' && sueloInfo.general_uf_m2 ? '; mediana general del sector ' + sueloInfo.general_uf_m2 + ' UF/m², no aplicable a un sitio de este tamaño' : sueloInfo.origen === 'comparables' && sueloInfo.general_uf_m2 ? '; el pool del sector daba ' + sueloInfo.general_uf_m2 + ' UF/m² con casas de otro tamaño' : '') + ')', valor_uf: terreno_uf },
         { concepto: 'Valor de la construcción', calculo: costoUfM2 + ' UF/m² (' + cfgCosto.label.toLowerCase() + ') x ' + m2Construido + ' m² construidos', valor_uf: construccion_uf },
         ...(amplioUf > 0 ? [{ concepto: 'm² ampliados sin regularizar (no catastrados en el SII)', calculo: costoUfM2 + ' UF/m² x ' + m2Ampliados + ' m² ampliados', valor_uf: amplioUf }] : []),
         ...lineasBanda,
@@ -1442,7 +1465,7 @@ RESPONDE SOLO con JSON válido en UNA SOLA LÍNEA sin saltos dentro de strings:
       parsed.historial_propiedad = historialPropiedad
       parsed.ofertas_venta = ofertasVenta
       parsed.ofertas_arriendo = ofertasArriendo
-      parsed._diag = { ...(diag || {}), rest: diagRest, n_comparables: comparablesReales.length, n_suelo: sueloInfo ? sueloInfo.n : 0, metodo: valorDet ? (valorDet.metodo || 'mediana sector') : 'SIN valor determinístico (estimación referencial del LLM)', coherencia, rango_identicas: rangoIdenticas, serie_ajuste: indiceComunal ? { fuente: indiceComunal.fuente, banda: indiceComunal.banda, banda_label: indiceComunal.banda_label, n_ventas: indiceComunal.n_ventas, desde: indiceComunal.desde, hasta: indiceComunal.hasta, generado: indiceComunal.generado, puntos: indiceComunal.puntos } : serieTipo ? { fuente: 'indice_local_mismo_tipo', n_ventas: serieTipo.n_ventas, desde: serieTipo.desde, hasta: serieTipo.hasta, variacion_total_pct: serieTipo.variacion_total_pct, puntos: serieTipo.puntos } : (indiceSectorMismoTipo ? { fuente: 'indice_sector_poligono_mismo_tipo', puntos: indiceSector } : { fuente: 'sin_serie_mismo_tipo (respaldo: tasa del conjunto)' }) }
+      parsed._diag = { ...(diag || {}), rest: diagRest, n_comparables: comparablesReales.length, n_suelo: sueloInfo ? sueloInfo.n : 0, suelo: sueloInfo ? { uf_m2: sueloInfo.uf_m2, origen: sueloInfo.origen || null, tramo: sueloInfo.tramo, pool_uf_m2: sueloInfo.general_uf_m2 ?? null, detalle: sueloInfo.detalle || null } : null, metodo: valorDet ? (valorDet.metodo || 'mediana sector') : 'SIN valor determinístico (estimación referencial del LLM)', coherencia, rango_identicas: rangoIdenticas, serie_ajuste: indiceComunal ? { fuente: indiceComunal.fuente, banda: indiceComunal.banda, banda_label: indiceComunal.banda_label, n_ventas: indiceComunal.n_ventas, desde: indiceComunal.desde, hasta: indiceComunal.hasta, generado: indiceComunal.generado, puntos: indiceComunal.puntos } : serieTipo ? { fuente: 'indice_local_mismo_tipo', n_ventas: serieTipo.n_ventas, desde: serieTipo.desde, hasta: serieTipo.hasta, variacion_total_pct: serieTipo.variacion_total_pct, puntos: serieTipo.puntos } : (indiceSectorMismoTipo ? { fuente: 'indice_sector_poligono_mismo_tipo', puntos: indiceSector } : { fuente: 'sin_serie_mismo_tipo (respaldo: tasa del conjunto)' }) }
       // Rentabilidad sobre el TOTAL que ve el cliente (base + ajustes).
       const _valorRef = valorTotalCliente || parsed.valor_uf || null
       parsed.valor_total_uf = valorTotalCliente
