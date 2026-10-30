@@ -322,6 +322,70 @@ export function sueloDeTramo(tramos, lotM2) {
   return hit && hit.n >= MIN_REFS_SUELO ? hit : null
 }
 
+// ── SUELO HOMOLOGADO POR TAMAÑO DE SITIO (FIX 30-oct) ───────────────────────
+// Caso Sendero del Mirador 6781, Vitacura (2.000 m² de sitio, 761 m² constr.):
+// el tramo ">1.200 m²" no llegaba a MIN_REFS_SUELO y el suelo caía a la
+// mediana GENERAL del sector (17,8 UF/m² sobre 14 casas, la mayoría en sitios
+// de 500-1.000 m²). El UF/m² de suelo BAJA con el tamaño del sitio (un sitio
+// de 2.000 m² no vale lo mismo por m² que uno de 600), así que aplicar la
+// mediana general a un sitio grande lo sobrevalora: 35.600 UF de terreno
+// cuando las propias ventas de casas en sitios de 1.000-4.000 m² del informe
+// daban 12-16 UF/m². Resultado: 57.288 UF para una casa cuyos comparables
+// directos (601-783 m²) cerraron a 52-57 UF/m² (≈ 40.000-44.000 UF).
+//
+// Regla de tasador: el suelo se lee de referencias de sitios de tamaño
+// COMPARABLE al tasado. Si el tramo fijo no tiene masa suficiente, se usa una
+// banda alrededor del sitio (0,5×–2,5×); si tampoco, una banda ancha
+// (0,33×–4×); y si el sitio es más grande que todas las referencias, las
+// referencias más grandes disponibles (tercio superior). Solo si nada de eso
+// reúne MIN_REFS_BANDA_SUELO referencias se vuelve a la mediana general.
+export const BANDA_SUELO = { min: 0.5, max: 2.5, minAncha: 0.33, maxAncha: 4, minRefs: 4 }
+export const MIN_REFS_BANDA_SUELO = BANDA_SUELO.minRefs
+
+function resumenDeLista(valsRaw, rango, fuenteBanda) {
+  const vals = sinOutliers(valsRaw, (x) => x)
+  if (vals.length < MIN_REFS_BANDA_SUELO) return null
+  return { rango, uf_m2_mediana: r1(mediana(vals)), uf_m2_p25: r1(percentil(vals, 25)), uf_m2_p75: r1(percentil(vals, 75)), n: vals.length, banda: fuenteBanda }
+}
+
+export function sueloPorBandaSitio(pts, lotM2) {
+  if (!(lotM2 > 0) || !(pts || []).length) return null
+  const lista = (pts || []).filter((p) => p && p.lot > 0 && p.r > 0)
+  if (!lista.length) return null
+  const fmtM2 = (x) => Math.round(x).toLocaleString('es-CL')
+  const enBanda = (lo, hi) => lista.filter((p) => p.lot >= lotM2 * lo && p.lot <= lotM2 * hi).map((p) => p.r)
+  // 1) banda estrecha alrededor del sitio tasado
+  const estrecha = resumenDeLista(enBanda(BANDA_SUELO.min, BANDA_SUELO.max),
+    `sitios de ${fmtM2(lotM2 * BANDA_SUELO.min)}–${fmtM2(lotM2 * BANDA_SUELO.max)} m² (tamaño comparable al tasado)`, 'estrecha')
+  if (estrecha) return estrecha
+  // 2) banda ancha
+  const ancha = resumenDeLista(enBanda(BANDA_SUELO.minAncha, BANDA_SUELO.maxAncha),
+    `sitios de ${fmtM2(lotM2 * BANDA_SUELO.minAncha)}–${fmtM2(lotM2 * BANDA_SUELO.maxAncha)} m²`, 'ancha')
+  if (ancha) return ancha
+  // 3) sitio más grande que (casi) todas las referencias: mandan las más grandes
+  const lotMediana = mediana(lista.map((p) => p.lot))
+  if (lotM2 > lotMediana * 1.5) {
+    const porTamano = [...lista].sort((a, b) => b.lot - a.lot)
+    const top = porTamano.slice(0, Math.max(MIN_REFS_BANDA_SUELO, Math.ceil(porTamano.length / 3)))
+    const minLot = top[top.length - 1].lot
+    const grandes = resumenDeLista(top.map((p) => p.r), `los ${top.length} sitios más grandes del sector (≥ ${fmtM2(minLot)} m²)`, 'mayores')
+    if (grandes) return grandes
+  }
+  return null
+}
+
+// Suelo a usar para un sitio dado: tramo fijo (≥ MIN_REFS_SUELO) → banda
+// alrededor del sitio → mediana general. Devuelve el resumen y de dónde salió.
+export function sueloParaSitio({ pts, lotM2, general }) {
+  const tramos = sueloPorTramo(pts)
+  const delTramo = lotM2 > 0 ? sueloDeTramo(tramos, lotM2) : null
+  if (delTramo) return { usar: delTramo, tramo: delTramo.rango, n: delTramo.n, origen: 'tramo' }
+  const banda = sueloPorBandaSitio(pts, lotM2)
+  if (banda) return { usar: banda, tramo: banda.rango, n: banda.n, origen: 'banda' }
+  if (!general) return null
+  return { usar: general, tramo: 'todos los tamaños de sitio', n: general.n_comparables, origen: 'general' }
+}
+
 // ── MÉTODO COMPARATIVO HOMOLOGADO PARA CASAS (FIX 15-oct, v2) ──────────────
 // El aditivo (suelo + construcción) pierde la MICROLOCALIZACIÓN: el suelo sale
 // de la mediana de un sector de ~1 km y todas las ventas pesan igual. Caso La
@@ -336,30 +400,79 @@ export function sueloDeTramo(tramos, lotM2) {
 // (4) promedio PONDERADO POR CERCANÍA con peso 1/√distancia (suave: la venta
 // a 100 m pesa ~2,6× la de 700 m, no 7×; distancia mínima 100 m).
 // Con ≥4 casas manda este valor; el aditivo queda como respaldo y referencia.
-export const COMPARATIVO_CASA = { tol: 0.30, minN: 4, distMinM: 100 }
+//
+// FIX 30-oct (caso Sendero del Mirador 6781, Vitacura: 761 m² en 2.000 m²):
+// (a) Con ±30% de TERRENO además de ±30% de m² construidos, una casa grande
+//     casi nunca junta 4 similares (de 5 ventas CBR del informe solo 1
+//     cumplía) y el valor caía al aditivo con suelo sobrevalorado. La
+//     homologación existe justamente para absorber diferencias de terreno,
+//     así que el terreno se tolera en dos pasos: primero la banda estrecha
+//     (±30%, igual que antes — si junta minN, nada cambia respecto de los
+//     casos ya validados); si no alcanza, banda ancha con la homologación
+//     por suelo. Se descarta la venta cuya homologación (terreno +
+//     construcción) supera el 50% de su precio: ya no es comparable.
+// (b) Antes de homologar se descartan las ventas ATÍPICAS EN BRUTO: UF/m²
+//     construido fuera del 60–175% de la mediana del grupo (desde 4 ventas,
+//     conservando 3). La venta del mismo conjunto a 26 UF/m² (Agua del Padre
+//     6815: 16.851 UF por 649 m², un tercio del sector) pasaba el filtro de
+//     homologadas (0,64 de la mediana) y, por estar a 147 m, habría pesado
+//     un tercio del promedio. Las descartadas se devuelven para explicarlas.
+export const COMPARATIVO_CASA = {
+  tol: 0.30, minN: 4, distMinM: 100,
+  terrenoAnchoMin: 0.4, terrenoAnchoMax: 2.5, // banda de terreno del 2º paso
+  maxHomologacionPct: 0.50,                   // tope del ajuste total / precio
+  atipicaMin: 0.60, atipicaMax: 1.75, minParaAtipicas: 4, conservar: 3,
+}
 export function comparativoCasas({ comparables, m2Construido, m2Terreno, sueloUfM2, costoUfM2, serieIndice, hoy }) {
   if (!(m2Construido > 0) || !(m2Terreno > 0) || !(sueloUfM2 > 0) || !(costoUfM2 > 0)) return null
-  const { tol, minN, distMinM } = COMPARATIVO_CASA
+  const { tol, minN, distMinM, terrenoAnchoMin, terrenoAnchoMax, maxHomologacionPct, atipicaMin, atipicaMax, minParaAtipicas, conservar } = COMPARATIVO_CASA
   const cerca = (x, obj) => x >= obj * (1 - tol) && x <= obj * (1 + tol)
   const conIndice = serieUtilizable(serieIndice)
-  const lista = (comparables || [])
+  const candidatas = (comparables || [])
     .map((c) => {
       const m2 = parseFloat(c.m2), t = parseFloat(c.m2_terreno), uf = parseFloat(c.precio_uf)
       if (!(m2 > 0) || !(t > 0) || !(uf > 0)) return null
-      if (!cerca(m2, m2Construido) || !cerca(t, m2Terreno)) return null
-      const f = conIndice ? factorFecha(c.fecha, serieIndice, hoy) : 1
-      const ufHoy = uf * f
-      const ajTerreno = (m2Terreno - t) * sueloUfM2
-      const ajConstr = (m2Construido - m2) * costoUfM2
+      if (!cerca(m2, m2Construido)) return null
       const d = parseFloat(c.distancia_m)
-      return {
-        direccion: c.direccion,
-        distancia_m: d >= 0 ? Math.round(d) : null,
-        uf_hoy: Math.round(ufHoy),
-        uf_homologado: Math.round(ufHoy + ajTerreno + ajConstr),
-      }
+      return { c, m2, t, uf, uf_m2: uf / m2, distancia_m: d >= 0 ? Math.round(d) : null, terrenoEstrecho: cerca(t, m2Terreno) }
     })
     .filter(Boolean)
+    .filter((x) => x.t >= m2Terreno * terrenoAnchoMin && x.t <= m2Terreno * terrenoAnchoMax)
+  if (!candidatas.length) return null
+  // (b) atípicas en bruto (UF/m² construido vs mediana del grupo)
+  let base = candidatas, descartadas = []
+  if (candidatas.length >= minParaAtipicas) {
+    const med = mediana(candidatas.map((x) => x.uf_m2))
+    const ok = candidatas.filter((x) => x.uf_m2 >= med * atipicaMin && x.uf_m2 <= med * atipicaMax)
+    if (ok.length >= conservar && ok.length < candidatas.length) {
+      base = ok
+      descartadas = candidatas.filter((x) => !ok.includes(x)).map((x) => ({
+        direccion: x.c.direccion, uf: Math.round(x.uf), uf_m2: Math.round(x.uf_m2), motivo: 'atipica',
+        detalle: `${Math.round(x.uf_m2)} UF/m² frente a ${Math.round(med)} UF/m² de mediana del grupo`,
+      }))
+    }
+  }
+  // (a) terreno en dos pasos: estrecho (±30%) si junta minN; si no, banda ancha
+  const estrechas = base.filter((x) => x.terrenoEstrecho)
+  const pool = estrechas.length >= minN ? estrechas : base
+  const bandaTerreno = estrechas.length >= minN ? 'estrecha' : 'ancha'
+  const homologar = (x) => {
+    const f = conIndice ? factorFecha(x.c.fecha, serieIndice, hoy) : 1
+    const ufHoy = x.uf * f
+    const ajTerreno = (m2Terreno - x.t) * sueloUfM2
+    const ajConstr = (m2Construido - x.m2) * costoUfM2
+    if (Math.abs(ajTerreno) + Math.abs(ajConstr) > ufHoy * maxHomologacionPct) return null
+    return {
+      direccion: x.c.direccion,
+      distancia_m: x.distancia_m,
+      m2: x.m2, m2_terreno: x.t,
+      uf_hoy: Math.round(ufHoy),
+      aj_terreno: Math.round(ajTerreno),
+      aj_constr: Math.round(ajConstr),
+      uf_homologado: Math.round(ufHoy + ajTerreno + ajConstr),
+    }
+  }
+  const lista = pool.map(homologar).filter(Boolean)
   const limpias = sinOutliers(lista, (x) => x.uf_homologado)
   if (limpias.length < minN) return null
   const pesos = limpias.map((x) => 1 / Math.sqrt(Math.max(distMinM, x.distancia_m ?? 1000)))
@@ -372,6 +485,9 @@ export function comparativoCasas({ comparables, m2Construido, m2Terreno, sueloUf
     min: Math.min(...ufs),
     max: Math.max(...ufs),
     n: limpias.length,
+    banda_terreno: bandaTerreno,
+    descartadas,
+    n_descartadas: descartadas.length,
     detalle: limpias.map((x, i) => ({ ...x, peso_pct: Math.round((pesos[i] / sumP) * 100) })),
   }
 }
@@ -1087,4 +1203,34 @@ export function controlAvaluoFiscal({ valorUf, avaluoUf, tier }) {
 
 export function bajarConfianza(c) {
   return c === 'Alta' ? 'Media' : 'Baja'
+}
+
+// ── CONTROL POR RENTABILIDAD DE ARRIENDO (FIX 30-oct) ───────────────────────
+// Rentabilidad bruta anual típica por tipo (arriendo × 12 / valor). Fuera del
+// rango, el valor merece revisión: por debajo del mínimo suele estar tasado
+// alto (o el arriendo de referencia es bajo); por sobre el máximo, tasado bajo.
+export const RENTABILIDAD_TIPICA = {
+  casa:         { min: 2.5, max: 7.0 },
+  departamento: { min: 3.5, max: 9.0 },
+  oficina:      { min: 4.0, max: 10.0 },
+  comercial:    { min: 4.0, max: 10.0 },
+}
+export function controlRentabilidad({ valorUf, arriendoUfMes, tipo }) {
+  if (!(valorUf > 0) || !(arriendoUfMes > 0)) return null
+  const rango = RENTABILIDAD_TIPICA[tipo] || RENTABILIDAD_TIPICA.casa
+  const pct = Math.round(((arriendoUfMes * 12) / valorUf) * 1000) / 10
+  const bajo = pct < rango.min, alto = pct > rango.max
+  const fmt = (x) => String(x).replace('.', ',')
+  const implicito = (r) => Math.round((arriendoUfMes * 12) / (r / 100)).toLocaleString('es-CL')
+  return {
+    rentabilidad_pct: pct,
+    rango,
+    valor_implicito_min_uf: Math.round((arriendoUfMes * 12) / (rango.max / 100)),
+    valor_implicito_max_uf: Math.round((arriendoUfMes * 12) / (rango.min / 100)),
+    revisar: bajo || alto,
+    mensaje: !(bajo || alto) ? null
+      : bajo
+        ? `La rentabilidad por arriendo (${fmt(pct)}% bruto anual con ${fmt(arriendoUfMes)} UF/mes) queda bajo el ${fmt(rango.min)}% típico de este tipo: el valor podría estar alto (por renta, el valor sería ≤ ${implicito(rango.min)} UF). Revisar comparables antes de usarlo.`
+        : `La rentabilidad por arriendo (${fmt(pct)}% bruto anual) supera el ${fmt(rango.max)}% típico: el valor podría estar bajo (por renta, ≥ ${implicito(rango.max)} UF). Revisar comparables antes de usarlo.`,
+  }
 }
